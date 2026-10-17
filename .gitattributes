@@ -1,0 +1,12 @@
+# Normalize text line endings; never touch binary documents.
+* text=auto
+*.py text eol=lf
+*.toml text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.ps1 text eol=crlf
+*.pdf binary
+*.png binary
+*.jpg binary
+*.ttf binary
+*.otf binary

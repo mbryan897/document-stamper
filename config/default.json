@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "taxonomies": {
+    "doc_types": [
+      "Search warrant return",
+      "Subpoena return",
+      "Court order",
+      "Supplemental report",
+      "Forensic report"
+    ]
+  },
+  "fields": {
+    "case_number": {
+      "label": "Case number",
+      "type": "text",
+      "required": true,
+      "normalize": ["trim", "upper"],
+      "formats": [
+        {
+          "name": "##-YYYY-######",
+          "pattern": "^\\d{2}-\\d{4}-\\d{6}$"
+        },
+        {
+          "name": "SOYYMMDD-######",
+          "pattern": "^SO(\\d{2})(\\d{2})(\\d{2})-\\d{6}$",
+          "date_groups": "YYMMDD"
+        }
+      ],
+      "from_filename": true
+    },
+    "doc_type": {
+      "label": "Document type",
+      "type": "choice",
+      "taxonomy": "doc_types",
+      "required": true
+    },
+    "doc_title": {
+      "label": "Document title",
+      "type": "text",
+      "required": false
+    }
+  },
+  "profiles": [
+    {
+      "name": "Records submission",
+      "default": true,
+      "fields": ["case_number", "doc_type", "doc_title"],
+      "stamps": [
+        {
+          "text": "{case_number}  |  {doc_type}  |  Page {page} of {total}",
+          "anchor": "top-right",
+          "direction": "along-top",
+          "margin_in": 0.25,
+          "font_size_pt": 9,
+          "color": "#2B3A8F",
+          "background_box": true,
+          "pages": "all"
+        }
+      ],
+      "output_name": {
+        "fields": ["case_number", "doc_type"],
+        "separator": "_",
+        "include_original_name": true
+      },
+      "metadata": {
+        "CaseNumber": "{case_number}"
+      }
+    }
+  ]
+}

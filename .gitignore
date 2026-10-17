@@ -1,0 +1,43 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Packaging metadata from editable installs
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# PyInstaller output (keep .spec files under packaging/)
+build/
+dist/
+
+# IDE and editor folders
+.vscode/
+.idea/
+*.code-workspace
+*.swp
+
+# Windows clutter
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# Generated test corpus (rebuilt by tools/make_corpus.py)
+tests/corpus/generated/
+
+# Local scratch output while developing
+out/
+*.stamped.pdf
+
+# Never commit local config overrides or last-used values
+config/local*.json
