@@ -1,30 +1,25 @@
 {
   "schema_version": 1,
+  "settings": {
+    "date_format": "MM-DD-YYYY"
+  },
   "taxonomies": {
     "doc_types": [
-      "Search warrant return",
-      "Subpoena return",
-      "Court order",
-      "Supplemental report",
-      "Forensic report"
+      "Report",
+      "Return",
+      "Order",
+      "Correspondence",
+      "Other"
     ]
   },
   "fields": {
-    "case_number": {
-      "label": "Case number",
+    "identifier": {
+      "label": "Identifier",
       "type": "text",
       "required": true,
-      "normalize": ["trim", "upper"],
+      "normalize": ["trim", "upper", "dashes"],
       "formats": [
-        {
-          "name": "##-YYYY-######",
-          "pattern": "^\\d{2}-\\d{4}-\\d{6}$"
-        },
-        {
-          "name": "SOYYMMDD-######",
-          "pattern": "^SO(\\d{2})(\\d{2})(\\d{2})-\\d{6}$",
-          "date_groups": "YYMMDD"
-        }
+        { "name": "Any value", "pattern": "*" }
       ],
       "from_filename": true
     },
@@ -42,12 +37,12 @@
   },
   "profiles": [
     {
-      "name": "Records submission",
+      "name": "Standard",
       "default": true,
-      "fields": ["case_number", "doc_type", "doc_title"],
+      "fields": ["identifier", "doc_type", "doc_title"],
       "stamps": [
         {
-          "text": "{case_number}  |  {doc_type}  |  Page {page} of {total}",
+          "text": "{identifier}  |  {doc_type}  |  Page {page} of {total}",
           "anchor": "top-right",
           "direction": "along-top",
           "margin_in": 0.25,
@@ -58,12 +53,12 @@
         }
       ],
       "output_name": {
-        "fields": ["case_number", "doc_type"],
+        "fields": ["identifier", "doc_type"],
         "separator": "_",
         "include_original_name": true
       },
       "metadata": {
-        "CaseNumber": "{case_number}"
+        "Identifier": "{identifier}"
       }
     }
   ]
