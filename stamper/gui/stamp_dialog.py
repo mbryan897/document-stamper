@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (
 
 from ..core.config import ANCHORS, Config, Profile, StampSpec
 from ..core.fields import ValidationResult, prefill_fields, validate_field, value_from_filename
-from ..core.filenames import suggest_filename
+from ..core.filenames import suggest_filename, visible
 from ..core.template import TemplateError, template_tokens
 from ..handlers.base import (
     ApplyResult,
@@ -311,7 +311,7 @@ class StampDialog(QWidget):
         size_mb = self.path.stat().st_size / (1024 * 1024) if self.path.exists() else 0.0
         pages = "1 page" if self.info.page_count == 1 else f"{self.info.page_count} pages"
         size = f"{size_mb:.1f} MB" if size_mb >= 0.1 else "under 0.1 MB"
-        return self.path.name, f"{pages}, {size}"
+        return visible(self.path.name), f"{pages}, {size}"
 
     def _extend_head(self, layout: QVBoxLayout) -> None:
         """Add widgets under the preview header (none for one file)."""
@@ -325,7 +325,7 @@ class StampDialog(QWidget):
 
     def _name_source(self) -> str:
         """The original file name the suggested name is built from."""
-        return self.path.name
+        return visible(self.path.name)
 
     def _accept_flags(self) -> tuple[bool, bool]:
         """``(accept_signature_loss, accept_restrictions)`` for the save."""
@@ -830,7 +830,7 @@ class StampDialog(QWidget):
         job = self.job()
         self._preview_req = self.engine.preview(self.path, self.page, job, self.password, self._preview_dpi())
         self._plan_revision = self.revision
-        self._plan_req = self.engine.plan(self.path, job, self.password)
+        self._plan_req = self.engine.plan(self.path, job, self.password, self.info.fingerprint)
         self._update_page_label()
         self._update_button()
 
@@ -998,7 +998,7 @@ class StampDialog(QWidget):
     def _ask_owner_password(self) -> None:
         problem = ""
         while True:
-            pw = self.services.ask_password(self, self.path.name, problem, True)
+            pw = self.services.ask_password(self, visible(self.path.name), problem, True)
             if pw is None:
                 return
             try:
@@ -1060,7 +1060,7 @@ class StampDialog(QWidget):
             return ("That's the original file. The stamped copy is always saved as a new file; "
                     "choose a different name or folder.")
         if out.exists():
-            return (f"{out.name} already exists. Choose another name; the window never replaces "
+            return (f"{visible(out.name)} already exists. Choose another name; the window never replaces "
                     "an existing file.")
         if not out.parent.is_dir():
             return f"The folder {out.parent} doesn't exist."
@@ -1098,6 +1098,7 @@ class StampDialog(QWidget):
             path=self.path, job=self.job(), out_path=out, password=self.password,
             accept_signature_loss=accept_signature,
             accept_restrictions=accept_restrictions,
+            expect=self.info.fingerprint,
         ))
 
     def _cancel_save(self) -> None:

@@ -11,6 +11,7 @@ GUI can wire them to its own thread without the engine knowing.
 from __future__ import annotations
 
 import abc
+import os
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date
@@ -31,6 +32,9 @@ __all__ = [
     "PlanResult",
     "ProgressCallback",
     "CancelCheck",
+    "SourceChanged",
+    "SourceFingerprint",
+    "check_unchanged",
     "StampDoesNotFit",
     "StampError",
     "StampJob",
@@ -105,6 +109,56 @@ class Cancelled(StampError):
     """The caller cancelled the job. Nothing was written."""
 
 
+class SourceChanged(StampError):
+    """The original changed on disk after it was opened (D-125). Nothing was written."""
+
+
+@dataclass(frozen=True, slots=True)
+class SourceFingerprint:
+    """Size, modification time and file ID of a source when it was opened (D-125).
+
+    Not a hash (D-007): it catches a file replaced or re-saved while the
+    window was open, not deliberate tampering (a modification time can be set
+    back). ``dev`` and ``ino`` are the volume serial number and NTFS file ID
+    on Windows; a file system without IDs reports 0 and only size and time
+    are compared.
+    """
+
+    size: int
+    mtime_ns: int
+    dev: int
+    ino: int
+
+    @classmethod
+    def of(cls, path: Path) -> SourceFingerprint:
+        """The fingerprint of ``path`` now. Raises OSError if it can't be read."""
+        st = os.stat(path)
+        return cls(st.st_size, st.st_mtime_ns, st.st_dev, st.st_ino)
+
+    def matches(self, other: SourceFingerprint) -> bool:
+        """True if ``other`` looks like the same, unchanged file."""
+        if (self.size, self.mtime_ns) != (other.size, other.mtime_ns):
+            return False
+        if self.ino and other.ino and (self.dev, self.ino) != (other.dev, other.ino):
+            return False
+        return True
+
+
+def check_unchanged(path: Path, expect: SourceFingerprint | None) -> None:
+    """Raise SourceChanged if ``path`` no longer matches ``expect`` (no-op when None)."""
+    if expect is None:
+        return
+    try:
+        now = SourceFingerprint.of(path)
+    except OSError:
+        raise SourceChanged(f"{Path(path).name} can't be found any more. Open it again.") from None
+    if not now.matches(expect):
+        raise SourceChanged(
+            f"The original, {Path(path).name}, changed after you opened it. "
+            "Open it again so the copy matches what you checked."
+        )
+
+
 # ------------------------------------------------------------------ data
 
 
@@ -140,6 +194,7 @@ class DocumentInfo:
     has_xmp: bool
     has_form_fields: bool
     encryption: str | None = None
+    fingerprint: SourceFingerprint | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -265,6 +320,7 @@ class Handler(abc.ABC):
         password: str | None = None,
         dpi: int = 96,
         outline_box: bool = True,
+        expect: SourceFingerprint | None = None,
     ) -> bytes:
         """PNG of one page (1-based) with the stamps drawn, as the copy will look.
 
@@ -280,6 +336,7 @@ class Handler(abc.ABC):
         *,
         password: str | None = None,
         cancel: CancelCheck | None = None,
+        expect: SourceFingerprint | None = None,
     ) -> PlanResult:
         """Check the whole document as ``apply`` would, without writing anything.
 
@@ -304,8 +361,13 @@ class Handler(abc.ABC):
         overwrite: bool = False,
         progress: ProgressCallback | None = None,
         cancel: CancelCheck | None = None,
+        expect: SourceFingerprint | None = None,
     ) -> ApplyResult:
         """Write a stamped copy to ``out_path``. The input is never changed.
 
         Raises a StampError subclass for anything the user must deal with.
+        With ``expect`` (from ``DocumentInfo.fingerprint``), a source that
+        changed since it was inspected raises SourceChanged, before reading
+        and again just before writing (D-125). ``plan`` and ``render_preview``
+        check before reading.
         """

@@ -5,7 +5,9 @@ caller's job (Phase 2/3).
 
 Rules
 -----
-- Each field value: Unicode NFC; characters Windows forbids (``<>:"/\\|?*``)
+- Each field value: hidden format characters (Unicode category Cf: bidi
+  overrides and isolates, zero-width characters, BOM, soft hyphen) are
+  removed (D-123); then Unicode NFC; characters Windows forbids (``<>:"/\\|?*``)
   and control characters become ``-``; whitespace becomes ``-``; the
   separator character inside a value becomes ``-`` so parts stay distinct;
   runs of ``-`` collapse; ``-``, ``.``, spaces and the separator are trimmed
@@ -48,9 +50,11 @@ __all__ = [
     "MAX_FILENAME_LENGTH",
     "build_filename",
     "clean_part",
+    "hidden_characters",
     "is_reserved_name",
     "remove_value",
     "suggest_filename",
+    "visible",
 ]
 
 MAX_FILENAME_LENGTH = 120
@@ -88,8 +92,31 @@ def _strip_edges(text: str, separator: str) -> str:
     return text.strip("-. " + separator)
 
 
+def _is_hidden(c: str) -> bool:
+    """A character that shows nothing or changes how the text around it displays."""
+    return unicodedata.category(c) in ("Cf", "Cc", "Zl", "Zp")
+
+
+def hidden_characters(text: str) -> list[tuple[int, str]]:
+    """``(index, character)`` for each control or format character in ``text`` (D-123)."""
+    return [(i, c) for i, c in enumerate(text) if _is_hidden(c)]
+
+
+def visible(text: str, *, keep: str = "\n\t") -> str:
+    """``text`` with each hidden character shown as ``⟨U+202E⟩`` (D-123).
+
+    For displaying file names and messages that contain them, so a name
+    can't look like something it isn't. Characters in ``keep`` (line
+    breaks and tabs by default) are left alone.
+    """
+    if not any(_is_hidden(c) and c not in keep for c in text):
+        return text
+    return "".join(f"⟨U+{ord(c):04X}⟩" if _is_hidden(c) and c not in keep else c for c in text)
+
+
 def clean_part(text: str, separator: str = "_", *, keep_separator: bool = False) -> str:
     """Make one piece of a filename safe; see the module rules."""
+    text = "".join(c for c in text if unicodedata.category(c) != "Cf")
     text = unicodedata.normalize("NFC", text)
     text = "".join(
         "-" if (c in ILLEGAL_FILENAME_CHARS or ord(c) < 32 or ord(c) == 127) else c

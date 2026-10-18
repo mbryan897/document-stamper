@@ -90,6 +90,8 @@ def test_case_numbers(records: Config, raw: str, valid: bool, value: str | None,
         assert result.value == value
         assert result.format == fmt
         assert result.message == f"Matches {fmt}."
+    elif "\n" in raw:  # a line break is refused as a hidden character first (D-123)
+        assert result.message.startswith("Case number: Contains a hidden character (U+000A, line break)")
     else:
         assert result.format is None
         assert result.message.startswith("Case number must match one of:")

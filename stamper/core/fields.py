@@ -7,18 +7,21 @@ the stamp dialog can show live feedback as the user types.
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date
 from pathlib import PureWindowsPath
 
 from .config import Config, FieldSpec, FormatSpec, Profile
+from .filenames import hidden_characters
 from .patterns import PatternTest
 
 __all__ = [
     "NORMALIZERS",
     "ValidationResult",
     "fold_dashes",
+    "hidden_character_message",
     "normalize",
     "prefill_fields",
     "validate_field",
@@ -103,6 +106,35 @@ def _validate_text(spec: FieldSpec, value: str) -> ValidationResult:
     return ValidationResult(False, value, f"{lead} {hint}." if hint else lead)
 
 
+_CONTROL_NAMES = {
+    "\t": "tab", "\n": "line break", "\r": "carriage return", "\x0b": "vertical tab",
+    "\x0c": "form feed", "\x00": "null character",
+}
+
+
+def _character_name(c: str) -> str:
+    name = unicodedata.name(c, "")
+    return name.lower() if name else _CONTROL_NAMES.get(c, "control character")
+
+
+def hidden_character_message(raw: str, value: str) -> str | None:
+    """The refusal for a value holding a control or format character (D-123), or None.
+
+    Bidi overrides and zero-width characters make a value display as something
+    other than what is stamped, so they are refused, not silently removed.
+    ``value`` is the normalized value; the position is counted in ``raw``,
+    which is what the user typed or pasted.
+    """
+    found = hidden_characters(value)
+    if not found:
+        return None
+    _, c = found[0]
+    pos = raw.find(c) + 1 if c in raw else found[0][0] + 1
+    more = f" and {len(found) - 1} more" if len(found) > 1 else ""
+    return (f"Contains a hidden character (U+{ord(c):04X}, {_character_name(c)}) at position {pos}{more}. "
+            "Retype the value.")
+
+
 def validate_field(config: Config, field_name: str, raw: str | None) -> ValidationResult:
     """Normalize and validate one value for a field defined in ``config``.
 
@@ -111,6 +143,9 @@ def validate_field(config: Config, field_name: str, raw: str | None) -> Validati
     """
     spec = config.fields[field_name]
     value = normalize(raw or "", spec.normalize)
+    hidden = hidden_character_message(raw or "", value)
+    if hidden is not None:
+        return ValidationResult(False, value, f"{spec.label}: {hidden}")
     if value.strip() == "":
         if spec.required:
             return ValidationResult(False, value, f"{spec.label} is required.")

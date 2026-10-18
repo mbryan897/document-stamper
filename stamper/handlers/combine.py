@@ -46,8 +46,10 @@ from .base import (
     CancelCheck,
     Cancelled,
     ConfirmationRequired,
+    SourceFingerprint,
     StampError,
     UnsupportedDocument,
+    check_unchanged,
 )
 from .pdf import PdfHandler
 
@@ -90,10 +92,15 @@ atexit.register(_cleanup_at_exit)
 
 @dataclass(frozen=True, slots=True)
 class CombineInput:
-    """One source file and the password that opens it (None if it needs none)."""
+    """One source file and the password that opens it (None if it needs none).
+
+    ``expect`` is the file's fingerprint from when the user opened it; a file
+    that changed since then is refused with SourceChanged (D-125).
+    """
 
     path: Path
     password: str | None = None
+    expect: SourceFingerprint | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -429,7 +436,8 @@ def combine_pdfs(
     """Combine ``inputs``, in order, into one temporary PDF inside ``folder``.
 
     Raises the handler's errors for a source (PasswordRequired, WrongPassword,
-    UnsupportedDocument for a damaged or XFA file), ConfirmationRequired
+    UnsupportedDocument for a damaged or XFA file, SourceChanged for a source
+    that changed since it was opened or during the copy), ConfirmationRequired
     naming every signed (``"signature"``) or restricted (``"restrictions"``)
     source unless accepted, and Cancelled. On any error, nothing is left
     behind. The caller must call ``cleanup()`` on the result.
@@ -442,8 +450,11 @@ def combine_pdfs(
     signed: list[str] = []
     restricted: list[str] = []
     protected: list[str] = []
+    fingerprints: list[SourceFingerprint | None] = []
     for item in inputs:
+        check_unchanged(Path(item.path), item.expect)
         info = handler.inspect(Path(item.path), item.password)
+        fingerprints.append(item.expect or info.fingerprint)
         if info.xfa:
             raise UnsupportedDocument(
                 f"{info.path.name} is an XFA form, which this tool can't stamp. "
@@ -487,6 +498,7 @@ def combine_pdfs(
                 raise Cancelled("Combining was cancelled. Nothing was saved.")
             src_path = Path(item.path)
             label = _label(src_path)
+            check_unchanged(src_path, fingerprints[position - 1])
             with handler._open(src_path, item.password) as (doc, _needed):
                 if doc.is_repaired:
                     repaired.append(label)
@@ -508,6 +520,7 @@ def combine_pdfs(
                 attachments += _copy_attachments(doc, out, label)
                 ranges.append(SourceRange(src_path, offset + 1, out.page_count))
                 lines.append(f"{label}|{offset + 1}-{out.page_count}")
+            check_unchanged(src_path, fingerprints[position - 1])  # unchanged while its pages were copied
             if progress is not None:
                 progress(position, len(inputs), label)
 

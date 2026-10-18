@@ -76,9 +76,9 @@ python -m stamper --help
 
 Without `--config`, the command line uses the same lookup as the window (see above).
 
-Fields are set with `--set NAME=VALUE` (repeat for each field; quote the whole argument when the value has spaces). Without `--out`, the copy goes next to the original under the suggested filename. Signed files and files with owner restrictions stop with a message naming the flag that confirms them (`--accept-signature-loss`, `--accept-restrictions`). Passwords are read with `--password-env VAR`, `--password-stdin` or a hidden prompt, never from the command line itself.
+Fields are set with `--set NAME=VALUE` (repeat for each field; quote the whole argument when the value has spaces). Without `--out`, the copy goes next to the original under the suggested filename. Signed files and files with owner restrictions stop with a message naming the flag that confirms them (`--accept-signature-loss`, `--accept-restrictions`). Passwords are read with `--password-env VAR`, `--password-stdin` or a hidden prompt, never from the command line itself. With `--combine` or `--batch`, give each file's password with `--password-env-for FILE VAR` (repeat for each file) or `--passwords-stdin` (one line per file, in the order the files are given; an empty line for a file without one).
 
-Exit codes: 0 saved, 1 unexpected error, 2 bad arguments, 3 config problem, 4 field values invalid, 5 file can't be stamped, 6 password missing or wrong, 7 confirmation flag needed, 8 output refused, 9 stamp doesn't fit.
+Exit codes: 0 saved, 1 unexpected error, 2 bad arguments, 3 config problem, 4 field values invalid, 5 file can't be stamped, 6 password missing or wrong, 7 confirmation flag needed, 8 output refused, 9 stamp doesn't fit, 10 a batch saved some files but not all.
 
 ## License
 

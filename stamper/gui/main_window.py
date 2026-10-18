@@ -46,13 +46,16 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
+from ..core import pending
 from ..core.config import Config, ConfigError, Profile, load_config
+from ..core.filenames import visible
 from ..core.locations import (
     ConfigSource,
     Locations,
@@ -63,6 +66,7 @@ from ..core.locations import (
     locations,
     save_state,
 )
+from ..core.pending import Leftover
 from ..handlers.base import (
     ApplyResult,
     Cancelled,
@@ -184,7 +188,7 @@ class DropScreen(QWidget):
         inner = QFrame()
         inner.setObjectName("dropInner")
         il = QVBoxLayout(inner)
-        il.setContentsMargins(24, 32, 24, 32)
+        il.setContentsMargins(24, 12, 24, 12)  # the stretches pad a tall target; a short one still fits
         il.setSpacing(14)
         il.addStretch(1)
         hero = QLabel("Drop PDFs to stamp")
@@ -209,6 +213,39 @@ class DropScreen(QWidget):
         self.message_frame, self.message = _message_frame()
         self.message_frame.setMaximumWidth(720)
         outer.addWidget(self.message_frame, 0, Qt.AlignmentFlag.AlignHCenter)
+
+        # Partial copies left by a run that stopped (D-124): offered for deletion, never deleted silently.
+        self.leftover_frame = QFrame()
+        self.leftover_frame.setObjectName("warning")
+        self.leftover_frame.setMinimumWidth(560)
+        self.leftover_frame.setMaximumWidth(720)
+        lf = QVBoxLayout(self.leftover_frame)
+        lf.setContentsMargins(14, 12, 14, 12)
+        lf.setSpacing(8)
+        self.leftover_label = QLabel()
+        self.leftover_label.setWordWrap(True)
+        self.leftover_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        # Several leftovers scroll inside the notice, so the drop target keeps its room.
+        self.leftover_scroll = QScrollArea()
+        self.leftover_scroll.setWidget(self.leftover_label)
+        self.leftover_scroll.setWidgetResizable(True)
+        self.leftover_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.leftover_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.leftover_scroll.setMaximumHeight(84)
+        self.leftover_scroll.setStyleSheet("QScrollArea, QScrollArea > QWidget > QWidget {background: transparent;}")
+        lf.addWidget(self.leftover_scroll)
+        buttons = QHBoxLayout()
+        buttons.setSpacing(8)
+        self.leftover_delete = QPushButton("Delete")
+        self.leftover_show = QPushButton("Show in folder")
+        self.leftover_keep = QPushButton("Keep")
+        for b in (self.leftover_delete, self.leftover_show, self.leftover_keep):
+            b.setObjectName("outline")
+            buttons.addWidget(b)
+        buttons.addStretch(1)
+        lf.addLayout(buttons)
+        self.leftover_frame.hide()
+        outer.addWidget(self.leftover_frame, 0, Qt.AlignmentFlag.AlignHCenter)
 
         row = QHBoxLayout()
         row.setSpacing(12)
@@ -241,6 +278,14 @@ class DropScreen(QWidget):
         """A plain message under the drop target; empty hides it."""
         self.message.setText(text)
         self.message_frame.setVisible(bool(text))
+
+    def show_leftovers(self, text: str, count: int) -> None:
+        """The partial-copy notice (D-124); ``count`` 0 hides it."""
+        self.leftover_label.setText(text)
+        self.leftover_delete.setText("Delete" if count == 1 else "Delete all")
+        self.leftover_keep.setText("Keep" if count == 1 else "Keep all")
+        self.leftover_show.setVisible(count == 1)
+        self.leftover_frame.setVisible(count > 0)
 
     def set_dragging(self, on: bool) -> None:
         """Highlight the drop target while a file is dragged over the window."""
@@ -446,10 +491,45 @@ class MainWindow(QMainWindow):
         self.busy.cancel.connect(self.engine.cancel)
         self.batch_saved.another_button.clicked.connect(lambda: self.show_drop())
 
+        self.leftovers: list[Leftover] = []
+        self.drop.leftover_delete.clicked.connect(self.delete_leftovers)
+        self.drop.leftover_keep.clicked.connect(self.keep_leftovers)
+        self.drop.leftover_show.clicked.connect(self._show_leftover)
+
         source = describe(Path(config_path), SourceKind.OTHER) if config_path else find_config(self.locs)
         loaded = self.load_config(source.path, source)
         # Keep the reason on screen when the config can't be used.
         self.show_drop("" if loaded else self.drop.message.text())
+        self.check_leftovers()
+
+    # ------------------------------------------------------------ partial copies (D-124)
+
+    def check_leftovers(self, problem: str = "") -> None:
+        """Look for partial copies a stopped run left behind and offer to delete them."""
+        self.leftovers = pending.leftovers()
+        self.drop.show_leftovers(pending.describe(self.leftovers, problem), len(self.leftovers))
+
+    def delete_leftovers(self) -> None:
+        """Delete the listed partial copies (each re-checked first)."""
+        problems: list[str] = []
+        for lo in self.leftovers:
+            try:
+                pending.delete(lo)
+            except OSError as e:
+                problems.append(str(e))
+        self.check_leftovers(" ".join(problems))
+        if problems and not self.leftovers:
+            self.drop.show_message(" ".join(problems))
+
+    def keep_leftovers(self) -> None:
+        """Leave the partial copies where they are and stop asking."""
+        for lo in self.leftovers:
+            pending.keep(lo)
+        self.check_leftovers()
+
+    def _show_leftover(self) -> None:
+        if self.leftovers:
+            self.services.show_in_folder(self.leftovers[0].path)
 
     # ------------------------------------------------------------ size on screen
 
@@ -504,7 +584,7 @@ class MainWindow(QMainWindow):
             more = len(e.problems) - len(problems)
             lines = "\n".join(f"• {p}" for p in problems)
             tail = f"\n…and {more} more." if more > 0 else ""
-            self.drop.show_message(f"{path.name} can't be used:\n{lines}{tail}")
+            self.drop.show_message(f"{visible(path.name)} can't be used:\n{lines}{tail}")
             if self.config is None:
                 self.drop.profile_combo.clear()
                 self.drop.config_label.setText("No config loaded. Open another config to continue.")
@@ -621,12 +701,12 @@ class MainWindow(QMainWindow):
             self.show_drop(f"Can't find the file {path}.")
             return
         if not self.handler.can_open(path):
-            self.show_drop(f"{path.name} isn't a PDF file. Choose a PDF to stamp.")
+            self.show_drop(f"{visible(path.name)} isn't a PDF file. Choose a PDF to stamp.")
             return
         self._last_folder = path.parent
         self.state.last_folder = str(path.parent)
         save_state(self.state, self.locs)
-        self.show_drop(f"Opening {path.name}…")
+        self.show_drop(f"Opening {visible(path.name)}…")
         self._opening = (self.engine.inspect(path), path, None)
 
     def _on_inspected(self, req: int, info: DocumentInfo) -> None:
@@ -636,7 +716,7 @@ class MainWindow(QMainWindow):
         self._opening = None
         if info.xfa:
             self.show_drop(
-                f"{path.name} is an XFA form, which this tool can't stamp. "
+                f"{visible(path.name)} is an XFA form, which this tool can't stamp. "
                 "Print it to PDF first, then stamp the printed copy.")
             return
         self.show_dialog(path, info, password)
@@ -648,9 +728,9 @@ class MainWindow(QMainWindow):
         self._opening = None
         if isinstance(failure.error, (PasswordRequired, WrongPassword)):
             problem = "" if isinstance(failure.error, PasswordRequired) else failure.message
-            pw = self.services.ask_password(self, path.name, problem, False)
+            pw = self.services.ask_password(self, visible(path.name), problem, False)
             if pw is None:
-                self.show_drop(f"{path.name} wasn't opened: it needs a password.")
+                self.show_drop(f"{visible(path.name)} wasn't opened: it needs a password.")
                 return
             self._opening = (self.engine.inspect(path, pw), path, pw)
             return

@@ -53,7 +53,7 @@ from PySide6.QtWidgets import (
 
 from ..core.config import Config, Profile
 from ..core.fields import prefill_fields
-from ..core.filenames import suggest_filename
+from ..core.filenames import suggest_filename, visible
 from ..core.multi import FilenameAgreement, agree_from_filenames, combined_original_name, disagreement_note
 from ..core.template import TemplateError, template_tokens
 from ..handlers.base import (
@@ -196,7 +196,7 @@ def needs_prepare(files: Sequence[ScreenedFile], mode: str) -> bool:
 def combine_task(files: Sequence[ScreenedFile], *, accept_signature_loss: bool,
                  accept_restrictions: bool, ctx: TaskContext, handler: Handler) -> tuple[CombinedFile, DocumentInfo]:
     """Combine on the engine thread, in the first file's folder (or the system temp folder if it can't be written)."""
-    inputs = [CombineInput(f.path, f.password) for f in files]
+    inputs = [CombineInput(f.path, f.password, f.info.fingerprint if f.info else None) for f in files]
     folder = files[0].path.parent
     remove_stale_temp(folder)
 
@@ -415,7 +415,7 @@ class FilesScreen(QWidget):
             item = self.list.item(i)
             f = self._files[item.data(Qt.ItemDataRole.UserRole)]
             pages = "needs a password" if f.needs_password else _page_word(f.page_count)
-            item.setText(f"{i + 1}.  {f.path.name}  —  {pages}")
+            item.setText(f"{i + 1}.  {visible(f.path.name)}  —  {pages}")
             item.setToolTip(str(f.path))
         n = self.list.count()
         self.title.setText(f"{n} files" if n != 1 else "1 file")
@@ -431,7 +431,7 @@ class FilesScreen(QWidget):
         self.order_help.setVisible(several)
         self.single_button.setVisible(n == 1)
         if n == 1:
-            self.single_button.setText(f"Stamp {self.files()[0].path.name} on its own")
+            self.single_button.setText(f"Stamp {visible(self.files()[0].path.name)} on its own")
         self.lead.setText("Put the files in order, then choose what to do with them." if several else
                           "Only one file is left. Add more files, or stamp this one on its own." if n == 1 else
                           "None of these files can be stamped. Go back and choose others.")
@@ -607,11 +607,11 @@ class PrepareScreen(QWidget):
             grid.setHorizontalSpacing(10)
             grid.setVerticalSpacing(6)
             for i, f in enumerate(locked):
-                name = QLabel(f.path.name)
+                name = QLabel(visible(f.path.name))
                 name.setWordWrap(True)
                 edit = QLineEdit(keep.get(str(f.path), ""))
                 edit.setEchoMode(QLineEdit.EchoMode.Password)
-                edit.setAccessibleName(f"Password for {f.path.name}")
+                edit.setAccessibleName(f"Password for {visible(f.path.name)}")
                 button = QPushButton("Check")
                 button.setObjectName("small")
                 status = _wrap_label("", "msgNeutral")
@@ -628,10 +628,10 @@ class PrepareScreen(QWidget):
             self.body_layout.addWidget(frame)
 
         opened = [f for f in self._files if f.info is not None]
-        signed = [f.path.name for f in opened if f.info and f.info.signed]
-        restricted = [f.path.name for f in opened if f.info and f.info.restricted]
+        signed = [visible(f.path.name) for f in opened if f.info and f.info.signed]
+        restricted = [visible(f.path.name) for f in opened if f.info and f.info.restricted]
         # Locked files count before their password is given, so the D-096 warning shows up front.
-        protected = [f.path.name for f in self._files if f.info is None or f.info.encrypted]
+        protected = [visible(f.path.name) for f in self._files if f.info is None or f.info.encrypted]
         old_sig = bool(self.signature_tick and self.signature_tick.isChecked())
         old_res = bool(self.restriction_tick and self.restriction_tick.isChecked())
         self.signature_tick = None
@@ -723,7 +723,7 @@ class PrepareScreen(QWidget):
     def blockers(self) -> list[str]:
         """Why Continue is disabled, as sentences."""
         out: list[str] = []
-        waiting = [f.path.name for f in self._files if f.needs_password]
+        waiting = [visible(f.path.name) for f in self._files if f.needs_password]
         if waiting:
             out.append(f"Give the password for {_names(waiting)}.")
         if self.signature_tick is not None and not self.signature_tick.isChecked():
@@ -824,7 +824,7 @@ class CombineDialog(_MultiMixin, StampDialog):
         self.jump_combo.setMinimumContentsLength(14)
         jump.setBuddy(self.jump_combo)
         for i, src in enumerate(self.combined.sources):
-            self.jump_combo.addItem(f"{i + 1}. {src.path.name}", src.first)
+            self.jump_combo.addItem(f"{i + 1}. {visible(src.path.name)}", src.first)
         self.jump_combo.activated.connect(self._jump)
         row.addWidget(jump)
         row.addWidget(self.jump_combo, 1)
@@ -839,7 +839,7 @@ class CombineDialog(_MultiMixin, StampDialog):
     def _update_page_label(self) -> None:
         super()._update_page_label()
         src, n = self.combined.source_for(self.page)
-        self.source_label.setText(f"This page: {src.path.name}, page {n} of {src.page_count}")
+        self.source_label.setText(f"This page: {visible(src.path.name)}, page {n} of {src.page_count}")
         i = self.combined.sources.index(src)
         if self.jump_combo.currentIndex() != i:
             self.jump_combo.setCurrentIndex(i)
@@ -861,7 +861,7 @@ class CombineDialog(_MultiMixin, StampDialog):
             frame, fl = _notice("warning")
             fl.addWidget(_wrap_label(warning))
             lay.addWidget(frame)
-        lines = [f"Pages in this order: {', '.join(s.path.name for s in self.combined.sources)}."]
+        lines = [f"Pages in this order: {', '.join(visible(s.path.name) for s in self.combined.sources)}."]
         if self.combined.signed:
             lines.append(f"Signed files ({_names(self.combined.signed)}) were confirmed; the originals stay signed.")
         if self._uses_original_name():
@@ -902,13 +902,13 @@ class CombineDialog(_MultiMixin, StampDialog):
     def _progress_text(self, done: int, total: int) -> str:
         page = min(done + 1, total)
         src, _ = self.combined.source_for(page)
-        return f"Stamping page {page} of {total} · {src.path.name}"
+        return f"Stamping page {page} of {total} · {visible(src.path.name)}"
 
     def check_output(self, out: Path) -> str:
         """Also refuse saving over any of the originals (D-008)."""
         for p in self.originals:
             if same_file(p, out):
-                return (f"That's {p.name}, one of the originals. The combined file is always saved as a "
+                return (f"That's {visible(p.name)}, one of the originals. The combined file is always saved as a "
                         "new file; choose a different name or folder.")
         return super().check_output(out)
 
@@ -970,7 +970,7 @@ class BatchDialog(_MultiMixin, StampDialog):
 
     def _head_texts(self) -> tuple[str, str]:
         i = self._current_index()
-        return (self.path.name, f"File {i + 1} of {len(self.files)} · {_page_word(self.info.page_count)}")
+        return (visible(self.path.name), f"File {i + 1} of {len(self.files)} · {_page_word(self.info.page_count)}")
 
     def _title_text(self) -> str:
         return f"Stamp {len(self.files)} files"
@@ -991,7 +991,7 @@ class BatchDialog(_MultiMixin, StampDialog):
         self.file_list.setTextElideMode(Qt.TextElideMode.ElideMiddle)
         self.file_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         for f in self.files:
-            item = QListWidgetItem(f.path.name)
+            item = QListWidgetItem(visible(f.path.name))
             item.setToolTip(str(f.path))
             self.file_list.addItem(item)
         self.file_list.setCurrentRow(0)
@@ -1033,7 +1033,7 @@ class BatchDialog(_MultiMixin, StampDialog):
         lines = []
         if any(i.encrypted for i in infos):
             lines.append("Each copy keeps its original's password and permissions.")
-        signed = [f.path.name for f in self.files if f.info and f.info.signed]
+        signed = [visible(f.path.name) for f in self.files if f.info and f.info.signed]
         if signed:
             lines.append(f"Signed files ({_names(signed)}) were confirmed; the originals stay signed.")
         if lines:
@@ -1113,7 +1113,8 @@ class BatchDialog(_MultiMixin, StampDialog):
 
     def items(self) -> list[BatchItem]:
         """Where each file's copy goes, with its password."""
-        return [BatchItem(f.path, (self.out_folder or f.path.parent) / self.name_for(f.path), f.password)
+        return [BatchItem(f.path, (self.out_folder or f.path.parent) / self.name_for(f.path), f.password,
+                          f.info.fingerprint if f.info else None)
                 for f in self.files]
 
     # saving
@@ -1183,17 +1184,17 @@ class BatchDialog(_MultiMixin, StampDialog):
         for i, c in enumerate(checks):
             item = self.file_list.item(i)
             mark = "✓ " if c.ok else ("– " if c.status == Status.SKIPPED else "! ")
-            item.setText(mark + c.item.path.name)
+            item.setText(mark + visible(c.item.path.name))
             item.setToolTip(c.message or str(c.item.out_path))
         good = [c for c in checks if c.ok]
         bad = [c for c in checks if not c.ok]
         if not good:
             self._finish()
-            listed = "\n".join(f"• {c.item.path.name}: {c.message}" for c in bad[:6])
+            listed = "\n".join(f"• {visible(c.item.path.name)}: {c.message}" for c in bad[:6])
             self._refuse(f"None of the files can be saved as set up:\n{listed}")
             return
         if bad:
-            listed = "\n".join(f"• {c.item.path.name}: {c.message}" for c in bad[:8])
+            listed = "\n".join(f"• {visible(c.item.path.name)}: {c.message}" for c in bad[:8])
             more = f"\n…and {len(bad) - 8} more." if len(bad) > 8 else ""
             ok = self.services.confirm(
                 self, "Some files can't be stamped",
@@ -1310,7 +1311,7 @@ class BatchSavedScreen(QWidget):
         parts = [f"{n} {(_STATUS_TEXT[s]).lower()}" for s, n in counts.items() if n]
         self.lead.setText(", ".join(parts).capitalize() + ". The originals are unchanged.")
         for r, o in enumerate(outcomes):
-            name = QLabel(o.item.path.name)
+            name = QLabel(visible(o.item.path.name))
             name.setWordWrap(True)
             name.setToolTip(str(o.item.path))
             status = QLabel(_STATUS_TEXT.get(o.status, o.status))
@@ -1323,7 +1324,7 @@ class BatchSavedScreen(QWidget):
             if o.result is not None:
                 b = QPushButton("Open")
                 b.setObjectName("small")
-                b.setAccessibleName(f"Open the copy of {o.item.path.name}")
+                b.setAccessibleName(f"Open the copy of {visible(o.item.path.name)}")
                 b.clicked.connect(lambda _c=False, p=o.result.output_path: self.services.open_file(p))
                 self.grid.addWidget(b, r, 3, Qt.AlignmentFlag.AlignTop)
                 self.open_buttons.append(b)

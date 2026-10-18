@@ -23,13 +23,14 @@ import os
 import tempfile
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from functools import lru_cache
 from pathlib import Path
 
 import pymupdf
 
+from ..core import pending
 from ..core.config import MIN_FONT_PT, StampSpec
 from ..core.geometry import (
     Placement,
@@ -43,6 +44,8 @@ from ..core.locations import resource_dir
 from ..core.patterns import parse_date_format
 from ..core.template import builtin_values, render
 from .base import (
+    SourceFingerprint,
+    check_unchanged,
     ApplyResult,
     CancelCheck,
     Cancelled,
@@ -274,8 +277,12 @@ class PdfHandler(Handler):
         For a file that needs a password, call without one first: the
         PasswordRequired error tells the caller to ask.
         """
+        try:
+            fingerprint = SourceFingerprint.of(Path(path))  # before reading: a change after this is caught
+        except OSError:
+            fingerprint = None  # _open reports the missing file
         with self._open(path, password) as (doc, needed):
-            return self._info(doc, path, needed)
+            return replace(self._info(doc, path, needed), fingerprint=fingerprint)
 
     # ---------------------------------------------------------- stamping
 
@@ -457,10 +464,12 @@ class PdfHandler(Handler):
         password: str | None = None,
         dpi: int = 96,
         outline_box: bool = True,
+        expect: SourceFingerprint | None = None,
     ) -> bytes:
         """See Handler.render_preview. ``page`` is 1-based."""
         path = Path(path)
         today = job.today or date.today()
+        check_unchanged(path, expect)
         with self._open(path, password) as (doc, _):
             if not 1 <= page <= doc.page_count:
                 raise ValueError(f"page {page} is outside 1-{doc.page_count}")
@@ -496,11 +505,13 @@ class PdfHandler(Handler):
         *,
         password: str | None = None,
         cancel: CancelCheck | None = None,
+        expect: SourceFingerprint | None = None,
     ) -> PlanResult:
         """See Handler.plan. Uses the same fitting and checks as ``apply``."""
         src = Path(path)
         today = job.today or date.today()
         warnings: list[str] = []
+        check_unchanged(src, expect)
         with self._open(src, password) as (doc, needed):
             info = self._info(doc, src, needed)
             self._refuse_xfa(info)
@@ -590,9 +601,11 @@ class PdfHandler(Handler):
 
     @staticmethod
     def _save_atomic(doc: pymupdf.Document, out: Path, encryption: int, overwrite: bool) -> None:
-        fd, tmp_name = tempfile.mkstemp(prefix="~stamper-", suffix=".tmp", dir=out.parent)
+        fd, tmp_name = tempfile.mkstemp(prefix=pending.TEMP_NAME_PREFIX, suffix=pending.TEMP_NAME_SUFFIX,
+                                        dir=out.parent)
         os.close(fd)
         tmp = Path(tmp_name)
+        entry = pending.record(tmp)  # so a crash before the rename can be cleaned up later (D-124)
         try:
             doc.save(tmp, garbage=0, deflate=False, clean=False, encryption=encryption)
             if overwrite:
@@ -607,6 +620,8 @@ class PdfHandler(Handler):
         finally:
             if tmp.exists():
                 tmp.unlink()
+            if not tmp.exists():
+                pending.forget(entry)
 
     def apply(
         self,
@@ -621,10 +636,12 @@ class PdfHandler(Handler):
         overwrite: bool = False,
         progress: ProgressCallback | None = None,
         cancel: CancelCheck | None = None,
+        expect: SourceFingerprint | None = None,
     ) -> ApplyResult:
         """See Handler.apply."""
         src, out = Path(path), Path(out_path)
         self._check_output(src, out, overwrite)
+        check_unchanged(src, expect)
         today = job.today or date.today()
         original_name = src.stem
         warnings: list[str] = []
@@ -669,6 +686,7 @@ class PdfHandler(Handler):
             if info.encrypted and remove_encryption:
                 warnings.append("The copy isn't password-protected, unlike the original.")
             self._check_output(src, out, overwrite)  # again, just before writing
+            check_unchanged(src, expect)  # MuPDF reads pages lazily: still the file that was checked
             self._save_atomic(
                 doc, out,
                 pymupdf.PDF_ENCRYPT_KEEP if keep else pymupdf.PDF_ENCRYPT_NONE,

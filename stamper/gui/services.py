@@ -8,7 +8,6 @@ plain functions instead, and nothing modal ever blocks a test run.
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -25,7 +24,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-__all__ = ["Services", "native_services"]
+from ..winshell import select_in_explorer
+
+__all__ = ["Services", "native_services", "show_in_folder"]
 
 
 @dataclass
@@ -133,18 +134,46 @@ def _ask_color(parent: QWidget, current: str) -> str | None:
 
 
 def _open_file(path: Path) -> None:
+    # Only ever a PDF the app just saved, opened through its file association
+    # (ShellExecute), which doesn't search for a program by name (D-116).
+    if path.suffix.lower() != ".pdf":
+        return
     if sys.platform == "win32":
         os.startfile(path)  # type: ignore[attr-defined]  # the user's PDF viewer
     else:
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
 
-def _show_in_folder(path: Path) -> None:
-    if sys.platform == "win32":
-        # explorer wants /select,"path" as one argument; it returns 1 even on success.
-        subprocess.Popen(f'explorer /select,"{path}"')  # noqa: S602
-    else:
+def show_in_folder(
+    path: Path,
+    *,
+    windows: bool | None = None,
+    select: Callable[[Path], None] = select_in_explorer,
+    open_folder: Callable[[Path], None] | None = None,
+) -> None:
+    """Show ``path`` in Explorer, selected; no program is started by name (D-116).
+
+    The shell selects the file itself (``SHOpenFolderAndSelectItems``). If
+    that fails, the folder is opened through its file association instead,
+    which runs Explorer from the full path registered for folders.
+    """
+    if windows is None:
+        windows = sys.platform == "win32"
+    if not windows:
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.parent)))
+        return
+    try:
+        select(path)
+        return
+    except OSError:
+        pass
+    if open_folder is None:
+        open_folder = os.startfile  # type: ignore[attr-defined]
+    open_folder(path.parent)
+
+
+def _show_in_folder(path: Path) -> None:
+    show_in_folder(path)
 
 
 def native_services() -> Services:

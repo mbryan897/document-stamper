@@ -23,6 +23,7 @@ from .base import (
     Cancelled,
     Handler,
     PlanResult,
+    SourceFingerprint,
     StampError,
     StampJob,
 )
@@ -55,11 +56,16 @@ class Status:
 
 @dataclass(frozen=True, slots=True)
 class BatchItem:
-    """One file in a batch: where it is, its password, and where its copy goes."""
+    """One file in a batch: where it is, its password, and where its copy goes.
+
+    ``expect`` is the file's fingerprint from when it was opened; a file that
+    changed since then fails with SourceChanged instead of being stamped (D-125).
+    """
 
     path: Path
     out_path: Path
     password: str | None = None
+    expect: SourceFingerprint | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,7 +139,7 @@ def check_batch(
             checks.append(BatchCheck(item, status, message))
         else:
             try:
-                plan = handler.plan(item.path, job, password=item.password, cancel=cancel)
+                plan = handler.plan(item.path, job, password=item.password, cancel=cancel, expect=item.expect)
             except Cancelled:
                 raise
             except StampError as e:
@@ -197,6 +203,7 @@ def run_batch(
                 overwrite=overwrite,
                 progress=page_progress,
                 cancel=cancel,
+                expect=item.expect,
             )
         except Cancelled:
             stopped = True

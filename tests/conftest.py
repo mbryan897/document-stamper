@@ -16,7 +16,7 @@ from tools import make_corpus
 
 @pytest.fixture(autouse=True)
 def _isolated_folders(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Point the app and user folders at empty temp folders (D-080).
+    """Point the app, user and local folders at empty temp folders (D-080, D-124).
 
     A developer's own ``config.json`` next to the repo or in ``%APPDATA%``
     must never change what a test sees, and tests must never write there.
@@ -25,8 +25,10 @@ def _isolated_folders(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pyt
     root = tmp_path_factory.mktemp("folders")
     (root / "app").mkdir()
     (root / "user").mkdir()
+    (root / "local").mkdir()
     monkeypatch.setenv("STAMPER_APP_DIR", str(root / "app"))
     monkeypatch.setenv("STAMPER_USER_DIR", str(root / "user"))
+    monkeypatch.setenv("STAMPER_LOCAL_DIR", str(root / "local"))
 
 
 @pytest.fixture(scope="session")

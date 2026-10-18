@@ -163,11 +163,13 @@ def test_cli_several_files_without_a_mode(corpus_dir: Path) -> None:
     assert "--combine" in r.stderr and "--batch" in r.stderr
 
 
-def test_cli_combine_in_argument_order(corpus_dir: Path, tmp_path: Path) -> None:
+def test_cli_combine_in_argument_order(corpus_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     b = copy_to(corpus_dir / "rotate_90.pdf", tmp_path)
     a = copy_to(corpus_dir / "encrypted_user_password.pdf", tmp_path)
     out = tmp_path / "exhibit.pdf"
-    r = Run(["--combine", str(b), str(a), "--out", str(out), "--password-for", str(a), PW, *BASE])
+    monkeypatch.setenv("STAMPER_TEST_PW_A", PW)
+    r = Run(["--combine", str(b), str(a), "--out", str(out),
+             "--password-env-for", str(a), "STAMPER_TEST_PW_A", *BASE])
     assert r.code == ExitCode.OK, r.stderr
     assert "Protected files in it: encrypted_user_password.pdf" in r.stdout
     with pymupdf.open(out) as doc:
@@ -182,7 +184,7 @@ def test_cli_combine_needs_password_and_confirmation(corpus_dir: Path, tmp_path:
     a = copy_to(corpus_dir / "encrypted_user_password.pdf", tmp_path)
     b = copy_to(corpus_dir / "letter_portrait.pdf", tmp_path)
     r = Run(["--combine", str(a), str(b), *BASE])
-    assert r.code == ExitCode.PASSWORD and "--password-for" in r.stderr
+    assert r.code == ExitCode.PASSWORD and "--password-env-for" in r.stderr and "--passwords-stdin" in r.stderr
     signed = make_signed_pdf(corpus_dir, tmp_path / "signed.pdf")
     r = Run(["--combine", str(b), str(signed), *BASE])
     assert r.code == ExitCode.CONFIRM and "signed.pdf" in r.stderr and "--accept-signature-loss" in r.stderr

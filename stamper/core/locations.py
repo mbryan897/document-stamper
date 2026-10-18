@@ -63,6 +63,7 @@ __all__ = [
     "is_frozen",
     "load_located",
     "load_state",
+    "local_dir",
     "locations",
     "resource_dir",
     "save_config",
@@ -118,6 +119,22 @@ def user_dir() -> Path:
     if appdata:
         return Path(appdata) / APP_FOLDER_NAME
     return Path.home() / ".config" / APP_FOLDER_NAME
+
+
+def local_dir() -> Path:
+    """``%LOCALAPPDATA%\\DocumentStamper``: this machine only, never synced by roaming profiles.
+
+    Holds the temp-file journal (D-124) and, from H-1, the combine work folder.
+    Elsewhere ``~/.local/share/DocumentStamper``. ``STAMPER_LOCAL_DIR`` overrides
+    it for tests.
+    """
+    override = os.environ.get("STAMPER_LOCAL_DIR")
+    if override:
+        return Path(override)
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        return Path(local) / APP_FOLDER_NAME
+    return Path.home() / ".local" / "share" / APP_FOLDER_NAME
 
 
 def builtin_config_path() -> Path:

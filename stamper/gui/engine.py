@@ -27,7 +27,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QThread, Signal, Slot
 
-from ..handlers.base import Cancelled, Handler, StampError, StampJob
+from ..handlers.base import Cancelled, Handler, SourceFingerprint, StampError, StampJob
 
 __all__ = ["PROGRESS_INTERVAL_S", "ApplyRequest", "EngineClient", "EngineFailure", "TaskContext"]
 
@@ -52,6 +52,7 @@ class ApplyRequest:
     password: str | None
     accept_signature_loss: bool
     accept_restrictions: bool
+    expect: SourceFingerprint | None = None  # refuse a source that changed since it was opened (D-125)
 
 
 class TaskContext:
@@ -129,14 +130,15 @@ class _Worker(QObject):
         else:
             self.previewed.emit(req, png)
 
-    @Slot(int, object, object, object)
-    def plan(self, req: int, path: Path, job: StampJob, password: object) -> None:
+    @Slot(int, object, object, object, object)
+    def plan(self, req: int, path: Path, job: StampJob, password: object, expect: object) -> None:
         if req != self._client.latest_plan:
             return
         try:
             result = self._handler.plan(
                 path, job, password=password,  # type: ignore[arg-type]
                 cancel=lambda: req != self._client.latest_plan,
+                expect=expect,  # type: ignore[arg-type]
             )
         except Cancelled:
             return  # a newer plan is on its way
@@ -167,6 +169,7 @@ class _Worker(QObject):
                 overwrite=False,  # never from the window (D-075)
                 progress=progress,
                 cancel=stop.is_set,
+                expect=request.expect,
             )
         except Exception as e:
             self.apply_failed.emit(_failure(e))
@@ -202,7 +205,7 @@ class EngineClient(QObject):
 
     _do_inspect = Signal(int, object, object)
     _do_preview = Signal(int, object, int, object, object, int)
-    _do_plan = Signal(int, object, object, object)
+    _do_plan = Signal(int, object, object, object, object)
     _do_apply = Signal(object)
     _do_task = Signal(int, object)
 
@@ -249,12 +252,16 @@ class EngineClient(QObject):
         self._do_preview.emit(req, Path(path), page, job, password, dpi)
         return req
 
-    def plan(self, path: Path, job: StampJob, password: str | None) -> int:
-        """Queue a whole-document check; an older one is dropped or cancelled."""
+    def plan(self, path: Path, job: StampJob, password: str | None,
+             expect: SourceFingerprint | None = None) -> int:
+        """Queue a whole-document check; an older one is dropped or cancelled.
+
+        ``expect`` makes the check refuse a source that changed since it was opened (D-125).
+        """
         req = self._number()
         self.latest_plan = req
         self.plans_started += 1
-        self._do_plan.emit(req, Path(path), job, password)
+        self._do_plan.emit(req, Path(path), job, password, expect)
         return req
 
     def apply(self, request: ApplyRequest) -> None:
