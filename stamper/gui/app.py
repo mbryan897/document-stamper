@@ -35,7 +35,7 @@ def run_window(files: Sequence[Path] = ()) -> int:
     """
     app = make_app()
     window = MainWindow()
-    window.show()
+    window.show_fitted()  # normal and centred when it fits the screen, else maximized (D-093)
     if files:
         window.open_files([Path(f) for f in files])
     return app.exec()

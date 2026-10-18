@@ -31,8 +31,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QKeySequence, QPixmap, QShortcut
+from PySide6.QtCore import QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QKeySequence, QPixmap, QResizeEvent, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -48,6 +48,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QStackedWidget,
     QToolButton,
     QVBoxLayout,
@@ -73,6 +74,8 @@ SECTIONS = ("Profiles", "Fields", "Lists", "General")
 PREVIEW_DEBOUNCE_MS = 150
 PREVIEW_W = 220
 MAX_PROBLEMS = 8
+PROBLEM_LINES = 6  # footer lines before the problem list scrolls (D-093)
+STATUS_LINES = 4
 SAMPLE_ORIGINAL = "provider_return.pdf"
 
 _ANCHOR_LABELS = {a: a.replace("-", " ").capitalize() for a in ANCHORS}
@@ -289,6 +292,51 @@ def _scroll(widget: QWidget) -> QScrollArea:
     area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
     area.setWidget(widget)
     return area
+
+
+class _BoundedText(QScrollArea):
+    """A word-wrapped label that grows with its text up to ``max_lines``, then scrolls.
+
+    Used above the footer buttons, so a long list of problems can't push
+    "Save changes" off the window (D-093).
+    """
+
+    def __init__(self, label: QLabel, max_lines: int) -> None:
+        super().__init__()
+        self.label = label
+        self.max_lines = max_lines
+        self.setWidgetResizable(True)
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self.viewport().setAutoFillBackground(False)
+        label.setAutoFillBackground(False)
+        self.setStyleSheet("QScrollArea { background: transparent; }"
+                           " QScrollArea > QWidget > QWidget { background: transparent; }")
+        self.setWidget(label)
+
+    def _height(self) -> int:
+        if not self.label.text():
+            return 0
+        cap = self.label.fontMetrics().lineSpacing() * self.max_lines + 4
+        return min(self.label.heightForWidth(max(self.viewport().width(), 120)), cap)
+
+    def sizeHint(self) -> QSize:  # noqa: N802 - Qt name
+        """As tall as the text, up to ``max_lines``."""
+        return QSize(super().sizeHint().width(), self._height())
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt name
+        """No minimum width; the same height as ``sizeHint``, so the cap holds."""
+        return QSize(0, self._height())
+
+    def refresh(self) -> None:
+        """Re-measure after the text changed."""
+        self.updateGeometry()
+
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802 - Qt name
+        """A new width wraps the text differently."""
+        super().resizeEvent(event)
+        self.updateGeometry()
 
 
 # ------------------------------------------------------------------ pages
@@ -1222,9 +1270,14 @@ class GeneralPage(_Page):
 
     def __init__(self, owner: ProfileSettings) -> None:
         super().__init__(owner)
-        self.form = QVBoxLayout(self)
-        self.form.setContentsMargins(0, 0, 0, 0)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        body = QWidget()
+        body.setObjectName("surface")
+        self.form = QVBoxLayout(body)
+        self.form.setContentsMargins(0, 0, 8, 0)
         self.form.setSpacing(12)
+        outer.addWidget(_scroll(body))  # scrolls like the other sections on a short window
 
     def rebuild(self) -> None:
         _clear(self.form)
@@ -1424,7 +1477,10 @@ class ProfileSettings(QWidget):
             self.stack.addWidget(p)
         row.addWidget(self.stack, 1)
         bl.addLayout(row, 1)
-        outer.addWidget(body, 1)
+        # The sections scroll on their own; this outer scroll only engages when the window is
+        # shorter than the sections' smallest size, so nothing above the buttons is clipped (D-093).
+        self.body_scroll = _scroll(body)
+        outer.addWidget(self.body_scroll, 1)
 
         foot = QWidget()
         foot.setObjectName("footer")
@@ -1433,9 +1489,14 @@ class ProfileSettings(QWidget):
         fl.setSpacing(8)
         self.problem_label = _label("", "msgBad")
         self.problem_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        fl.addWidget(self.problem_label)
+        self.problem_box = _BoundedText(self.problem_label, PROBLEM_LINES)
+        self.problem_box.hide()
+        fl.addWidget(self.problem_box)
         self.status = _label("", "help")
-        fl.addWidget(self.status)
+        self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.status_box = _BoundedText(self.status, STATUS_LINES)
+        self.status_box.hide()
+        fl.addWidget(self.status_box)
         buttons = QHBoxLayout()
         buttons.addStretch(1)
         self.cancel_button = QPushButton("Cancel")
@@ -1496,7 +1557,7 @@ class ProfileSettings(QWidget):
 
     def changed(self, *, debounce: bool = False) -> None:
         """An edit happened: re-check (at once, or after typing pauses)."""
-        self.status.setText("")
+        self.say("")
         self._update_buttons(checking=True)
         if debounce:
             self._debounce.start()
@@ -1519,6 +1580,8 @@ class ProfileSettings(QWidget):
         text = "\n".join(f"• {plain_problem(p)}" for p in shown) + (f"\n…and {more} more." if more > 0 else "")
         self.problem_label.setText(f"Fix these before saving:\n{text}" if self.problems else "")
         self.problem_label.setVisible(bool(self.problems))
+        self.problem_box.setVisible(bool(self.problems))
+        self.problem_box.refresh()
         for p in self.pages:
             p.refresh_live()
         self._update_buttons()
@@ -1533,8 +1596,10 @@ class ProfileSettings(QWidget):
         return self.save_button.isEnabled()
 
     def say(self, text: str) -> None:
-        """A short message above the buttons."""
+        """A short message above the buttons (scrolls past a few lines)."""
         self.status.setText(text)
+        self.status_box.setVisible(bool(text))
+        self.status_box.refresh()
 
     # ------------------------------------------------------------ preview
 

@@ -6,6 +6,11 @@ switch profiles or open another config file for testing. Problems opening a
 file (not a PDF, missing, XFA, no password) are plain messages on the drop
 screen, which stays put.
 
+The window sizes itself to the screen it opens on (D-093): 1200 x 780,
+centred, when that fits; maximized otherwise. No screen in the stack may need
+more height than ``MINIMUM_SIZE``, so the buttons at the bottom of each
+screen stay inside the window at any size the user can choose.
+
 The config comes from the lookup in ``core/locations.py`` (D-017, D-080):
 next to the app, then ``%APPDATA%``, then the built-in default. "Open another
 config…" is a per-session override on top of it (D-072). "Profile
@@ -17,11 +22,20 @@ last profile and the last folder a file came from are remembered in
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QCloseEvent, QDragEnterEvent, QDropEvent, QPixmap
+from PySide6.QtCore import QRect, QSize, Qt
+from PySide6.QtGui import (
+    QCloseEvent,
+    QDragEnterEvent,
+    QDropEvent,
+    QGuiApplication,
+    QPixmap,
+    QScreen,
+    QShowEvent,
+)
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -30,6 +44,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QPushButton,
+    QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -59,12 +74,58 @@ from .engine import EngineClient, EngineFailure
 from .fonts import MONO_FAMILY
 from .profiles import ProfileSettings
 from .services import Services, native_services
-from .stamp_dialog import StampDialog
+from .stamp_dialog import StampDialog, group_warnings
 
-__all__ = ["DropScreen", "MainWindow", "SavedScreen", "several_files_message"]
+__all__ = [
+    "FRAME_ALLOWANCE",
+    "MINIMUM_SIZE",
+    "PREFERRED_SIZE",
+    "DropScreen",
+    "MainWindow",
+    "SavedScreen",
+    "WindowFit",
+    "fit_to_screen",
+    "several_files_message",
+]
 
 MAX_CONFIG_PROBLEMS = 6
 THUMB_W, THUMB_H = 200, 260
+
+PREFERRED_SIZE = QSize(1200, 780)  # the mockup's working area
+MINIMUM_SIZE = QSize(880, 560)  # every screen's buttons fit in this
+FRAME_ALLOWANCE = QSize(16, 40)  # Windows title bar and borders, in logical pixels
+
+
+@dataclass(frozen=True)
+class WindowFit:
+    """How the window opens on a screen: its size, its minimum, and whether maximized."""
+
+    size: QSize
+    minimum: QSize
+    maximized: bool
+
+
+def fit_to_screen(
+    available: QSize,
+    *,
+    preferred: QSize = PREFERRED_SIZE,
+    minimum: QSize = MINIMUM_SIZE,
+    frame: QSize = FRAME_ALLOWANCE,
+) -> WindowFit:
+    """Size the window for a screen's available area (taskbar excluded), D-093.
+
+    The preferred size opens as a normal window when it fits with its frame;
+    otherwise the window opens maximized, with a restore size that fits. The
+    minimum is never larger than the screen, so the window can always be made
+    small enough to see all of it.
+    """
+    room = QSize(max(available.width() - frame.width(), 1), max(available.height() - frame.height(), 1))
+    fits = preferred.width() <= room.width() and preferred.height() <= room.height()
+    return WindowFit(
+        size=QSize(preferred) if fits else preferred.boundedTo(room),
+        minimum=minimum.boundedTo(room),
+        maximized=not fits,
+    )
 
 
 def several_files_message(count: int) -> str:
@@ -99,8 +160,10 @@ class DropScreen(QWidget):
         self.target = QFrame()
         self.target.setObjectName("dropTarget")
         self.target.setProperty("dragging", False)
-        self.target.setMinimumSize(560, 320)
-        self.target.setMaximumWidth(720)
+        # 320 tall when there's room; shrinks to 220 so a short window still shows everything.
+        self.target.setMinimumSize(560, 220)
+        self.target.setMaximumSize(720, 320)
+        self.target.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         tl = QVBoxLayout(self.target)
         tl.setContentsMargins(10, 10, 10, 10)
         inner = QFrame()
@@ -125,7 +188,7 @@ class DropScreen(QWidget):
         il.addWidget(self.choose_button, 0, Qt.AlignmentFlag.AlignCenter)
         il.addStretch(1)
         tl.addWidget(inner)
-        outer.addWidget(self.target, 0, Qt.AlignmentFlag.AlignHCenter)
+        outer.addWidget(self.target, 4, Qt.AlignmentFlag.AlignHCenter)
 
         self.message_frame, self.message = _message_frame()
         self.message_frame.setMaximumWidth(720)
@@ -259,8 +322,11 @@ class SavedScreen(QWidget):
             self.lead.setText(f"{pages} the stamp.")
         self.path_label.setText(str(result.output_path))
         self.original_label.setText("Unchanged, still digitally signed" if signed else "Unchanged")
-        self.notes.setText("\n".join(f"Note: {w}" for w in result.warnings))
-        self.notes.setVisible(bool(result.warnings))
+        # Grouped like the dialog's notes (D-066), and capped: one line per shrunk page
+        # on a long receipt bundle would push the buttons off the window (D-093).
+        notes = group_warnings(result.warnings)
+        self.notes.setText("\n".join(f"Note: {w}" for w in notes))
+        self.notes.setVisible(bool(notes))
         self.thumbnail.clear()
         self.open_button.setFocus()
 
@@ -294,8 +360,12 @@ class MainWindow(QMainWindow):
     ) -> None:
         super().__init__()
         self.setWindowTitle("Document Stamper")
-        self.setMinimumSize(980, 660)
-        self.resize(1200, 780)
+        screen = QGuiApplication.primaryScreen()
+        fit = fit_to_screen(screen.availableGeometry().size() if screen else PREFERRED_SIZE
+                            + FRAME_ALLOWANCE)
+        self.setMinimumSize(fit.minimum)
+        self.resize(fit.size)
+        self._watching_screen = False
         self.setAcceptDrops(True)
         self.services = services or native_services()
         self.handler = handler or PdfHandler()
@@ -338,6 +408,43 @@ class MainWindow(QMainWindow):
         loaded = self.load_config(source.path, source)
         # Keep the reason on screen when the config can't be used.
         self.show_drop("" if loaded else self.drop.message.text())
+
+    # ------------------------------------------------------------ size on screen
+
+    def place_on(self, available: QRect) -> WindowFit:
+        """Size and centre the window for a screen's available area; returns the fit."""
+        fit = fit_to_screen(available.size())
+        self.setMinimumSize(fit.minimum)
+        self.resize(fit.size)
+        outer_w = fit.size.width() + FRAME_ALLOWANCE.width()
+        outer_h = fit.size.height() + FRAME_ALLOWANCE.height()
+        self.move(available.x() + max(0, (available.width() - outer_w) // 2),
+                  available.y() + max(0, (available.height() - outer_h) // 2))
+        return fit
+
+    def show_fitted(self) -> None:
+        """Show the window sized to its screen: normal and centred if it fits, else maximized."""
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        if screen is None:
+            self.show()
+            return
+        if self.place_on(screen.availableGeometry()).maximized:
+            self.showMaximized()
+        else:
+            self.show()
+
+    def showEvent(self, event: QShowEvent) -> None:  # noqa: N802 - Qt name
+        """Start following screen changes once the window has a native handle."""
+        super().showEvent(event)
+        handle = self.windowHandle()
+        if handle is not None and not self._watching_screen:
+            handle.screenChanged.connect(self._screen_changed)
+            self._watching_screen = True
+
+    def _screen_changed(self, screen: QScreen | None) -> None:
+        # Dragged to a smaller monitor: let the window shrink to fit it.
+        if screen is not None:
+            self.setMinimumSize(fit_to_screen(screen.availableGeometry().size()).minimum)
 
     # ------------------------------------------------------------ config and profile
 
