@@ -55,10 +55,15 @@ General → "Add to the Send to menu" puts Document Stamper in Explorer's right-
 ## Test build
 
 ```powershell
-.\packaging\build.ps1     # dist\DocumentStamper\ with DocumentStamper.exe and stamper-cli.exe
+.\packaging\build.ps1
 ```
 
-An unsigned PyInstaller onedir folder for testing. Use `stamper-cli.exe` from scripts; `DocumentStamper.exe` has no console.
+This makes two unsigned test builds:
+
+- `dist\DocumentStamper.exe`: one file that runs by itself from any folder or drive. Each launch unpacks its support files to a temporary folder first, so it takes a few seconds to open. Put `config.json` next to it to carry your profiles with it.
+- `dist\DocumentStamper\`: the folder build (fallback if antivirus objects to the one-file exe). Copy the whole folder; it holds `DocumentStamper.exe`, `stamper-cli.exe` for scripts, and `_internal\`.
+
+Run the build from a normal (not administrator) terminal.
 
 ## Command line
 
