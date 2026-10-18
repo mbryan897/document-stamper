@@ -25,6 +25,7 @@ from typing import TextIO
 from .core.config import Config, ConfigError, Profile, load_config
 from .core.fields import prefill_fields, validate_field, value_from_filename
 from .core.filenames import suggest_filename
+from .core.locations import builtin_config_path, find_config
 from .core.patterns import parse_date_format
 from .handlers.base import (
     Cancelled,
@@ -40,7 +41,9 @@ from .handlers.base import (
 )
 from .handlers.pdf import PdfHandler
 
-__all__ = ["ExitCode", "build_parser", "default_config_path", "get_version", "main"]
+__all__ = [
+    "ExitCode", "build_parser", "default_config_path", "get_version", "located_config_path", "main",
+]
 
 DIST_NAME = "document-stamper"
 
@@ -72,12 +75,13 @@ def get_version() -> str:
 
 
 def default_config_path() -> Path:
-    """The config used when ``--config`` isn't given.
+    """The shipped generic config (``config/default.json``), the last step of the lookup."""
+    return builtin_config_path()
 
-    Phase 4 (D-017) replaces this with the exe-folder, then ``%APPDATA%``
-    lookup; nothing else in the CLI decides where config lives.
-    """
-    return Path(__file__).resolve().parents[1] / "config" / "default.json"
+
+def located_config_path() -> Path:
+    """The config used when ``--config`` isn't given: next to the app, then ``%APPDATA%``, then the default (D-080)."""
+    return find_config().path
 
 
 class _Parser(argparse.ArgumentParser):
@@ -106,7 +110,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--set", dest="sets", action="append", default=[], metavar="NAME=VALUE",
                    help="a field value, e.g. identifier=99-2026-999901 (repeat for each field)")
     p.add_argument("--profile", help="profile name (default: the config's default profile)")
-    p.add_argument("--config", type=Path, help="config.json to use")
+    p.add_argument("--config", type=Path,
+                   help="config.json to use (default: next to the app, then %%APPDATA%%\\DocumentStamper, then the built-in one)")
     out = p.add_mutually_exclusive_group()
     out.add_argument("--out", type=Path, help="full path of the stamped copy")
     out.add_argument("--out-dir", type=Path,
@@ -172,7 +177,7 @@ def _run(args: argparse.Namespace, out: TextIO, stdin: TextIO) -> ExitCode:
     say = (lambda msg: None) if args.quiet else (lambda msg: out.write(msg + "\n"))
 
     # Config and profile
-    config_path = args.config or default_config_path()
+    config_path = args.config or located_config_path()
     try:
         config = load_config(config_path)
     except ConfigError as e:

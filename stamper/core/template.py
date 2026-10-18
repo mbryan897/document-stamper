@@ -4,6 +4,14 @@ A template is plain text with ``{token}`` placeholders. ``{{`` and ``}}``
 write literal braces. Tokens are field names or the built-ins ``{page}``,
 ``{total}``, ``{original_name}`` and ``{date}``.
 
+Optional groups (D-083, O-006)
+------------------------------
+Text in square brackets belongs to the tokens inside it: ``[Title: {doc_title}]``
+is left out entirely when any token inside the brackets is empty, and counts
+as one empty value for the separator rule below. A group with no tokens is
+always printed (without the brackets). Groups can't be nested. ``[[`` and
+``]]`` write literal square brackets.
+
 Empty values and their separators
 ---------------------------------
 When a token's value is empty, the token is removed together with the
@@ -34,7 +42,11 @@ from .patterns import DateFormat
 
 __all__ = [
     "BUILTIN_TOKENS",
+    "GroupEnd",
+    "GroupStart",
+    "Literal",
     "TemplateError",
+    "Token",
     "builtin_values",
     "parse_template",
     "render",
@@ -65,7 +77,17 @@ class Token:
     name: str
 
 
-Segment = Literal | Token
+@dataclass(frozen=True, slots=True)
+class GroupStart:
+    """``[``: the start of an optional group."""
+
+
+@dataclass(frozen=True, slots=True)
+class GroupEnd:
+    """``]``: the end of an optional group."""
+
+
+Segment = Literal | Token | GroupStart | GroupEnd
 
 
 def parse_template(text: str) -> list[Segment]:
@@ -73,6 +95,7 @@ def parse_template(text: str) -> list[Segment]:
     segments: list[Segment] = []
     buf: list[str] = []
     i, n = 0, len(text)
+    group_at: int | None = None  # character index of the open "[", if any
 
     def flush() -> None:
         if buf:
@@ -102,6 +125,37 @@ def parse_template(text: str) -> list[Segment]:
             segments.append(Token(name))
             i = end + 1
             continue
+        if ch == "[":
+            if text.startswith("[[", i):
+                flush()
+                segments.append(Literal("[", escaped=True))
+                i += 2
+                continue
+            if group_at is not None:
+                raise TemplateError(
+                    f"the [ at character {i + 1} starts a group inside the group opened at "
+                    f"character {group_at + 1}; groups can't be nested (write [[ for a literal bracket)"
+                )
+            flush()
+            segments.append(GroupStart())
+            group_at = i
+            i += 1
+            continue
+        if ch == "]":
+            if text.startswith("]]", i):
+                flush()
+                segments.append(Literal("]", escaped=True))
+                i += 2
+                continue
+            if group_at is None:
+                raise TemplateError(
+                    f"the ] at character {i + 1} has no matching [; write ]] for a literal bracket"
+                )
+            flush()
+            segments.append(GroupEnd())
+            group_at = None
+            i += 1
+            continue
         if ch == "}":
             if text.startswith("}}", i):
                 flush()
@@ -114,6 +168,10 @@ def parse_template(text: str) -> list[Segment]:
         buf.append(ch)
         i += 1
     flush()
+    if group_at is not None:
+        raise TemplateError(
+            f"the [ at character {group_at + 1} is never closed; write [[ for a literal bracket"
+        )
     return segments
 
 
@@ -137,17 +195,38 @@ def render(text: str, values: Mapping[str, str]) -> str:
     is only whitespace counts as empty.
     """
     # Each item is (char, protected) or _EMPTY. Protected characters came
-    # from a value or an escaped brace and are never removed.
+    # from a value or an escaped brace and are never removed. An optional
+    # group is collected separately and becomes one _EMPTY if any of its
+    # tokens is empty.
     items: list[tuple[str, bool] | object] = []
+    group: list[tuple[str, bool]] | None = None
+    group_empty = False
     for seg in parse_template(text):
+        if isinstance(seg, GroupStart):
+            group, group_empty = [], False
+            continue
+        if isinstance(seg, GroupEnd):
+            assert group is not None
+            if group_empty:
+                items.append(_EMPTY)
+            else:
+                items.extend(group)
+            group = None
+            continue
         if isinstance(seg, Token):
             value = values[seg.name]
-            if value.strip():
+            if group is not None:
+                if value.strip():
+                    group.extend((c, True) for c in value)
+                else:
+                    group_empty = True
+            elif value.strip():
                 items.extend((c, True) for c in value)
             else:
                 items.append(_EMPTY)
         else:
-            items.extend((c, seg.escaped) for c in seg.text)
+            chars = [(c, seg.escaped) for c in seg.text]
+            (group if group is not None else items).extend(chars)  # type: ignore[arg-type]
 
     def removable(item: object) -> bool:
         if item is _EMPTY:

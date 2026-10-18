@@ -38,6 +38,28 @@ python -m stamper "D:\Returns\provider return.pdf"  # straight to the stamp dial
 
 Drop one PDF on the window (or use "Choose a file…"), check the fields and placement against the live preview, then "Stamp and save…". The copy is saved as a new file; the window never replaces an existing file or the original. With no arguments, or only existing files and no options, `python -m stamper` opens the window; anything else runs the command line.
 
+## Profile settings and where the config lives
+
+"Profile settings…" on the drop screen edits profiles, fields, validation rules, lists and the date format, with a live preview and test boxes. Save writes the config back safely and keeps the previous version as `config.json.bak`; Import and Export move a whole config between machines.
+
+The config is looked for in this order:
+
+1. `config.json` next to the app (from source: the repo root, git-ignored). Copy the app folder and this file travels with it.
+2. `%APPDATA%\DocumentStamper\config.json`.
+3. The built-in `config\default.json` (never written to; saving it creates one of the files above).
+
+`--config` on the command line and "Open another config…" in the window override the lookup. A config file you can't write to opens read-only. The last profile and the last folder you opened a file from are remembered in `%APPDATA%\DocumentStamper\state.json`; field values never are.
+
+General → "Add to the Send to menu" puts Document Stamper in Explorer's right-click Send to menu.
+
+## Test build
+
+```powershell
+.\packaging\build.ps1     # dist\DocumentStamper\ with DocumentStamper.exe and stamper-cli.exe
+```
+
+An unsigned PyInstaller onedir folder for testing. Use `stamper-cli.exe` from scripts; `DocumentStamper.exe` has no console.
+
 ## Command line
 
 `stamper-cli` always runs the command line. `python -m stamper` does too whenever an option is given (add `--` before a lone file name to force it).
@@ -46,6 +68,8 @@ Drop one PDF on the window (or use "Choose a file…"), check the fields and pla
 python -m stamper "D:\Returns\provider return.pdf" --set identifier=99-2026-999901 --set "doc_type=Report"
 python -m stamper --help
 ```
+
+Without `--config`, the command line uses the same lookup as the window (see above).
 
 Fields are set with `--set NAME=VALUE` (repeat for each field; quote the whole argument when the value has spaces). Without `--out`, the copy goes next to the original under the suggested filename. Signed files and files with owner restrictions stop with a message naming the flag that confirms them (`--accept-signature-loss`, `--accept-restrictions`). Passwords are read with `--password-env VAR`, `--password-stdin` or a hidden prompt, never from the command line itself.
 

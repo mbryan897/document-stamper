@@ -1,0 +1,345 @@
+"""Where the app's files live: config lookup, safe saving, last-used values.
+
+Config lookup (D-017, D-080)
+----------------------------
+1. ``config.json`` next to the app (the exe folder; the repo root when run
+   from source). This is the portable copy: it travels with the app folder.
+2. ``config.json`` in the user folder (``%APPDATA%\\DocumentStamper``).
+3. The shipped ``config/default.json``, which is never written to.
+
+"Open another config…" in the window and ``--config`` on the command line
+override the lookup for that session or run; they are not part of it.
+
+Profile settings saves back to the file it loaded. A file that can't be
+written (a locked shared copy) is read-only in the window, which offers
+Export instead. Saving the shipped default goes to the first place that can
+take it: next to the app, else the user folder.
+
+Last-used values (D-081) go in ``state.json`` in the user folder, never next
+to the app, so a read-only shared copy still remembers them. Only the last
+profile and the last folder a file was opened from are kept. Field values
+are never remembered.
+
+Packaged builds (O-010, D-087)
+------------------------------
+``app_dir()`` is where ``config.json`` is looked for; ``resource_dir()`` is
+where the bundled fonts and the shipped config are. From source both are the
+repo root. In a PyInstaller onedir build the exe folder and its ``_internal``
+folder.
+
+Two environment variables override the folders, for tests and for IT:
+``STAMPER_APP_DIR`` and ``STAMPER_USER_DIR``.
+
+Nothing here imports Qt.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import sys
+import tempfile
+from dataclasses import dataclass, field
+from enum import Enum
+from pathlib import Path
+
+from .config import Config, load_config, parse_config
+
+__all__ = [
+    "APP_FOLDER_NAME",
+    "CONFIG_NAME",
+    "STATE_NAME",
+    "AppState",
+    "ConfigSource",
+    "Locations",
+    "SourceKind",
+    "app_dir",
+    "backup_path",
+    "builtin_config_path",
+    "describe",
+    "find_config",
+    "folder_is_writable",
+    "is_frozen",
+    "load_located",
+    "load_state",
+    "locations",
+    "resource_dir",
+    "save_config",
+    "save_state",
+    "save_target",
+    "user_dir",
+]
+
+APP_FOLDER_NAME = "DocumentStamper"
+CONFIG_NAME = "config.json"
+STATE_NAME = "state.json"
+BACKUP_SUFFIX = ".bak"
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+# ------------------------------------------------------------------ folders
+
+
+def is_frozen() -> bool:
+    """True when running from a packaged (PyInstaller) build."""
+    return bool(getattr(sys, "frozen", False))
+
+
+def resource_dir() -> Path:
+    """Where ``assets/`` and ``config/default.json`` are.
+
+    From source: the repo root. Packaged: PyInstaller's ``_internal`` folder
+    (``sys._MEIPASS``).
+    """
+    if is_frozen():
+        base = getattr(sys, "_MEIPASS", None)
+        return Path(base) if base else Path(sys.executable).resolve().parent
+    return _REPO_ROOT
+
+
+def app_dir() -> Path:
+    """The folder whose ``config.json`` comes first: the exe's folder, or the repo root."""
+    override = os.environ.get("STAMPER_APP_DIR")
+    if override:
+        return Path(override)
+    if is_frozen():
+        return Path(sys.executable).resolve().parent
+    return _REPO_ROOT
+
+
+def user_dir() -> Path:
+    """``%APPDATA%\\DocumentStamper``; elsewhere ``~/.config/DocumentStamper``."""
+    override = os.environ.get("STAMPER_USER_DIR")
+    if override:
+        return Path(override)
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        return Path(appdata) / APP_FOLDER_NAME
+    return Path.home() / ".config" / APP_FOLDER_NAME
+
+
+def builtin_config_path() -> Path:
+    """The shipped generic config. Read, never written."""
+    return resource_dir() / "config" / "default.json"
+
+
+@dataclass(frozen=True, slots=True)
+class Locations:
+    """The three places a config can come from, and where state goes."""
+
+    app: Path
+    user: Path
+    builtin: Path
+
+    @property
+    def app_config(self) -> Path:
+        """``config.json`` next to the app."""
+        return self.app / CONFIG_NAME
+
+    @property
+    def user_config(self) -> Path:
+        """``config.json`` in the user folder."""
+        return self.user / CONFIG_NAME
+
+    @property
+    def state_file(self) -> Path:
+        """``state.json`` in the user folder."""
+        return self.user / STATE_NAME
+
+
+def locations() -> Locations:
+    """The folders for this run (environment overrides applied)."""
+    return Locations(app=app_dir(), user=user_dir(), builtin=builtin_config_path())
+
+
+# ------------------------------------------------------------------ lookup
+
+
+class SourceKind(Enum):
+    """Where a config came from."""
+
+    APP = "app"  # next to the exe
+    USER = "user"  # %APPDATA%
+    BUILTIN = "builtin"  # shipped default, read-only
+    OTHER = "other"  # "Open another config…" or --config
+
+    @property
+    def description(self) -> str:
+        """Plain words for the interface."""
+        return {
+            SourceKind.APP: "next to the app",
+            SourceKind.USER: "in your user folder",
+            SourceKind.BUILTIN: "the built-in default",
+            SourceKind.OTHER: "opened for this session",
+        }[self]
+
+
+@dataclass(frozen=True, slots=True)
+class ConfigSource:
+    """A config file and what may be done with it.
+
+    ``writable`` is False for the built-in default and for files the user
+    can't change; Profile settings then offers Export instead of Save, except
+    for the built-in default, whose first save goes to ``save_target()``.
+    """
+
+    path: Path
+    kind: SourceKind
+    writable: bool
+
+
+def folder_is_writable(folder: Path) -> bool:
+    """True if a file can be created in ``folder`` (tries it; ACLs make ``os.access`` unreliable)."""
+    try:
+        fd, name = tempfile.mkstemp(prefix="~stamper-check-", suffix=".tmp", dir=folder)
+    except OSError:
+        return False
+    os.close(fd)
+    try:
+        os.remove(name)
+    except OSError:
+        pass
+    return True
+
+
+def _file_is_writable(path: Path) -> bool:
+    # The read-only attribute (os.access) and the folder (replace needs a temp file there).
+    return os.access(path, os.W_OK) and folder_is_writable(path.parent)
+
+
+def describe(path: Path, kind: SourceKind) -> ConfigSource:
+    """A ConfigSource for a path, checking whether it can be written."""
+    if kind is SourceKind.BUILTIN:
+        return ConfigSource(path, kind, False)
+    return ConfigSource(path, kind, path.is_file() and _file_is_writable(path))
+
+
+def find_config(locs: Locations | None = None) -> ConfigSource:
+    """The config to use when none was chosen: next to the app, then the user folder, then the default.
+
+    A file that exists counts, even if it turns out to be invalid; the caller
+    reports its problems rather than silently falling back to another config.
+    """
+    locs = locs or locations()
+    if locs.app_config.is_file():
+        return describe(locs.app_config, SourceKind.APP)
+    if locs.user_config.is_file():
+        return describe(locs.user_config, SourceKind.USER)
+    return describe(locs.builtin, SourceKind.BUILTIN)
+
+
+def load_located(locs: Locations | None = None) -> tuple[Config, ConfigSource]:
+    """Find and load the config; raises ConfigError naming the file found."""
+    source = find_config(locs)
+    return load_config(source.path), source
+
+
+def save_target(source: ConfigSource, locs: Locations | None = None) -> ConfigSource | None:
+    """Where Profile settings saves: the loaded file, or for the default the first writable place.
+
+    None when nothing can be written (a read-only file, or no writable folder).
+    """
+    locs = locs or locations()
+    if source.kind is not SourceKind.BUILTIN:
+        return source if source.writable else None
+    if locs.app.is_dir() and folder_is_writable(locs.app):
+        return ConfigSource(locs.app_config, SourceKind.APP, True)
+    try:
+        locs.user.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return None
+    if folder_is_writable(locs.user):
+        return ConfigSource(locs.user_config, SourceKind.USER, True)
+    return None
+
+
+# ------------------------------------------------------------------ saving
+
+
+def backup_path(path: Path) -> Path:
+    """``config.json`` -> ``config.json.bak``."""
+    return path.with_name(path.name + BACKUP_SUFFIX)
+
+
+def _write_atomic(path: Path, text: str) -> None:
+    """Write UTF-8 text to a temp file in the same folder, then replace ``path``."""
+    fd, tmp = tempfile.mkstemp(prefix="~stamper-", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def save_config(config: Config, path: Path, *, backup: bool = True) -> Path:
+    """Write a validated config to ``path`` safely; returns ``path``.
+
+    The text is re-read through the validator before anything on disk
+    changes, so a file that wouldn't load is never written. With ``backup``,
+    an existing file is copied to ``config.json.bak`` first (one level kept).
+    Raises OSError if the folder can't be written, ConfigError if the text
+    doesn't validate (a programming error).
+    """
+    text = config.to_json()
+    parse_config(json.loads(text), path.name)
+    if backup and path.is_file():
+        shutil.copy2(path, backup_path(path))
+    _write_atomic(path, text)
+    return path
+
+
+# ------------------------------------------------------------------ state
+
+
+@dataclass(slots=True)
+class AppState:
+    """Last-used values (D-081). Never field values."""
+
+    last_profile: str | None = None
+    last_folder: str | None = None
+    extra: dict[str, object] = field(default_factory=dict)  # keys from newer versions, kept as-is
+
+    def to_json(self) -> str:
+        """Serialize, keeping unknown keys."""
+        data: dict[str, object] = dict(self.extra)
+        data["last_profile"] = self.last_profile
+        data["last_folder"] = self.last_folder
+        return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+
+
+def load_state(locs: Locations | None = None) -> AppState:
+    """Read ``state.json``; a missing or damaged file gives empty state (it's only a convenience)."""
+    locs = locs or locations()
+    try:
+        data = json.loads(locs.state_file.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return AppState()
+    if not isinstance(data, dict):
+        return AppState()
+    profile = data.pop("last_profile", None)
+    folder = data.pop("last_folder", None)
+    return AppState(
+        last_profile=profile if isinstance(profile, str) else None,
+        last_folder=folder if isinstance(folder, str) else None,
+        extra=data,
+    )
+
+
+def save_state(state: AppState, locs: Locations | None = None) -> bool:
+    """Write ``state.json``; returns False (and changes nothing) if it can't."""
+    locs = locs or locations()
+    try:
+        locs.user.mkdir(parents=True, exist_ok=True)
+        _write_atomic(locs.state_file, state.to_json())
+    except OSError:
+        return False
+    return True

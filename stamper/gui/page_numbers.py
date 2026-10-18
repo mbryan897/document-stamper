@@ -15,6 +15,8 @@ The page-number part of a template is found like this:
   of its last token, letters, digits and single spaces. Edge spaces are
   trimmed. So ``Page {page} of {total}`` and ``p. {page}/{total}`` are each
   one part.
+- An optional group (D-083) that holds exactly that part moves with it,
+  brackets included: ``[Page {page} of {total}]``.
 
 The first stamp keeps its template with that part removed and the separator
 touching it trimmed, as D-041 tidies an empty value: the run on its left, or
@@ -31,7 +33,16 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from ..core.config import StampSpec
-from ..core.template import Literal, Token, TemplateError, parse_template, template_tokens
+from ..core.template import (
+    GroupEnd,
+    GroupStart,
+    Literal,
+    Segment,
+    TemplateError,
+    Token,
+    parse_template,
+    template_tokens,
+)
 
 __all__ = [
     "BOTTOM_CHOICES",
@@ -84,13 +95,15 @@ class PageNumberOption:
     stamp: int | None
 
 
-def _raw_segments(text: str) -> list[tuple[int, int, Literal | Token]]:
+def _raw_segments(text: str) -> list[tuple[int, int, Segment]]:
     """Template segments with their (start, end) in the raw template text."""
     out = []
     pos = 0
     for seg in parse_template(text):
         if isinstance(seg, Token):
             width = len(seg.name) + 2
+        elif isinstance(seg, (GroupStart, GroupEnd)):
+            width = 1
         elif seg.escaped:
             width = 2
         else:
@@ -100,7 +113,14 @@ def _raw_segments(text: str) -> list[tuple[int, int, Literal | Token]]:
     return out
 
 
-def _is_plain(raw_index: int, segs: list[tuple[int, int, Literal | Token]]) -> bool:
+def _segment_at(raw_index: int, segs: list[tuple[int, int, Segment]]) -> Segment | None:
+    for start, end, seg in segs:
+        if start <= raw_index < end:
+            return seg
+    return None
+
+
+def _is_plain(raw_index: int, segs: list[tuple[int, int, Segment]]) -> bool:
     for start, end, seg in segs:
         if start <= raw_index < end:
             return isinstance(seg, Literal) and not seg.escaped
@@ -162,6 +182,10 @@ def split_page_numbers(text: str) -> Split | None:
         right += 1
     while right > left and text[right - 1] == " ":
         right -= 1
+    # An optional group holding exactly the page-number part moves with its brackets (D-083).
+    if (left > 0 and isinstance(_segment_at(left - 1, segs), GroupStart)
+            and isinstance(_segment_at(right, segs), GroupEnd)):
+        left, right = left - 1, right + 1
 
     moved = text[left:right]
     before, after = text[:left], text[right:]

@@ -13,6 +13,8 @@ from pathlib import Path
 
 from PySide6.QtGui import QFont, QFontDatabase
 
+from ..core.locations import resource_dir
+
 __all__ = ["MONO_FAMILY", "UI_FAMILY", "UI_FONT_FILES", "load_fonts", "mono_font", "ui_font_dir"]
 
 UI_FAMILY = "Atkinson Hyperlegible Next"
@@ -31,9 +33,9 @@ _loaded: list[str] | None = None
 def ui_font_dir() -> Path:
     """Where the interface fonts live.
 
-    One function so packaging (Phase 5, O-010) can change the lookup in one place.
+    The repo's ``assets/fonts``, or a packaged build's resources (D-087).
     """
-    return Path(__file__).resolve().parents[2] / "assets" / "fonts"
+    return resource_dir() / "assets" / "fonts"
 
 
 def load_fonts() -> list[str]:

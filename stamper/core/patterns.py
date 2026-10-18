@@ -42,6 +42,7 @@ __all__ = [
     "PatternTest",
     "TokenKind",
     "compile_pattern",
+    "example",
     "explain",
     "parse_date_format",
     "test_value",
@@ -336,6 +337,35 @@ class CompiledPattern:
             end_best + 1,
         )
 
+    def example(self, today: date) -> str:
+        """A value that fits the pattern, for previews and the test box.
+
+        Digits count 1, 2, 3 …, letters A, B, C …, date parts are ``today``.
+        """
+        out: list[str] = []
+        digit = letter = 0
+        for t in self._tokens:
+            match t.kind:
+                case TokenKind.LITERAL:
+                    out.append(t.text)
+                case TokenKind.DIGIT:
+                    out.append("1234567890"[digit % 10])
+                    digit += 1
+                case TokenKind.LETTER | TokenKind.ALNUM:
+                    out.append("ABCDEFGHIJKLMNOPQRSTUVWXYZ"[letter % 26])
+                    letter += 1
+                case TokenKind.ANY:
+                    out.append("Example")
+                case TokenKind.YEAR4:
+                    out.append(f"{today.year:04d}")
+                case TokenKind.YEAR2:
+                    out.append(f"{today.year % 100:02d}")
+                case TokenKind.MONTH:
+                    out.append(f"{today.month:02d}")
+                case TokenKind.DAY:
+                    out.append(f"{today.day:02d}")
+        return "".join(out)
+
     def explain(self) -> str:
         """Plain-English description of the pattern, for the help screen."""
         parts: list[str] = []
@@ -393,6 +423,11 @@ def compile_pattern(source: str) -> CompiledPattern:
 def explain(source: str) -> str:
     """Describe a pattern in plain English; raises PatternError."""
     return compile_pattern(source).explain()
+
+
+def example(source: str, today: date) -> str:
+    """A value that fits a pattern (see ``CompiledPattern.example``); raises PatternError."""
+    return compile_pattern(source).example(today)
 
 
 def test_value(source: str, value: str) -> PatternTest:

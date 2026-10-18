@@ -10,11 +10,13 @@ Which interface runs is decided by ``route`` (D-063):
 - anything else: the command line, exactly as in Phase 2. Any option, or
   ``--``, forces the command line: ``stamper -- file.pdf``.
 
-``stamper-cli`` always runs the command line.
+``stamper-cli`` (``stamper-cli.exe`` in the packaged folder) always runs
+the command line.
 """
 
 from __future__ import annotations
 
+import os
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -47,11 +49,25 @@ def route(argv: Sequence[str]) -> Route:
     return Route("cli")
 
 
+def _ensure_streams() -> None:
+    """Give the command line somewhere to write when there is no console.
+
+    The windowed ``DocumentStamper.exe`` has no console, so ``sys.stdout``
+    and ``sys.stderr`` are None there; output is dropped instead of crashing
+    and the exit code still says what happened. Scripts use ``stamper-cli.exe``
+    (D-087).
+    """
+    for name in ("stdout", "stderr"):
+        if getattr(sys, name) is None:
+            setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))  # noqa: SIM115 - lives for the process
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the window or the command line; returns the exit code."""
     args = list(sys.argv[1:] if argv is None else argv)
     decision = route(args)
     if decision.kind == "cli":
+        _ensure_streams()
         return cli_main(args)
     from .gui.app import run_window  # Qt is only imported for the window
 

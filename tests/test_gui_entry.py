@@ -154,3 +154,13 @@ def test_profiles_and_another_config(qtbot: QtBot, window: MainWindow, fake: Fak
     combo.setCurrentIndex(0)
     combo.activated.emit(0)
     assert window.profile is not None and window.profile.name == "Short"
+
+
+def test_cli_without_a_console_does_not_crash(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The windowed exe has no console: sys.stdout and sys.stderr are None (D-087).
+    monkeypatch.setattr(sys, "stdout", None)
+    monkeypatch.setattr(sys, "stderr", None)
+    with pytest.raises(SystemExit) as stop:  # argparse's own exit for a bad option
+        entry.main(["--no-such-option"])
+    assert stop.value.code == 2
+    assert entry.main(["missing.pdf", "--set", "identifier=X"]) == 5  # an error sentence, no crash

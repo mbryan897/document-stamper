@@ -14,6 +14,21 @@ import pytest
 from tools import make_corpus
 
 
+@pytest.fixture(autouse=True)
+def _isolated_folders(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point the app and user folders at empty temp folders (D-080).
+
+    A developer's own ``config.json`` next to the repo or in ``%APPDATA%``
+    must never change what a test sees, and tests must never write there.
+    Subprocesses inherit the variables.
+    """
+    root = tmp_path_factory.mktemp("folders")
+    (root / "app").mkdir()
+    (root / "user").mkdir()
+    monkeypatch.setenv("STAMPER_APP_DIR", str(root / "app"))
+    monkeypatch.setenv("STAMPER_USER_DIR", str(root / "user"))
+
+
 @pytest.fixture(scope="session")
 def corpus_dir() -> Path:
     """Return the generated corpus folder, building any missing files first."""

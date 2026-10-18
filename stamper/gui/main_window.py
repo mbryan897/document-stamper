@@ -6,9 +6,12 @@ switch profiles or open another config file for testing. Problems opening a
 file (not a PDF, missing, XFA, no password) are plain messages on the drop
 screen, which stays put.
 
-The config comes from the CLI's ``default_config_path()`` (D-072); the
-Phase 4 lookup (D-017) replaces that function, and "Open another config…"
-stays a per-session override on top of it.
+The config comes from the lookup in ``core/locations.py`` (D-017, D-080):
+next to the app, then ``%APPDATA%``, then the built-in default. "Open another
+config…" is a per-session override on top of it (D-072). "Profile
+settings…" edits whichever config is loaded and saves it back (D-082). The
+last profile and the last folder a file came from are remembered in
+``state.json`` (D-081); field values never are.
 """
 
 from __future__ import annotations
@@ -32,8 +35,17 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..cli import default_config_path
 from ..core.config import Config, ConfigError, Profile, load_config
+from ..core.locations import (
+    ConfigSource,
+    Locations,
+    SourceKind,
+    describe,
+    find_config,
+    load_state,
+    locations,
+    save_state,
+)
 from ..handlers.base import (
     ApplyResult,
     DocumentInfo,
@@ -45,6 +57,7 @@ from ..handlers.base import (
 from ..handlers.pdf import PdfHandler
 from .engine import EngineClient, EngineFailure
 from .fonts import MONO_FAMILY
+from .profiles import ProfileSettings
 from .services import Services, native_services
 from .stamp_dialog import StampDialog
 
@@ -130,8 +143,12 @@ class DropScreen(QWidget):
         self.config_button = QPushButton("Open another config…")
         self.config_button.setObjectName("link")
         self.config_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.settings_button = QPushButton("Profile settings…")
+        self.settings_button.setObjectName("link")
+        self.settings_button.setCursor(Qt.CursorShape.PointingHandCursor)
         row.addWidget(with_label)
         row.addWidget(self.profile_combo)
+        row.addWidget(self.settings_button)
         row.addWidget(self.config_button)
         row.addStretch(1)
         outer.addLayout(row)
@@ -272,6 +289,8 @@ class MainWindow(QMainWindow):
         services: Services | None = None,
         handler: Handler | None = None,
         today: date | None = None,
+        locs: Locations | None = None,
+        sendto_shortcut: Path | None = None,
     ) -> None:
         super().__init__()
         self.setWindowTitle("Document Stamper")
@@ -282,13 +301,20 @@ class MainWindow(QMainWindow):
         self.handler = handler or PdfHandler()
         self.engine = EngineClient(self.handler, self)
         self.today = today
+        self.locs = locs or locations()
+        self.state = load_state(self.locs)
+        self._sendto_shortcut = sendto_shortcut
         self.config: Config | None = None
         self.config_path: Path | None = None
+        self.source: ConfigSource | None = None
         self.profile: Profile | None = None
         self.dialog: StampDialog | None = None
+        self.settings: ProfileSettings | None = None
         self._opening: tuple[int, Path, str | None] | None = None
         self._thumb_req = 0
-        self._last_folder: Path | None = None
+        self._last_folder: Path | None = (
+            Path(self.state.last_folder) if self.state.last_folder and Path(self.state.last_folder).is_dir()
+            else None)
 
         self.stack = QStackedWidget()
         self.drop = DropScreen()
@@ -299,6 +325,7 @@ class MainWindow(QMainWindow):
 
         self.drop.choose_button.clicked.connect(self.choose_file)
         self.drop.config_button.clicked.connect(self.choose_config)
+        self.drop.settings_button.clicked.connect(self.open_settings)
         self.drop.profile_combo.activated.connect(self._profile_picked)
         self.saved.open_button.clicked.connect(self._open_saved)
         self.saved.folder_button.clicked.connect(self._show_saved)
@@ -307,15 +334,22 @@ class MainWindow(QMainWindow):
         self.engine.inspect_failed.connect(self._on_inspect_failed)
         self.engine.previewed.connect(self._on_thumbnail)
 
-        self.load_config(config_path or default_config_path())
-        self.show_drop()
+        source = describe(Path(config_path), SourceKind.OTHER) if config_path else find_config(self.locs)
+        loaded = self.load_config(source.path, source)
+        # Keep the reason on screen when the config can't be used.
+        self.show_drop("" if loaded else self.drop.message.text())
 
     # ------------------------------------------------------------ config and profile
 
-    def load_config(self, path: Path) -> bool:
-        """Load a config file; problems are shown on the drop screen."""
+    def load_config(self, path: Path, source: ConfigSource | None = None) -> bool:
+        """Load a config file; problems are shown on the drop screen.
+
+        ``source`` says where it came from (the lookup, or "Open another
+        config…" when not given).
+        """
+        path = Path(path)
         try:
-            config = load_config(Path(path))
+            config = load_config(path)
         except ConfigError as e:
             problems = e.problems[:MAX_CONFIG_PROBLEMS]
             more = len(e.problems) - len(problems)
@@ -325,9 +359,11 @@ class MainWindow(QMainWindow):
             if self.config is None:
                 self.drop.profile_combo.clear()
                 self.drop.config_label.setText("No config loaded. Open another config to continue.")
+                self.drop.settings_button.setEnabled(False)
             return False
-        keep = self.profile.name if self.profile and self.config else None
-        self.config, self.config_path = config, Path(path)
+        keep = self.profile.name if self.profile and self.config else self.state.last_profile
+        self.config, self.config_path = config, path
+        self.source = source or describe(path, SourceKind.OTHER)
         try:
             self.profile = config.profile(keep) if keep else config.default_profile
         except KeyError:
@@ -338,7 +374,8 @@ class MainWindow(QMainWindow):
             combo.addItem(p.name, p.name)
         combo.setCurrentIndex(combo.findData(self.profile.name))
         combo.setEnabled(len(config.profiles) > 1)
-        self.drop.config_label.setText(f"Config: {self.config_path}")
+        self.drop.config_label.setText(f"Config: {self.config_path} ({self.source.kind.description})")
+        self.drop.settings_button.setEnabled(True)
         self.drop.show_message("")
         return True
 
@@ -351,15 +388,50 @@ class MainWindow(QMainWindow):
     def _profile_picked(self, index: int) -> None:
         if self.config is not None:
             self.profile = self.config.profile(self.drop.profile_combo.itemData(index))
+            self.state.last_profile = self.profile.name
+            save_state(self.state, self.locs)
 
     # ------------------------------------------------------------ screens
 
     def show_drop(self, message: str = "") -> None:
         """Back to the drop screen, optionally with a message."""
         self._close_dialog()
+        self._close_settings()
         self.stack.setCurrentWidget(self.drop)
         self.drop.show_message(message)
         self.drop.choose_button.setFocus()
+
+    # ------------------------------------------------------------ profile settings
+
+    def open_settings(self) -> ProfileSettings | None:
+        """Show Profile settings for the loaded config."""
+        if self.config is None or self.source is None:
+            return None
+        self._close_dialog()
+        self._close_settings()
+        settings = ProfileSettings(
+            config=self.config, source=self.source, locs=self.locs, engine=self.engine,
+            services=self.services, today=self.today, sendto_shortcut=self._sendto_shortcut)
+        settings.saved.connect(self._settings_saved)
+        settings.closed.connect(lambda: self.show_drop())
+        self.settings = settings
+        self.stack.addWidget(settings)
+        self.stack.setCurrentWidget(settings)
+        settings.nav.setFocus()
+        return settings
+
+    def _settings_saved(self, source: ConfigSource) -> None:
+        if self.load_config(source.path, source):
+            self.show_drop(f"Profile settings saved to {source.path}.")
+        else:
+            self.show_drop()
+
+    def _close_settings(self) -> None:
+        if self.settings is not None:
+            self.settings.dispose()
+            self.stack.removeWidget(self.settings)
+            self.settings.deleteLater()
+            self.settings = None
 
     def _close_dialog(self) -> None:
         if self.dialog is not None:
@@ -396,6 +468,8 @@ class MainWindow(QMainWindow):
             self.show_drop(f"{path.name} isn't a PDF file. Choose a PDF to stamp.")
             return
         self._last_folder = path.parent
+        self.state.last_folder = str(path.parent)
+        save_state(self.state, self.locs)
         self.show_drop(f"Opening {path.name}…")
         self._opening = (self.engine.inspect(path), path, None)
 
@@ -484,7 +558,7 @@ class MainWindow(QMainWindow):
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802 - Qt name
         """Accept files dragged over the drop and saved screens."""
-        if self.stack.currentWidget() is not self.dialog and self._dropped_paths(event):
+        if self.stack.currentWidget() in (self.drop, self.saved) and self._dropped_paths(event):
             event.acceptProposedAction()
             self.drop.set_dragging(True)
         else:
@@ -498,7 +572,7 @@ class MainWindow(QMainWindow):
         """Open the dropped file (one at a time)."""
         self.drop.set_dragging(False)
         paths = self._dropped_paths(event)
-        if not paths or self.stack.currentWidget() is self.dialog:
+        if not paths or self.stack.currentWidget() not in (self.drop, self.saved):
             event.ignore()
             return
         event.acceptProposedAction()
@@ -509,5 +583,6 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 - Qt name
         """Cancel any save and wait for the engine, so no temporary file is left (D-055)."""
         self._close_dialog()
+        self._close_settings()
         self.engine.shutdown()
         super().closeEvent(event)

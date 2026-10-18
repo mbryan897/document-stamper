@@ -39,6 +39,7 @@ from ..core.geometry import (
     visible_rect_to_unrotated,
     visible_to_unrotated,
 )
+from ..core.locations import resource_dir
 from ..core.patterns import parse_date_format
 from ..core.template import builtin_values, render
 from .base import (
@@ -70,6 +71,7 @@ __all__ = [
     "font_path",
     "same_file",
     "stamp_font",
+    "write_sample_page",
 ]
 
 FONT_FILE = "AtkinsonHyperlegibleMono-Regular.ttf"
@@ -81,11 +83,27 @@ _EPS = 1e-6
 
 
 def font_path() -> Path:
-    """Where the bundled stamp font lives.
+    """Where the bundled stamp font lives (the repo, or a packaged build's resources, D-087)."""
+    return resource_dir() / "assets" / "fonts" / FONT_FILE
 
-    One function so packaging (Phase 5) can change the lookup in one place.
+
+def write_sample_page(path: Path, width: float = 612.0, height: float = 792.0) -> Path:
+    """Write a one-page placeholder PDF (US Letter by default) for Profile settings' preview.
+
+    Grey placeholder lines run to the top edge, so the white box is visible.
+    Synthetic content only; returns ``path``.
     """
-    return Path(__file__).resolve().parents[2] / "assets" / "fonts" / FONT_FILE
+    doc = pymupdf.open()
+    page = doc.new_page(width=width, height=height)
+    grey = (0.62, 0.66, 0.72)
+    page.insert_text((72, 40), "SAMPLE PAGE - NOT A REAL DOCUMENT", fontsize=10, fontname="helv", color=grey)
+    y = 90.0
+    while y < height - 72:
+        page.draw_line((72, y), (width - 72, y), color=grey, width=0.6)
+        y += 18.0
+    doc.save(path)
+    doc.close()
+    return path
 
 
 @lru_cache(maxsize=1)

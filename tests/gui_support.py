@@ -38,6 +38,10 @@ class FakeServices:
     save_suggestions: list[Path] = field(default_factory=list)
     opened: list[Path] = field(default_factory=list)
     shown: list[Path] = field(default_factory=list)
+    confirms: list[bool] = field(default_factory=list)
+    questions: list[tuple[str, str]] = field(default_factory=list)
+    import_files: list[Path | None] = field(default_factory=list)
+    export_paths: list[Path | None] = field(default_factory=list)
 
     def services(self) -> Services:
         """A Services object backed by these lists."""
@@ -48,7 +52,14 @@ class FakeServices:
             ask_password=self._password,
             open_file=self.opened.append,
             show_in_folder=self.shown.append,
+            confirm=self._confirm,
+            ask_import_file=lambda _p: self.import_files.pop(0) if self.import_files else None,
+            ask_export_path=lambda _p, _s: self.export_paths.pop(0) if self.export_paths else None,
         )
+
+    def _confirm(self, _parent: object, title: str, text: str, _yes: str) -> bool:
+        self.questions.append((title, text))
+        return self.confirms.pop(0) if self.confirms else False
 
     def _save(self, _parent: object, suggested: Path) -> Path | None:
         self.save_suggestions.append(suggested)

@@ -157,3 +157,26 @@ def test_date_format_errors(fmt: str, fragment: str) -> None:
     with pytest.raises(PatternError, match=None) as exc:
         parse_date_format(fmt)
     assert fragment in str(exc.value)
+
+
+# ------------------------------------------------------------ example values (D-084)
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("##-YYYY-######", "12-2026-345678"),
+        ("SOYYMMDD-######", "SO261018-123456"),
+        ("@@?-#", "ABC-1"),
+        ("*", "Example"),
+        (r"\#\D-#", "#D-1"),
+    ],
+)
+def test_example_values_fit(source: str, expected: str) -> None:
+    from datetime import date
+
+    from stamper.core.patterns import compile_pattern, example
+
+    value = example(source, date(2026, 10, 18))
+    assert value == expected
+    assert compile_pattern(source).matches(value)

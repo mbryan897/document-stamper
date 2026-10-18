@@ -142,3 +142,21 @@ def test_page_numbers_on_rendered_output(choice: str, corpus_dir: Path, tmp_path
             text = page.get_text()
             assert f"Page {n} of {doc.page_count}" in text and f"{FAKE_ID}  |  Court order" in text
             assert f"Court order  |  Page" not in text
+
+
+# ------------------------------------------------------------ optional groups (D-083)
+
+
+def test_group_around_the_page_part_moves_with_it() -> None:
+    split = split_page_numbers("{identifier}  |  [Page {page} of {total}]")
+    assert split == Split(kept="{identifier}", moved="[Page {page} of {total}]")
+
+
+def test_page_part_inside_a_wider_group_stops_at_the_group() -> None:
+    split = split_page_numbers("{identifier}  |  [{doc_type} p. {page}]")
+    assert split is not None and split.moved == "p. {page}"
+
+
+def test_group_elsewhere_is_kept() -> None:
+    split = split_page_numbers("{identifier}  |  [Title: {doc_title}]  |  Page {page} of {total}")
+    assert split == Split(kept="{identifier}  |  [Title: {doc_title}]", moved="Page {page} of {total}")

@@ -139,4 +139,25 @@ QProgressBar {{
 }}
 QProgressBar::chunk {{ background: {_C["ink"]}; border-radius: 6px; }}
 QScrollArea {{ border: 0; }}
+
+QLineEdit#code {{ font-family: "{MONO_FAMILY}"; font-size: 15px; }}
+QDoubleSpinBox {{ min-height: 36px; font-size: 15px; }}
+QListWidget {{
+    background: {_C["surface"]}; border: 1.5px solid {_C["border"]}; border-radius: 8px;
+    padding: 4px; font-size: 15px; outline: 0;
+}}
+QListWidget:focus {{ border-color: {_C["ink"]}; }}
+QListWidget::item {{ min-height: 28px; padding: 0 6px; border-radius: 6px; }}
+QListWidget::item:selected {{ background: {_C["ink_tint"]}; color: {_C["text"]}; }}
+QListWidget#nav {{ border: 0; background: transparent; font-size: 16px; font-weight: 500; }}
+QListWidget#nav::item {{ min-height: 38px; padding: 0 10px; }}
+QFrame#card {{ background: {_C["surface"]}; border: 1px solid {_C["border"]}; border-radius: 10px; }}
+QToolButton#insert {{
+    min-height: 40px; padding: 0 12px; font-size: 15px; background: {_C["surface"]};
+    border: 1.5px solid {_C["border"]}; border-radius: 8px;
+}}
+QToolButton#insert:focus {{ border: 3px solid {_C["ink"]}; }}
+QMenu {{ background: {_C["surface"]}; border: 1px solid {_C["border"]}; padding: 4px; }}
+QMenu::item {{ padding: 6px 18px; }}
+QMenu::item:selected {{ background: {_C["ink_tint"]}; }}
 """

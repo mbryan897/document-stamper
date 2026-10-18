@@ -41,6 +41,9 @@ out/
 
 # Never commit local config overrides or last-used values
 config/local*.json
+# config.json next to the app: from source that is the repo root (D-080)
+/config.json
+/config.json.bak
 
 # Local screenshots and notes from GUI work (never committed)
 docs-local/
