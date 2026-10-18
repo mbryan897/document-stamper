@@ -19,6 +19,7 @@ Evidentiary-integrity notes (for manual review)
 
 from __future__ import annotations
 
+import math
 import os
 import tempfile
 from collections.abc import Iterator, Mapping
@@ -82,6 +83,11 @@ FONT_RESOURCE = "StampMono"  # resource name inside each page
 BOX_PADDING_PT = 2.5  # white space between the text and the box edge
 SHRINK_STEP_PT = 0.5
 PREVIEW_OUTLINE_RGB = (0.85, 0.55, 0.0)  # amber, the interface's warning color
+MAX_PREVIEW_PIXELS = 20_000_000  # a preview never asks for more; huge pages render coarser (D-122)
+SMALL_PAGE_IN = 1.0  # notes for pages outside these sizes (either side) and very large files
+LARGE_PAGE_IN = 100.0  # the PDF maximum is 200 in; from about 30 in the preview is drawn coarser
+LARGE_PAGE_COUNT = 2000
+LARGE_FILE_BYTES = 500 * 1024 * 1024
 _EPS = 1e-6
 
 
@@ -146,6 +152,43 @@ def _strip_long_prefix(path: str) -> str:
 def _canonical(path: Path) -> str:
     raw = _strip_long_prefix(os.fspath(path))
     return os.path.normcase(os.path.realpath(os.path.abspath(raw)))
+
+
+def preview_zoom(rect: pymupdf.Rect, dpi: float) -> float:
+    """The scale for a preview at ``dpi``, lowered so it never exceeds MAX_PREVIEW_PIXELS (D-122)."""
+    w, h = max(rect.width, 1.0), max(rect.height, 1.0)
+    zoom = min(dpi / 72, math.sqrt(MAX_PREVIEW_PIXELS / (w * h)))
+    while math.ceil(w * zoom) * math.ceil(h * zoom) > MAX_PREVIEW_PIXELS:  # pixel counts round up
+        zoom *= 0.999
+    return zoom
+
+
+def _page_list(numbers: list[int]) -> str:
+    shown = ", ".join(str(n) for n in numbers[:5])
+    more = f" and {len(numbers) - 5} more" if len(numbers) > 5 else ""
+    return f"page{'s' if len(numbers) > 1 else ''} {shown}{more}"
+
+
+def size_notes(info: DocumentInfo) -> list[str]:
+    """Soft notes for unusual page sizes and very large files (D-122); never a refusal."""
+    notes: list[str] = []
+    small = [p.number for p in info.pages if min(p.width, p.height) / 72 < SMALL_PAGE_IN]
+    large = [p.number for p in info.pages if max(p.width, p.height) / 72 > LARGE_PAGE_IN]
+    if small:
+        notes.append(f"{_page_list(small).capitalize()} {'is' if len(small) == 1 else 'are'} under "
+                     f"{SMALL_PAGE_IN:g} inch on a side. Check the stamp there carefully.")
+    if large:
+        notes.append(f"{_page_list(large).capitalize()} {'is' if len(large) == 1 else 'are'} over "
+                     f"{LARGE_PAGE_IN:g} inches on a side, so the preview is drawn at a lower resolution.")
+    if info.page_count > LARGE_PAGE_COUNT:
+        notes.append(f"{info.path.name} has {info.page_count:,} pages; checking and saving take longer.")
+    try:
+        size = info.path.stat().st_size
+    except OSError:
+        size = 0
+    if size > LARGE_FILE_BYTES:
+        notes.append(f"{info.path.name} is {size / (1024 * 1024):,.0f} MB; checking and saving take longer.")
+    return notes
 
 
 def same_file(a: Path, b: Path) -> bool:
@@ -477,7 +520,7 @@ class PdfHandler(Handler):
             p = doc[page - 1]
             values = self._page_values(job, page, doc.page_count, path.stem, today)
             self._stamp_page(p, job, values, [], outline=outline_box)
-            return p.get_pixmap(dpi=dpi, alpha=False).tobytes("png")
+            return p.get_pixmap(matrix=pymupdf.Matrix(*[preview_zoom(p.rect, dpi)] * 2), alpha=False).tobytes("png")
 
     # ---------------------------------------------------------- plan
 
@@ -496,6 +539,7 @@ class PdfHandler(Handler):
             notes.append(f"{info.path.name} was damaged and was repaired when opened. Check the stamped copy carefully.")
         if info.has_xmp:
             notes.append("The original has XMP metadata, which wasn't updated; only the document properties were.")
+        notes.extend(size_notes(info))
         return notes
 
     def plan(

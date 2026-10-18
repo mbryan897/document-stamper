@@ -9,7 +9,7 @@ Pattern syntax
 ``#``      one digit 0-9
 ``@``      one letter A-Z (either case)
 ``?``      one letter or digit
-``*``      anything, one or more characters
+``*``      anything, one or more characters (at most two ``*`` per pattern)
 ``YYYY``   4-digit year
 ``YY``     2-digit year, always read as 2000 + YY
 ``MM``     month 01-12
@@ -35,6 +35,7 @@ from datetime import date
 from enum import Enum
 
 __all__ = [
+    "MAX_STARS",
     "CompiledPattern",
     "DateCheck",
     "DateFormat",
@@ -45,8 +46,12 @@ __all__ = [
     "example",
     "explain",
     "parse_date_format",
+    "regex_risk",
     "test_value",
 ]
+
+
+MAX_STARS = 2  # ``*`` tokens allowed in one pattern (D-118)
 
 
 class PatternError(ValueError):
@@ -163,6 +168,13 @@ def _parse(source: str) -> list[_Token]:
         }.get(ch, TokenKind.LITERAL)
         tokens.append(_Token(kind, ch, pos))
         i += 1
+
+    stars = [t for t in tokens if t.kind is TokenKind.ANY]
+    if len(stars) > MAX_STARS:
+        # Each * can match any run of text, so several of them make a failed
+        # match slow: four took about 100 ms on 128 characters (D-118).
+        raise PatternError(f"a rule can have at most {MAX_STARS} *, because more can take too long to check",
+                           stars[MAX_STARS].position)
 
     seen: dict[str, _Token] = {}
     for tok in tokens:
@@ -503,3 +515,193 @@ class DateFormat:
 def parse_date_format(source: str) -> DateFormat:
     """Parse a date format such as ``MM-DD-YYYY``; raises PatternError (cached)."""
     return DateFormat(source)
+
+
+# ------------------------------------------------------------------ advanced regex safety (D-118)
+
+# Python's re has no match timeout, so a rule that can backtrack badly would
+# freeze the window on every keystroke. Advanced rules are checked here, on
+# the parse tree, before they are ever run; this check can't hang because it
+# never matches anything. It walks ``re._parser``'s tree (private, stable since
+# Python 3.11): anything it doesn't recognise is refused rather than passed,
+# and a test fails loudly if the tree's shape changes on a Python upgrade.
+
+import re._constants as _sre  # noqa: E402
+import re._parser as _sre_parse  # noqa: E402
+
+_SAMPLE = [chr(i) for i in range(128)] + ["\u00a0", "\u00e9", "\u0661", "\u3000"]
+_DIGITS = frozenset("0123456789")
+_WORD = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
+_SPACE = frozenset(" \t\n\r\f\v")
+_ALL = frozenset(_SAMPLE)
+_UNBOUNDED = _sre.MAXREPEAT
+_REPEATS = (_sre.MAX_REPEAT, _sre.MIN_REPEAT)
+
+_NESTED = "a repeated part contains another open-ended repeat"
+_ALTERNATION = "a repeated choice has options that can match the same text"
+_ADJACENT = "two open-ended repeats next to each other can match the same characters"
+_BACKREF = "it refers back to an earlier group"
+_UNKNOWN = "it uses a construct this check can't assess"
+
+
+class _Risky(Exception):
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(reason)
+
+
+def _category(cat: object) -> frozenset[str]:
+    table = {
+        _sre.CATEGORY_DIGIT: _DIGITS,
+        _sre.CATEGORY_NOT_DIGIT: _ALL - _DIGITS,
+        _sre.CATEGORY_WORD: _WORD,
+        _sre.CATEGORY_NOT_WORD: _ALL - _WORD,
+        _sre.CATEGORY_SPACE: _SPACE,
+        _sre.CATEGORY_NOT_SPACE: _ALL - _SPACE,
+    }
+    if cat not in table:
+        raise _Risky(_UNKNOWN)
+    return table[cat]
+
+
+def _fold(chars: frozenset[str], ignore_case: bool) -> frozenset[str]:
+    if not ignore_case:
+        return chars
+    return frozenset(chars | {c.swapcase() for c in chars if c.isascii()})
+
+
+def _class(items: list[tuple[object, object]], ignore_case: bool) -> frozenset[str]:
+    chars: set[str] = set()
+    negate = False
+    for op, av in items:
+        if op is _sre.NEGATE:
+            negate = True
+        elif op is _sre.LITERAL:
+            chars.add(chr(av))  # type: ignore[arg-type]
+        elif op is _sre.RANGE:
+            lo, hi = av  # type: ignore[misc]
+            chars.update(c for c in _SAMPLE if lo <= ord(c) <= hi)
+        elif op is _sre.CATEGORY:
+            chars.update(_category(av))
+        else:
+            raise _Risky(_UNKNOWN)
+    result = _fold(frozenset(chars), ignore_case)
+    return _ALL - result if negate else result
+
+
+@dataclass(frozen=True, slots=True)
+class _Info:
+    """What a piece of a regex can do: be empty, start with, contain, and repeat without limit."""
+
+    nullable: bool
+    first: frozenset[str]
+    chars: frozenset[str]
+    unbounded: bool
+
+
+_EMPTY = _Info(True, frozenset(), frozenset(), False)
+
+
+def _seq(items: list[tuple[object, object]], ignore_case: bool) -> _Info:
+    infos = [_node(op, av, ignore_case) for op, av in items]
+    # Open-ended repeats separated only by parts that can be empty must not overlap.
+    last_open: frozenset[str] | None = None
+    for (op, av), info in zip(items, infos, strict=True):
+        is_open = op in _REPEATS and av[1] is _UNBOUNDED  # type: ignore[index]
+        if is_open:
+            if last_open is not None and last_open & info.chars:
+                raise _Risky(_ADJACENT)
+            last_open = info.chars
+        elif not info.nullable:
+            last_open = None
+    nullable = all(i.nullable for i in infos)
+    first: set[str] = set()
+    for info in infos:
+        first |= info.first
+        if not info.nullable:
+            break
+    chars = frozenset().union(*(i.chars for i in infos)) if infos else frozenset()
+    return _Info(nullable, frozenset(first), chars, any(i.unbounded for i in infos))
+
+
+def _node(op: object, av: object, ignore_case: bool) -> _Info:
+    if op is _sre.LITERAL:
+        c = _fold(frozenset({chr(av)}), ignore_case)  # type: ignore[arg-type]
+        return _Info(False, c, c, False)
+    if op is _sre.NOT_LITERAL:
+        c = _ALL - _fold(frozenset({chr(av)}), ignore_case)  # type: ignore[arg-type]
+        return _Info(False, c, c, False)
+    if op is _sre.ANY:
+        c = _ALL - {"\n"}
+        return _Info(False, c, c, False)
+    if op is _sre.IN:
+        c = _class(av, ignore_case)  # type: ignore[arg-type]
+        return _Info(False, c, c, False)
+    if op is _sre.AT:
+        return _EMPTY
+    if op in (_sre.ASSERT, _sre.ASSERT_NOT):
+        _seq(list(av[1]), ignore_case)  # type: ignore[index]  # checked, but matches nothing itself
+        return _EMPTY
+    if op is _sre.SUBPATTERN:
+        _group, add, _del, body = av  # type: ignore[misc]
+        return _seq(list(body), ignore_case or bool(add & _sre.SRE_FLAG_IGNORECASE))
+    if op is _sre.ATOMIC_GROUP:
+        inner = _seq(list(av), ignore_case)  # type: ignore[arg-type]
+        return _Info(inner.nullable, inner.first, inner.chars, False)  # can't be backtracked into
+    if op is _sre.BRANCH:
+        _none, alternatives = av  # type: ignore[misc]
+        infos = [_seq(list(a), ignore_case) for a in alternatives]
+        return _Info(any(i.nullable for i in infos), frozenset().union(*(i.first for i in infos)),
+                     frozenset().union(*(i.chars for i in infos)), any(i.unbounded for i in infos))
+    if op is _sre.POSSESSIVE_REPEAT:
+        lo, _hi, body = av  # type: ignore[misc]
+        inner = _seq(list(body), ignore_case)
+        return _Info(lo == 0 or inner.nullable, inner.first, inner.chars, False)  # gives nothing back
+    if op in _REPEATS:
+        lo, hi, body = av  # type: ignore[misc]
+        inner = _seq(list(body), ignore_case)
+        if hi is _UNBOUNDED or hi > 1:
+            if inner.unbounded:
+                raise _Risky(_NESTED)
+            _check_repeated_choice(list(body), ignore_case)
+        return _Info(lo == 0 or inner.nullable, inner.first, inner.chars, inner.unbounded or hi is _UNBOUNDED)
+    if op in (_sre.GROUPREF, _sre.GROUPREF_EXISTS):
+        raise _Risky(_BACKREF)
+    raise _Risky(_UNKNOWN)
+
+
+def _check_repeated_choice(body: list[tuple[object, object]], ignore_case: bool) -> None:
+    """Inside a repeat, a choice's options must not overlap or be empty."""
+    for op, av in body:
+        if op is _sre.SUBPATTERN:
+            _check_repeated_choice(list(av[3]), ignore_case)  # type: ignore[index]
+        elif op is _sre.BRANCH:
+            infos = [_seq(list(a), ignore_case) for a in av[1]]  # type: ignore[index]
+            if any(i.nullable for i in infos):
+                raise _Risky(_ALTERNATION)
+            for i, a in enumerate(infos):
+                for b in infos[i + 1:]:
+                    if a.first & b.first:
+                        raise _Risky(_ALTERNATION)
+
+
+def regex_risk(regex: str) -> str | None:
+    """Why an advanced rule could take a very long time to check, or None if it can't (D-118).
+
+    Refused: an open-ended repeat inside another repeat (``(a+)+``,
+    ``(\\w+\\s?)+``, ``(.*a){20}``); a repeated choice whose options can match
+    the same text or nothing (``(a|aa)+``); two open-ended repeats with nothing
+    required between them that can match the same characters (``\\d*\\d*``,
+    ``.*.*``); backreferences; and anything the check doesn't recognise.
+    Atomic groups and possessive repeats (``(?>...)``, ``a++``) are allowed.
+    Raises ``re.error`` if the regex doesn't compile.
+    """
+    tree = _sre_parse.parse(regex, re.ASCII)
+    ignore_case = bool(tree.state.flags & _sre.SRE_FLAG_IGNORECASE)
+    try:
+        _seq(list(tree.data), ignore_case)
+    except _Risky as e:
+        return e.reason
+    except (TypeError, ValueError, AttributeError, IndexError):
+        return _UNKNOWN
+    return None

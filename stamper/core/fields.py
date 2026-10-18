@@ -18,6 +18,8 @@ from .filenames import hidden_characters
 from .patterns import PatternTest
 
 __all__ = [
+    "MAX_RAW_LENGTH",
+    "MAX_VALUE_LENGTH",
     "NORMALIZERS",
     "ValidationResult",
     "fold_dashes",
@@ -33,6 +35,10 @@ __all__ = [
 _DASHES = dict.fromkeys(
     map(ord, "‐‑‒–—―−﹘﹣－"), "-"
 )
+
+
+MAX_VALUE_LENGTH = 128  # characters in a typed value after normalizing (D-118)
+MAX_RAW_LENGTH = 1024  # longer input is refused before normalizers or rules run
 
 
 def fold_dashes(text: str) -> str:
@@ -142,7 +148,14 @@ def validate_field(config: Config, field_name: str, raw: str | None) -> Validati
     config validation checks profile field lists).
     """
     spec = config.fields[field_name]
+    if raw is not None and len(raw) > MAX_RAW_LENGTH:
+        return ValidationResult(False, raw[:MAX_VALUE_LENGTH],
+                                f"{spec.label}: Too long: at most {MAX_VALUE_LENGTH} characters.")
     value = normalize(raw or "", spec.normalize)
+    if spec.type != "choice" and len(value) > MAX_VALUE_LENGTH:
+        return ValidationResult(False, value,
+                                f"{spec.label}: Too long: at most {MAX_VALUE_LENGTH} characters "
+                                f"(this is {len(value)}).")
     hidden = hidden_character_message(raw or "", value)
     if hidden is not None:
         return ValidationResult(False, value, f"{spec.label}: {hidden}")

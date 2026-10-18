@@ -57,10 +57,10 @@ from PySide6.QtWidgets import (
 
 from .. import sendto
 from ..core.config import ANCHORS, Config, ConfigError, Profile, load_config
-from ..core.fields import validate_field, value_from_filename
+from ..core.fields import MAX_VALUE_LENGTH, validate_field, value_from_filename
 from ..core.filenames import suggest_filename
 from ..core.locations import ConfigSource, Locations, SourceKind, describe, save_config, save_target
-from ..core.patterns import PatternError, explain, parse_date_format
+from ..core.patterns import PatternError, explain, parse_date_format, regex_risk
 from ..core.template import BUILTIN_TOKENS, TemplateError, builtin_values, render
 from ..handlers.base import StampJob
 from ..handlers.pdf import same_file, write_sample_page
@@ -99,7 +99,7 @@ PATTERN_HELP = """<p>Write the rule the way the value looks:</p>
 <tr><td><b>#</b></td><td>one digit 0–9</td></tr>
 <tr><td><b>@</b></td><td>one letter A–Z</td></tr>
 <tr><td><b>?</b></td><td>one letter or digit</td></tr>
-<tr><td><b>*</b></td><td>any text, at least one character</td></tr>
+<tr><td><b>*</b></td><td>any text, at least one character (at most two * in a rule)</td></tr>
 <tr><td><b>YYYY</b> or <b>YY</b></td><td>a 4- or 2-digit year (YY is 20YY)</td></tr>
 <tr><td><b>MM</b>, <b>DD</b></td><td>month and day; together they must be a real date</td></tr>
 <tr><td><b>\\</b>x</td><td>the character x itself, for example <b>\\#</b></td></tr>
@@ -848,6 +848,11 @@ class FormatEditor(QFrame):
     def _explain(self) -> None:
         text = self.rule.text()
         if self.advanced:
+            problem = _regex_problem(text)
+            if problem:
+                self.explanation.setText(problem)
+                _restyle(self.explanation, "msgBad")
+                return
             self.explanation.setText(
                 "Regular expression (ASCII); it must match the whole value. Dates aren't checked, "
                 "and it isn't used to fill in from the file name.")
@@ -868,6 +873,20 @@ class FormatEditor(QFrame):
         del self.page.draft.fields[self.key]["formats"][self.index]
         self.page.rebuild_detail()
         self.page.owner.changed()
+
+
+def _regex_problem(text: str) -> str:
+    """Why an advanced rule can't be used, said before it is ever run (D-118); empty if it can."""
+    if not text:
+        return ""
+    try:
+        risk = regex_risk(text)
+    except re.error as e:
+        return f"This regular expression doesn't compile: {e}."
+    if risk:
+        return (f"This rule can take a very long time to check ({risk}), so it can't be saved. "
+                "Rewrite it without that, or use a simple pattern.")
+    return ""
 
 
 class FieldsPage(_Page):
@@ -1040,6 +1059,7 @@ class FieldsPage(_Page):
         self.form.addWidget(_section("Try it"))
         self.form.addWidget(_label("A value, as someone would type it:", "muted"))
         self.try_value = QLineEdit()
+        self.try_value.setMaxLength(MAX_VALUE_LENGTH)
         self.try_value.setObjectName("identifier" if kind == "text" else "")
         self.try_value.setPlaceholderText("Type a value to check")
         self.try_value.setAccessibleName("Try a value")

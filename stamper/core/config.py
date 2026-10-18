@@ -32,7 +32,7 @@ from pydantic import (
 )
 
 from .filenames import ILLEGAL_FILENAME_CHARS
-from .patterns import CompiledPattern, DateFormat, PatternError, compile_pattern, parse_date_format
+from .patterns import CompiledPattern, DateFormat, PatternError, compile_pattern, parse_date_format, regex_risk
 from .template import BUILTIN_TOKENS, TemplateError, template_tokens
 
 __all__ = [
@@ -131,6 +131,10 @@ class FormatSpec(_Model):
                 re.compile(self.regex, re.ASCII)
             except re.error as e:
                 raise ValueError(f'regex "{self.regex}" doesn\'t compile: {e}') from None
+            risk = regex_risk(self.regex)
+            if risk is not None:  # refused before it can ever run (D-118)
+                raise ValueError(f'regex "{self.regex}" can take a very long time to check ({risk}). '
+                                 "Rewrite it without that, or use a simple pattern.")
         return self
 
     @property

@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.config import ANCHORS, Config, Profile, StampSpec
-from ..core.fields import ValidationResult, prefill_fields, validate_field, value_from_filename
+from ..core.fields import MAX_VALUE_LENGTH, ValidationResult, prefill_fields, validate_field, value_from_filename
 from ..core.filenames import suggest_filename, visible
 from ..core.template import TemplateError, template_tokens
 from ..handlers.base import (
@@ -413,6 +413,7 @@ class StampDialog(QWidget):
             editor = combo
         else:
             line = QLineEdit()
+            line.setMaxLength(MAX_VALUE_LENGTH)  # D-118: also stops a pasted wall of text
             line.setClearButtonEnabled(False)
             if spec.type == "date":
                 line.setPlaceholderText(self.config.settings.date_format)
