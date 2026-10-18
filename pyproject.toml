@@ -32,6 +32,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest==9.1.1",
+    "pytest-qt==4.5.0",
     "pyinstaller==6.22.3",
 ]
 
@@ -40,6 +41,7 @@ Repository = "https://github.com/MBryan897/document-stamper"
 
 [project.scripts]
 stamper = "stamper.__main__:main"
+stamper-cli = "stamper.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["stamper*"]
@@ -48,3 +50,4 @@ include = ["stamper*"]
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-ra"
+qt_api = "pyside6"

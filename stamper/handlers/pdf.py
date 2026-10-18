@@ -23,6 +23,7 @@ import os
 import tempfile
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import date
 from functools import lru_cache
 from pathlib import Path
@@ -51,6 +52,7 @@ from .base import (
     OutputRefused,
     PageInfo,
     PasswordRequired,
+    PlanResult,
     ProgressCallback,
     StampDoesNotFit,
     StampJob,
@@ -138,6 +140,19 @@ def same_file(a: Path, b: Path) -> bool:
         return os.path.exists(a) and os.path.exists(b) and os.path.samefile(a, b)
     except OSError:
         return False
+
+
+@dataclass(frozen=True, slots=True)
+class _Planned:
+    """One stamp fitted on one page: what ``_draw_page`` draws."""
+
+    index: int  # 0-based stamp number
+    spec: StampSpec
+    text: str
+    placement: Placement
+    size: float
+    box_on: bool
+    rect: pymupdf.Rect  # box in unrotated page space
 
 
 # ------------------------------------------------------------------ handler
@@ -306,22 +321,25 @@ class PdfHandler(Handler):
                 )
             size = nxt
 
-    def _stamp_page(
+    def _plan_page(
         self,
         page: pymupdf.Page,
         job: StampJob,
         values: Mapping[str, str],
         warnings: list[str],
-        *,
-        outline: bool = False,
-    ) -> list[StampPlacement]:
+    ) -> list[_Planned]:
+        """Fit every stamp on one page and check overlaps, without drawing.
+
+        Appends the shrink and form-field warnings for the page. Raises
+        StampDoesNotFit when a stamp can't fit or two stamps overlap.
+        """
         page_no = page.number + 1
         vis_w, vis_h = page.rect.width, page.rect.height
         rot = page.rotation
         crop = page.cropbox
         cw, ch = crop.width, crop.height
 
-        planned: list[tuple[int, StampSpec, str, Placement, float, bool]] = []
+        planned: list[_Planned] = []
         for j, spec in enumerate(job.stamps):
             text = render(spec.text, values)
             if not text:
@@ -333,48 +351,75 @@ class PdfHandler(Handler):
                     f"{spec.font_size_pt:g} pt to {size:g} pt to fit."
                 )
             box_on = spec.background_box if job.background_box is None else job.background_box
-            planned.append((j, spec, text, pl, size, box_on))
+            rect = pymupdf.Rect(*visible_rect_to_unrotated(pl.box, rot, cw, ch).as_tuple())
+            planned.append(_Planned(j, spec, text, pl, size, box_on, rect))
 
         for a in range(len(planned)):
             for b in range(a + 1, len(planned)):
-                if planned[a][3].box.intersects(planned[b][3].box):
-                    ja, jb = planned[a][0] + 1, planned[b][0] + 1
+                if planned[a].placement.box.intersects(planned[b].placement.box):
+                    ja, jb = planned[a].index + 1, planned[b].index + 1
                     raise StampDoesNotFit(
                         f"Page {page_no} ({_inches(vis_w)} × {_inches(vis_h)} in): "
                         f"stamps {ja} and {jb} overlap. Move one to another position.",
                         page_no, jb,
                     )
 
-        annot_rects = [a.rect for a in page.annots()] + [w.rect for w in page.widgets()]
-        out: list[StampPlacement] = []
         if planned:
-            page.insert_font(fontname=FONT_RESOURCE, fontbuffer=_font_buffer())
-        for j, spec, text, pl, size, box_on in planned:
-            unrot = visible_rect_to_unrotated(pl.box, rot, cw, ch)
-            rect = pymupdf.Rect(*unrot.as_tuple())
-            if box_on:
-                page.draw_rect(rect, color=None, fill=(1, 1, 1), width=0, overlay=True)
-            origin = visible_to_unrotated(pl.origin, rot, cw, ch)
+            annot_rects = [a.rect for a in page.annots()] + [w.rect for w in page.widgets()]
+            for item in planned:
+                if any(item.rect.intersects(r) for r in annot_rects):
+                    warnings.append(
+                        f"Page {page_no}, stamp {item.index + 1}: overlaps a form field or "
+                        "annotation, which is drawn on top of the stamp."
+                    )
+        return planned
+
+    @staticmethod
+    def _placements(page_no: int, planned: list[_Planned]) -> list[StampPlacement]:
+        return [
+            StampPlacement(
+                page=page_no, stamp=p.index + 1, text=p.text, box=p.placement.box.as_tuple(),
+                font_size=p.size, box_drawn=p.box_on, direction=p.spec.direction,
+            )
+            for p in planned
+        ]
+
+    @staticmethod
+    def _draw_page(page: pymupdf.Page, planned: list[_Planned], *, outline: bool = False) -> None:
+        """Draw planned stamps on a page, above its content."""
+        if not planned:
+            return
+        rot = page.rotation
+        crop = page.cropbox
+        cw, ch = crop.width, crop.height
+        page.insert_font(fontname=FONT_RESOURCE, fontbuffer=_font_buffer())
+        for p in planned:
+            if p.box_on:
+                page.draw_rect(p.rect, color=None, fill=(1, 1, 1), width=0, overlay=True)
+            origin = visible_to_unrotated(p.placement.origin, rot, cw, ch)
             page.insert_text(
-                pymupdf.Point(*origin), text,
-                fontsize=size, fontname=FONT_RESOURCE,
-                color=_hex_to_rgb(spec.color),
-                rotate=insert_rotation(rot, spec.direction),
+                pymupdf.Point(*origin), p.text,
+                fontsize=p.size, fontname=FONT_RESOURCE,
+                color=_hex_to_rgb(p.spec.color),
+                rotate=insert_rotation(rot, p.spec.direction),
                 overlay=True,
             )
             if outline:
-                page.draw_rect(rect, color=PREVIEW_OUTLINE_RGB, width=0.75,
+                page.draw_rect(p.rect, color=PREVIEW_OUTLINE_RGB, width=0.75,
                                dashes="[2 2] 0", overlay=True)
-            if any(rect.intersects(r) for r in annot_rects):
-                warnings.append(
-                    f"Page {page_no}, stamp {j + 1}: overlaps a form field or annotation, "
-                    "which is drawn on top of the stamp."
-                )
-            out.append(StampPlacement(
-                page=page_no, stamp=j + 1, text=text, box=pl.box.as_tuple(),
-                font_size=size, box_drawn=box_on, direction=spec.direction,
-            ))
-        return out
+
+    def _stamp_page(
+        self,
+        page: pymupdf.Page,
+        job: StampJob,
+        values: Mapping[str, str],
+        warnings: list[str],
+        *,
+        outline: bool = False,
+    ) -> list[StampPlacement]:
+        planned = self._plan_page(page, job, values, warnings)
+        self._draw_page(page, planned, outline=outline)
+        return self._placements(page.number + 1, planned)
 
     def _page_values(
         self, job: StampJob, page_no: int, total: int, original_name: str, today: date
@@ -407,6 +452,59 @@ class PdfHandler(Handler):
             self._stamp_page(p, job, values, [], outline=outline_box)
             return p.get_pixmap(dpi=dpi, alpha=False).tobytes("png")
 
+    # ---------------------------------------------------------- plan
+
+    @staticmethod
+    def _refuse_xfa(info: DocumentInfo) -> None:
+        if info.xfa:
+            raise UnsupportedDocument(
+                f"{info.path.name} is an XFA form, which this tool can't stamp. "
+                "Print it to PDF first, then stamp the printed copy."
+            )
+
+    @staticmethod
+    def _document_notes(info: DocumentInfo) -> list[str]:
+        notes = []
+        if info.repaired:
+            notes.append(f"{info.path.name} was damaged and was repaired when opened. Check the stamped copy carefully.")
+        if info.has_xmp:
+            notes.append("The original has XMP metadata, which wasn't updated; only the document properties were.")
+        return notes
+
+    def plan(
+        self,
+        path: Path,
+        job: StampJob,
+        *,
+        password: str | None = None,
+        cancel: CancelCheck | None = None,
+    ) -> PlanResult:
+        """See Handler.plan. Uses the same fitting and checks as ``apply``."""
+        src = Path(path)
+        today = job.today or date.today()
+        warnings: list[str] = []
+        with self._open(src, password) as (doc, needed):
+            info = self._info(doc, src, needed)
+            self._refuse_xfa(info)
+            warnings.extend(self._document_notes(info))
+            total = doc.page_count
+            self._check_glyphs(job, total, src.stem, today)
+            placements: list[StampPlacement] = []
+            for page in doc:
+                if cancel is not None and cancel():
+                    raise Cancelled("The check was cancelled.")
+                values = self._page_values(job, page.number + 1, total, src.stem, today)
+                planned = self._plan_page(page, job, values, warnings)
+                placements.extend(self._placements(page.number + 1, planned))
+            written, replaced = self._metadata_plan(doc, job, src.stem, today, warnings)
+        return PlanResult(
+            page_count=total,
+            warnings=tuple(warnings),
+            placements=tuple(placements),
+            metadata_written=written,
+            metadata_replaced=replaced,
+        )
+
     # ---------------------------------------------------------- apply
 
     @staticmethod
@@ -431,28 +529,44 @@ class PdfHandler(Handler):
         doc.xref_set_key(-1, "Info", f"{xref} 0 R")
         return xref
 
-    def _write_metadata(
-        self, doc: pymupdf.Document, job: StampJob, original_name: str, today: date,
+    @staticmethod
+    def _metadata_plan(
+        doc: pymupdf.Document, job: StampJob, original_name: str, today: date,
         warnings: list[str],
     ) -> tuple[dict[str, str], dict[str, tuple[str, str]]]:
+        """Document properties to write, and the existing ones they replace.
+
+        Reads the Info dictionary without changing it; appends a warning per
+        replaced value.
+        """
         fmt = parse_date_format(job.date_format)
         base = {**job.values, "original_name": original_name, "date": fmt.format(today)}
         written: dict[str, str] = {}
         replaced: dict[str, tuple[str, str]] = {}
-        info = self._info_xref(doc)
+        kind, val = doc.xref_get_key(-1, "Info")
+        info = int(val.split()[0]) if kind == "xref" else 0
         for key, template in job.metadata.items():
             value = render(template, base)
             if not value:
                 continue
-            kind, old = doc.xref_get_key(info, key)
+            kind, old = doc.xref_get_key(info, key) if info else ("null", "")
             if kind != "null" and old != value:
                 replaced[key] = (old, value)
                 warnings.append(
                     f'Document property {key} was "{old}" in the original; '
                     f'the copy has "{value}".'
                 )
-            doc.xref_set_key(info, key, pymupdf.get_pdf_str(value))
             written[key] = value
+        return written, replaced
+
+    def _write_metadata(
+        self, doc: pymupdf.Document, job: StampJob, original_name: str, today: date,
+        warnings: list[str],
+    ) -> tuple[dict[str, str], dict[str, tuple[str, str]]]:
+        written, replaced = self._metadata_plan(doc, job, original_name, today, warnings)
+        info = self._info_xref(doc)
+        for key, value in written.items():
+            doc.xref_set_key(info, key, pymupdf.get_pdf_str(value))
         doc.xref_set_key(info, "ModDate", pymupdf.get_pdf_str(pymupdf.get_pdf_now()))
         return written, replaced
 
@@ -499,11 +613,7 @@ class PdfHandler(Handler):
 
         with self._open(src, password) as (doc, needed):
             info = self._info(doc, src, needed)
-            if info.xfa:
-                raise UnsupportedDocument(
-                    f"{src.name} is an XFA form, which this tool can't stamp. "
-                    "Print it to PDF first, then stamp the printed copy."
-                )
+            self._refuse_xfa(info)
             if info.signed:
                 if not accept_signature_loss:
                     raise ConfirmationRequired(
@@ -520,10 +630,7 @@ class PdfHandler(Handler):
                         "Confirm to stamp it anyway; the copy keeps the same restrictions.",
                     )
                 warnings.append("The original's owner restrictions don't allow changes; it was stamped after confirmation.")
-            if info.repaired:
-                warnings.append(f"{src.name} was damaged and was repaired when opened. Check the stamped copy carefully.")
-            if info.has_xmp:
-                warnings.append("The original has XMP metadata, which wasn't updated; only the document properties were.")
+            warnings.extend(self._document_notes(info))
 
             total = doc.page_count
             self._check_glyphs(job, total, original_name, today)

@@ -275,6 +275,23 @@ class CompiledPattern:
         m = self.regex.fullmatch(value)
         return None if m is None else _check_date(m.groupdict())
 
+    def date_of(self, value: str) -> date | None:
+        """The calendar date a matching value encodes, or None.
+
+        Only patterns with a year (``YYYY`` or ``YY``), ``MM`` and ``DD``
+        encode a full date. None if the value doesn't match or the date isn't
+        real. ``YY`` is 2000 + YY (D-035).
+        """
+        m = self.regex.fullmatch(value)
+        if m is None or not _check_date(m.groupdict()).ok:
+            return None
+        g = m.groupdict()
+        yyyy, yy, mm, dd = g.get("yyyy"), g.get("yy"), g.get("mm"), g.get("dd")
+        if mm is None or dd is None or (yyyy is None and yy is None):
+            return None
+        year = int(yyyy) if yyyy is not None else 2000 + int(yy)  # type: ignore[arg-type]
+        return date(year, int(mm), int(dd))
+
     def test(self, value: str) -> PatternTest:
         """Test a value and say where it first goes wrong."""
         m = self.regex.fullmatch(value)

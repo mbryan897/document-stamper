@@ -144,3 +144,14 @@ def test_case_number_filenames_present(corpus_dir: Path) -> None:
     names = [p.name for p in corpus_dir.glob("*.pdf")]
     assert any(make_corpus.FAKE_CASE_DASHED in n for n in names)
     assert any(make_corpus.FAKE_CASE_SO in n for n in names)
+
+
+def test_hallway_sample_is_14_synthetic_pages(tmp_path: Path) -> None:
+    from stamper.handlers.pdf import PdfHandler
+    from tools import make_hallway_sample
+
+    out = make_hallway_sample.build(tmp_path / "hallway.pdf")
+    info = PdfHandler().inspect(out)
+    assert info.page_count == 14 and not info.signed
+    with pymupdf.open(out) as doc:
+        assert "NOT REAL DATA" in doc[0].get_text() and "page 14 of 14" in doc[13].get_text()

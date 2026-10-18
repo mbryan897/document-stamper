@@ -41,3 +41,6 @@ out/
 
 # Never commit local config overrides or last-used values
 config/local*.json
+
+# Local screenshots and notes from GUI work (never committed)
+docs-local/

@@ -1,30 +1,61 @@
 """Entry point for ``python -m stamper`` and ``stamper.exe``.
 
-With arguments, runs the command line. With none, prints a short usage
-message; the window arrives in Phase 3.
+Which interface runs is decided by ``route`` (D-063):
+
+- no arguments: the window, on the drop screen;
+- only existing files, and nothing that starts with ``-``: the window. One
+  file opens its stamp dialog (dragging a file onto the exe, or Send To,
+  passes one bare path); several files open the drop screen with a message,
+  because batch stamping is out of scope;
+- anything else: the command line, exactly as in Phase 2. Any option, or
+  ``--``, forces the command line: ``stamper -- file.pdf``.
+
+``stamper-cli`` always runs the command line.
 """
 
 from __future__ import annotations
 
 import sys
 from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
 
-from .cli import build_parser, get_version
+from .cli import get_version
 from .cli import main as cli_main
 
-__all__ = ["get_version", "main"]
+__all__ = ["Route", "get_version", "main", "route"]
+
+
+@dataclass(frozen=True, slots=True)
+class Route:
+    """Where a command line goes: ``"window"`` with its files, or ``"cli"``."""
+
+    kind: str
+    files: tuple[Path, ...] = ()
+
+
+def route(argv: Sequence[str]) -> Route:
+    """Decide between the window and the command line for these arguments."""
+    args = list(argv)
+    if not args:
+        return Route("window")
+    if any(a.startswith("-") for a in args):
+        return Route("cli")
+    paths = tuple(Path(a) for a in args)
+    if all(p.is_file() for p in paths):
+        return Route("window", paths)
+    return Route("cli")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run the command line, or print usage when there are no arguments."""
+    """Run the window or the command line; returns the exit code."""
     args = list(sys.argv[1:] if argv is None else argv)
-    if not args:
-        parser = build_parser()
-        sys.stdout.write(f"Document Stamper {get_version()}\n")
-        parser.print_usage(sys.stdout)
-        sys.stdout.write("Run stamper --help for all options. The window isn't available yet.\n")
-        return 0
-    return cli_main(args)
+    decision = route(args)
+    if decision.kind == "cli":
+        return cli_main(args)
+    from .gui.app import run_window  # Qt is only imported for the window
+
+    return run_window(decision.files)
 
 
 if __name__ == "__main__":

@@ -41,7 +41,7 @@ These can't be produced well with PyMuPDF alone. Put them in `tests/corpus/manua
 
 ### Digitally signed PDF (`signed.pdf`)
 - Make a placeholder PDF with the generator, then sign it with a **self-signed test certificate**, never an agency or personal certificate.
-- Options: `pyHanko` (`pyhanko sign addsig --field Sig1 pemder --key test.key --cert test.crt in.pdf signed.pdf` with a cert made by `openssl req -x509 -newkey rsa:2048 -nodes -keyout test.key -out test.crt -subj "/CN=Stamper Test"`), or Adobe Acrobat's Fill & Sign / Certificates with a self-signed Digital ID.
+- Options: `pyHanko` in a throwaway venv (`pyhanko sign addsig --field Sig1 pemder --key test.key --cert test.crt --no-pass in.pdf signed.pdf`) with a test certificate made by `tools/make_test_cert.py` (run in that venv) or by `openssl req -x509 -newkey rsa:2048 -nodes -keyout test.key -out test.crt -subj "/CN=Stamper Test"`, or Adobe Acrobat's Fill & Sign / Certificates with a self-signed Digital ID.
 - Keep pyHanko out of the project dependencies; install it in a throwaway venv.
 - Expected: signature detected, warning shown, copy saved, original byte-identical.
 
@@ -55,3 +55,17 @@ These can't be produced well with PyMuPDF alone. Put them in `tests/corpus/manua
 
 ### Large file by size (200+ MB)
 - The generated large file covers page count, not size. For size, build pages from high-resolution random-noise images (noise doesn't compress), locally only; never commit it.
+
+### 14-page signed return for the Phase 3 hallway test
+
+`tools/make_hallway_sample.py` writes a 14-page placeholder return (unsigned). Sign it as above, with a visible signature field on the last page:
+
+```powershell
+python tools\make_hallway_sample.py $env:TEMP\hallway\hallway_unsigned.pdf
+py -3.14 -m venv $env:TEMP\pyhanko-venv
+& $env:TEMP\pyhanko-venv\Scripts\python.exe -m pip install "pyHanko==0.38.0" "pyhanko-cli==0.6.0"
+& $env:TEMP\pyhanko-venv\Scripts\python.exe tools\make_test_cert.py $env:TEMP\hallway\cert
+& $env:TEMP\pyhanko-venv\Scripts\pyhanko.exe sign addsig --field "14/360,40,580,110/Sig1" pemder --key $env:TEMP\hallway\cert\test.key --cert $env:TEMP\hallway\cert\test.crt --no-pass $env:TEMP\hallway\hallway_unsigned.pdf $env:TEMP\hallway\provider_return_14p.pdf
+```
+
+The signed file also works as `tests/corpus/manual/signed.pdf`. Keep the key and certificate out of the repo.

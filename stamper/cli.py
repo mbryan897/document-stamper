@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import TextIO
 
 from .core.config import Config, ConfigError, Profile, load_config
-from .core.fields import validate_field, value_from_filename
+from .core.fields import prefill_fields, validate_field, value_from_filename
 from .core.filenames import suggest_filename
 from .core.patterns import parse_date_format
 from .handlers.base import (
@@ -243,7 +243,8 @@ def _run(args: argparse.Namespace, out: TextIO, stdin: TextIO) -> ExitCode:
     else:
         name_values = {**values, "date": parse_date_format(config.settings.date_format).format(today)}
         folder: Path = args.out_dir or src.parent
-        out_path = folder / suggest_filename(profile, name_values, src.name, ticked=ticked)
+        out_path = folder / suggest_filename(
+            profile, name_values, src.name, ticked=ticked, dedupe=prefill_fields(config, profile))
 
     job = StampJob.from_profile(
         config, profile, values,

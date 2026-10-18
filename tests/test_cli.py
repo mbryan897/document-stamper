@@ -47,7 +47,8 @@ def test_suggested_name_in_source_folder_and_prefill(corpus_dir: Path, tmp_path:
     r = Run([str(src), "--config", str(RECORDS_CONFIG), "--set", "doc_type=search warrant return"])
     assert r.code == ExitCode.OK, r.stderr
     assert f"Case number taken from the filename: {make_corpus.FAKE_CASE_SO}" in r.stdout
-    expected = tmp_path / f"{make_corpus.FAKE_CASE_SO}_Search-warrant-return_{src.stem}.pdf"
+    # O-008 (D-067): the identifier isn't repeated from the original name.
+    expected = tmp_path / f"{make_corpus.FAKE_CASE_SO}_Search-warrant-return_provider_return.pdf"
     assert expected.is_file()
 
 
@@ -219,8 +220,10 @@ def test_module_version() -> None:
     assert p.stdout.startswith("Document Stamper ")
 
 
-def test_module_no_arguments_prints_usage() -> None:
-    p = _module()
+def test_module_help_prints_usage() -> None:
+    # Replaces the Phase 2 no-arguments usage test: with no arguments the
+    # module now opens the window (D-063, D-064; routing in test_gui_entry.py).
+    p = _module("--help")
     assert p.returncode == 0
     assert "usage: stamper" in p.stdout
 

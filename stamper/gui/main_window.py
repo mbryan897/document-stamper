@@ -1,0 +1,513 @@
+"""The main window: drop screen, stamp dialog and saved screen.
+
+One window, three screens in a stack. The drop screen takes one PDF (drag
+and drop or "Choose a file…") and shows the active profile, with a way to
+switch profiles or open another config file for testing. Problems opening a
+file (not a PDF, missing, XFA, no password) are plain messages on the drop
+screen, which stays put.
+
+The config comes from the CLI's ``default_config_path()`` (D-072); the
+Phase 4 lookup (D-017) replaces that function, and "Open another config…"
+stays a per-session override on top of it.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from datetime import date
+from pathlib import Path
+
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QCloseEvent, QDragEnterEvent, QDropEvent, QPixmap
+from PySide6.QtWidgets import (
+    QComboBox,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QPushButton,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
+from ..cli import default_config_path
+from ..core.config import Config, ConfigError, Profile, load_config
+from ..handlers.base import (
+    ApplyResult,
+    DocumentInfo,
+    Handler,
+    PasswordRequired,
+    StampJob,
+    WrongPassword,
+)
+from ..handlers.pdf import PdfHandler
+from .engine import EngineClient, EngineFailure
+from .fonts import MONO_FAMILY
+from .services import Services, native_services
+from .stamp_dialog import StampDialog
+
+__all__ = ["DropScreen", "MainWindow", "SavedScreen", "several_files_message"]
+
+MAX_CONFIG_PROBLEMS = 6
+THUMB_W, THUMB_H = 200, 260
+
+
+def several_files_message(count: int) -> str:
+    """What the drop screen says when more than one file arrives (batch is out of scope)."""
+    return f"Drop one file at a time. {count} files were dropped; none were opened."
+
+
+def _message_frame() -> tuple[QFrame, QLabel]:
+    frame = QFrame()
+    frame.setObjectName("notice")
+    lay = QVBoxLayout(frame)
+    lay.setContentsMargins(16, 12, 16, 12)
+    label = QLabel()
+    label.setWordWrap(True)
+    label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+    lay.addWidget(label)
+    frame.hide()
+    return frame, label
+
+
+class DropScreen(QWidget):
+    """One large drop target, "Choose a file…", and the active profile."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("ground")
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(32, 32, 32, 24)
+        outer.setSpacing(24)
+        outer.addStretch(1)
+
+        self.target = QFrame()
+        self.target.setObjectName("dropTarget")
+        self.target.setProperty("dragging", False)
+        self.target.setMinimumSize(560, 320)
+        self.target.setMaximumWidth(720)
+        tl = QVBoxLayout(self.target)
+        tl.setContentsMargins(10, 10, 10, 10)
+        inner = QFrame()
+        inner.setObjectName("dropInner")
+        il = QVBoxLayout(inner)
+        il.setContentsMargins(24, 32, 24, 32)
+        il.setSpacing(14)
+        il.addStretch(1)
+        hero = QLabel("Drop a PDF to stamp")
+        hero.setObjectName("hero")
+        hero.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lead = QLabel("You'll confirm the label and placement before anything is saved.")
+        lead.setObjectName("lead")
+        lead.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lead.setWordWrap(True)
+        self.choose_button = QPushButton("Choose a file…")
+        self.choose_button.setObjectName("outline")
+        self.choose_button.setDefault(True)
+        il.addWidget(hero)
+        il.addWidget(lead)
+        il.addSpacing(6)
+        il.addWidget(self.choose_button, 0, Qt.AlignmentFlag.AlignCenter)
+        il.addStretch(1)
+        tl.addWidget(inner)
+        outer.addWidget(self.target, 0, Qt.AlignmentFlag.AlignHCenter)
+
+        self.message_frame, self.message = _message_frame()
+        self.message_frame.setMaximumWidth(720)
+        outer.addWidget(self.message_frame, 0, Qt.AlignmentFlag.AlignHCenter)
+
+        row = QHBoxLayout()
+        row.setSpacing(12)
+        row.addStretch(1)
+        with_label = QLabel("Stamping with")
+        with_label.setObjectName("muted")
+        self.profile_combo = QComboBox()
+        self.profile_combo.setAccessibleName("Profile")
+        self.profile_combo.setMinimumWidth(220)
+        with_label.setBuddy(self.profile_combo)
+        self.config_button = QPushButton("Open another config…")
+        self.config_button.setObjectName("link")
+        self.config_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        row.addWidget(with_label)
+        row.addWidget(self.profile_combo)
+        row.addWidget(self.config_button)
+        row.addStretch(1)
+        outer.addLayout(row)
+        self.config_label = QLabel("")
+        self.config_label.setObjectName("muted")
+        self.config_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        outer.addWidget(self.config_label)
+        outer.addStretch(1)
+
+    def show_message(self, text: str) -> None:
+        """A plain message under the drop target; empty hides it."""
+        self.message.setText(text)
+        self.message_frame.setVisible(bool(text))
+
+    def set_dragging(self, on: bool) -> None:
+        """Highlight the drop target while a file is dragged over the window."""
+        self.target.setProperty("dragging", on)
+        self.target.style().unpolish(self.target)
+        self.target.style().polish(self.target)
+
+
+class SavedScreen(QWidget):
+    """Where the file went, notes from the result, and what to do next."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("ground")
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(32, 32, 32, 32)
+        outer.addStretch(1)
+        card = QFrame()
+        card.setObjectName("savedCard")
+        card.setMaximumWidth(920)
+        cl = QHBoxLayout(card)
+        cl.setContentsMargins(44, 40, 44, 40)
+        cl.setSpacing(40)
+
+        self.thumbnail = QLabel()
+        self.thumbnail.setObjectName("thumbnail")
+        self.thumbnail.setFixedSize(THUMB_W + 2, THUMB_H + 2)
+        self.thumbnail.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.thumbnail.setAccessibleName("First page of the stamped copy")
+        cl.addWidget(self.thumbnail, 0, Qt.AlignmentFlag.AlignTop)
+
+        right = QVBoxLayout()
+        right.setSpacing(18)
+        title = QLabel("Stamped and saved")
+        title.setObjectName("savedTitle")
+        self.lead = QLabel()
+        self.lead.setObjectName("lead")
+        self.lead.setWordWrap(True)
+        self.lead.setTextFormat(Qt.TextFormat.RichText)
+        right.addWidget(title)
+        right.addWidget(self.lead)
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(16)
+        grid.setVerticalSpacing(10)
+        saved_to = QLabel("Saved to")
+        saved_to.setObjectName("muted")
+        self.path_label = QLabel()
+        self.path_label.setWordWrap(True)
+        self.path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        original = QLabel("Original")
+        original.setObjectName("muted")
+        self.original_label = QLabel()
+        self.original_label.setWordWrap(True)
+        grid.addWidget(saved_to, 0, 0, Qt.AlignmentFlag.AlignTop)
+        grid.addWidget(self.path_label, 0, 1)
+        grid.addWidget(original, 1, 0, Qt.AlignmentFlag.AlignTop)
+        grid.addWidget(self.original_label, 1, 1)
+        grid.setColumnStretch(1, 1)
+        right.addLayout(grid)
+
+        self.notes = QLabel()
+        self.notes.setWordWrap(True)
+        self.notes.setObjectName("help")
+        self.notes.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        right.addWidget(self.notes)
+
+        buttons = QHBoxLayout()
+        buttons.setSpacing(10)
+        self.open_button = QPushButton("Open file")
+        self.open_button.setObjectName("primary")
+        self.folder_button = QPushButton("Show in folder")
+        self.another_button = QPushButton("Stamp another file")
+        self.another_button.setObjectName("link")
+        buttons.addWidget(self.open_button)
+        buttons.addWidget(self.folder_button)
+        buttons.addWidget(self.another_button)
+        buttons.addStretch(1)
+        right.addLayout(buttons)
+        cl.addLayout(right, 1)
+        outer.addWidget(card, 0, Qt.AlignmentFlag.AlignHCenter)
+        outer.addStretch(1)
+        self.result: ApplyResult | None = None
+
+    def show_result(self, result: ApplyResult, *, label: str, identifier: str, signed: bool) -> None:
+        """Fill the screen from an ApplyResult."""
+        self.result = result
+        pages = "The page carries" if result.pages_stamped == 1 else f"All {result.pages_stamped} pages carry"
+        if identifier:
+            self.lead.setText(
+                f"{pages} {label.lower()} "
+                f"<span style=\"font-family: '{MONO_FAMILY}'; font-weight: 600; color: #18202E\">"
+                f"{_escape(identifier)}</span>.")
+        else:
+            self.lead.setText(f"{pages} the stamp.")
+        self.path_label.setText(str(result.output_path))
+        self.original_label.setText("Unchanged, still digitally signed" if signed else "Unchanged")
+        self.notes.setText("\n".join(f"Note: {w}" for w in result.warnings))
+        self.notes.setVisible(bool(result.warnings))
+        self.thumbnail.clear()
+        self.open_button.setFocus()
+
+    def show_thumbnail(self, png: bytes) -> None:
+        """Show the first page of the stamped copy."""
+        pix = QPixmap()
+        pix.loadFromData(png, "PNG")
+        ratio = self.devicePixelRatioF() or 1.0
+        pix = pix.scaled(QSize(int(THUMB_W * ratio), int(THUMB_H * ratio)),
+                         Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        pix.setDevicePixelRatio(ratio)
+        self.thumbnail.setPixmap(pix)
+
+
+def _escape(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+class MainWindow(QMainWindow):
+    """The Document Stamper window."""
+
+    def __init__(
+        self,
+        *,
+        config_path: Path | None = None,
+        services: Services | None = None,
+        handler: Handler | None = None,
+        today: date | None = None,
+    ) -> None:
+        super().__init__()
+        self.setWindowTitle("Document Stamper")
+        self.setMinimumSize(980, 660)
+        self.resize(1200, 780)
+        self.setAcceptDrops(True)
+        self.services = services or native_services()
+        self.handler = handler or PdfHandler()
+        self.engine = EngineClient(self.handler, self)
+        self.today = today
+        self.config: Config | None = None
+        self.config_path: Path | None = None
+        self.profile: Profile | None = None
+        self.dialog: StampDialog | None = None
+        self._opening: tuple[int, Path, str | None] | None = None
+        self._thumb_req = 0
+        self._last_folder: Path | None = None
+
+        self.stack = QStackedWidget()
+        self.drop = DropScreen()
+        self.saved = SavedScreen()
+        self.stack.addWidget(self.drop)
+        self.stack.addWidget(self.saved)
+        self.setCentralWidget(self.stack)
+
+        self.drop.choose_button.clicked.connect(self.choose_file)
+        self.drop.config_button.clicked.connect(self.choose_config)
+        self.drop.profile_combo.activated.connect(self._profile_picked)
+        self.saved.open_button.clicked.connect(self._open_saved)
+        self.saved.folder_button.clicked.connect(self._show_saved)
+        self.saved.another_button.clicked.connect(lambda: self.show_drop())
+        self.engine.inspected.connect(self._on_inspected)
+        self.engine.inspect_failed.connect(self._on_inspect_failed)
+        self.engine.previewed.connect(self._on_thumbnail)
+
+        self.load_config(config_path or default_config_path())
+        self.show_drop()
+
+    # ------------------------------------------------------------ config and profile
+
+    def load_config(self, path: Path) -> bool:
+        """Load a config file; problems are shown on the drop screen."""
+        try:
+            config = load_config(Path(path))
+        except ConfigError as e:
+            problems = e.problems[:MAX_CONFIG_PROBLEMS]
+            more = len(e.problems) - len(problems)
+            lines = "\n".join(f"• {p}" for p in problems)
+            tail = f"\n…and {more} more." if more > 0 else ""
+            self.drop.show_message(f"{path.name} can't be used:\n{lines}{tail}")
+            if self.config is None:
+                self.drop.profile_combo.clear()
+                self.drop.config_label.setText("No config loaded. Open another config to continue.")
+            return False
+        keep = self.profile.name if self.profile and self.config else None
+        self.config, self.config_path = config, Path(path)
+        try:
+            self.profile = config.profile(keep) if keep else config.default_profile
+        except KeyError:
+            self.profile = config.default_profile
+        combo = self.drop.profile_combo
+        combo.clear()
+        for p in config.profiles:
+            combo.addItem(p.name, p.name)
+        combo.setCurrentIndex(combo.findData(self.profile.name))
+        combo.setEnabled(len(config.profiles) > 1)
+        self.drop.config_label.setText(f"Config: {self.config_path}")
+        self.drop.show_message("")
+        return True
+
+    def choose_config(self) -> None:
+        """"Open another config…": load a config.json for this session only."""
+        path = self.services.ask_config_file(self)
+        if path is not None:
+            self.load_config(path)
+
+    def _profile_picked(self, index: int) -> None:
+        if self.config is not None:
+            self.profile = self.config.profile(self.drop.profile_combo.itemData(index))
+
+    # ------------------------------------------------------------ screens
+
+    def show_drop(self, message: str = "") -> None:
+        """Back to the drop screen, optionally with a message."""
+        self._close_dialog()
+        self.stack.setCurrentWidget(self.drop)
+        self.drop.show_message(message)
+        self.drop.choose_button.setFocus()
+
+    def _close_dialog(self) -> None:
+        if self.dialog is not None:
+            self.dialog.disconnect_engine()
+            self.stack.removeWidget(self.dialog)
+            self.dialog.deleteLater()
+            self.dialog = None
+
+    # ------------------------------------------------------------ opening a file
+
+    def choose_file(self) -> None:
+        """"Choose a file…": the native dialog, PDFs only."""
+        path = self.services.ask_open_file(self, self._last_folder)
+        if path is not None:
+            self.open_file(path)
+
+    def open_files(self, paths: Sequence[Path]) -> None:
+        """Open what was dropped or passed on the command line: exactly one file."""
+        if len(paths) > 1:
+            self.show_drop(several_files_message(len(paths)))
+        elif paths:
+            self.open_file(paths[0])
+
+    def open_file(self, path: Path) -> None:
+        """Check a file and, if it can be stamped, show the stamp dialog for it."""
+        path = Path(path)
+        if self.config is None or self.profile is None:
+            self.show_drop("Open a config file that works before choosing a PDF.")
+            return
+        if not path.is_file():
+            self.show_drop(f"Can't find the file {path}.")
+            return
+        if not self.handler.can_open(path):
+            self.show_drop(f"{path.name} isn't a PDF file. Choose a PDF to stamp.")
+            return
+        self._last_folder = path.parent
+        self.show_drop(f"Opening {path.name}…")
+        self._opening = (self.engine.inspect(path), path, None)
+
+    def _on_inspected(self, req: int, info: DocumentInfo) -> None:
+        if self._opening is None or self._opening[0] != req:
+            return
+        _, path, password = self._opening
+        self._opening = None
+        if info.xfa:
+            self.show_drop(
+                f"{path.name} is an XFA form, which this tool can't stamp. "
+                "Print it to PDF first, then stamp the printed copy.")
+            return
+        self.show_dialog(path, info, password)
+
+    def _on_inspect_failed(self, req: int, failure: EngineFailure) -> None:
+        if self._opening is None or self._opening[0] != req:
+            return
+        _, path, _ = self._opening
+        self._opening = None
+        if isinstance(failure.error, (PasswordRequired, WrongPassword)):
+            problem = "" if isinstance(failure.error, PasswordRequired) else failure.message
+            pw = self.services.ask_password(self, path.name, problem, False)
+            if pw is None:
+                self.show_drop(f"{path.name} wasn't opened: it needs a password.")
+                return
+            self._opening = (self.engine.inspect(path, pw), path, pw)
+            return
+        self.show_drop(failure.message)
+
+    def show_dialog(self, path: Path, info: DocumentInfo, password: str | None) -> StampDialog:
+        """Show the stamp dialog for a file that has been inspected."""
+        assert self.config is not None and self.profile is not None
+        self._close_dialog()
+        self.drop.show_message("")
+        dialog = StampDialog(
+            config=self.config, profile=self.profile, path=path, info=info,
+            password=password, engine=self.engine, services=self.services, today=self.today,
+        )
+        dialog.cancelled.connect(lambda: self.show_drop())
+        dialog.saved.connect(self._on_saved)
+        self.dialog = dialog
+        self.stack.addWidget(dialog)
+        self.stack.setCurrentWidget(dialog)
+        dialog.focus_first()
+        return dialog
+
+    # ------------------------------------------------------------ saved
+
+    def _on_saved(self, result: ApplyResult) -> None:
+        dialog = self.dialog
+        assert dialog is not None and self.config is not None
+        ident = dialog.values().get("identifier", "")
+        label = self.config.fields["identifier"].label if "identifier" in self.config.fields else "Identifier"
+        password = dialog.password if result.encryption_kept else None
+        signed = dialog.info.signed
+        first = dialog.info.pages[0]
+        ratio = self.devicePixelRatioF() or 1.0
+        thumb_dpi = int(min(THUMB_W / (first.width / 72), THUMB_H / (first.height / 72)) * ratio * 1.5)
+        self._close_dialog()
+        self.saved.show_result(result, label=label, identifier=ident, signed=signed)
+        self.stack.setCurrentWidget(self.saved)
+        self._thumb_req = self.engine.preview(
+            result.output_path, 1, StampJob(stamps=(), values={}), password, max(24, thumb_dpi))
+
+    def _on_thumbnail(self, req: int, png: bytes) -> None:
+        if req == self._thumb_req and self.stack.currentWidget() is self.saved:
+            self.saved.show_thumbnail(png)
+
+    def _open_saved(self) -> None:
+        if self.saved.result is not None:
+            self.services.open_file(self.saved.result.output_path)
+
+    def _show_saved(self) -> None:
+        if self.saved.result is not None:
+            self.services.show_in_folder(self.saved.result.output_path)
+
+    # ------------------------------------------------------------ drag and drop
+
+    @staticmethod
+    def _dropped_paths(event: QDragEnterEvent | QDropEvent) -> list[Path]:
+        mime = event.mimeData()
+        if not mime.hasUrls():
+            return []
+        return [Path(u.toLocalFile()) for u in mime.urls() if u.isLocalFile()]
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802 - Qt name
+        """Accept files dragged over the drop and saved screens."""
+        if self.stack.currentWidget() is not self.dialog and self._dropped_paths(event):
+            event.acceptProposedAction()
+            self.drop.set_dragging(True)
+        else:
+            event.ignore()
+
+    def dragLeaveEvent(self, event: object) -> None:  # noqa: N802 - Qt name
+        """Stop highlighting the drop target."""
+        self.drop.set_dragging(False)
+
+    def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802 - Qt name
+        """Open the dropped file (one at a time)."""
+        self.drop.set_dragging(False)
+        paths = self._dropped_paths(event)
+        if not paths or self.stack.currentWidget() is self.dialog:
+            event.ignore()
+            return
+        event.acceptProposedAction()
+        self.open_files(paths)
+
+    # ------------------------------------------------------------ closing
+
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 - Qt name
+        """Cancel any save and wait for the engine, so no temporary file is left (D-055)."""
+        self._close_dialog()
+        self.engine.shutdown()
+        super().closeEvent(event)

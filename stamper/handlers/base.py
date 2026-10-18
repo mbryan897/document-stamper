@@ -28,6 +28,7 @@ __all__ = [
     "OutputRefused",
     "PageInfo",
     "PasswordRequired",
+    "PlanResult",
     "ProgressCallback",
     "CancelCheck",
     "StampDoesNotFit",
@@ -217,6 +218,23 @@ class ApplyResult:
     encryption_kept: bool
 
 
+@dataclass(frozen=True, slots=True)
+class PlanResult:
+    """What ``plan`` found: what ``apply`` would do, without writing anything.
+
+    ``warnings`` are the page and document warnings ``apply`` would give
+    (shrunk text, form fields over a stamp, a repaired file, XMP, replaced
+    document properties), but not the confirmations, which the caller asks
+    for from ``DocumentInfo``.
+    """
+
+    page_count: int
+    warnings: tuple[str, ...]
+    placements: tuple[StampPlacement, ...]
+    metadata_written: Mapping[str, str]
+    metadata_replaced: Mapping[str, tuple[str, str]]
+
+
 # ------------------------------------------------------------------ interface
 
 
@@ -252,6 +270,24 @@ class Handler(abc.ABC):
 
         With ``outline_box`` the area each stamp covers is outlined, so the
         user can see exactly what the white box hides. The file isn't changed.
+        """
+
+    @abc.abstractmethod
+    def plan(
+        self,
+        path: Path,
+        job: StampJob,
+        *,
+        password: str | None = None,
+        cancel: CancelCheck | None = None,
+    ) -> PlanResult:
+        """Check the whole document as ``apply`` would, without writing anything.
+
+        Raises the same errors as ``apply`` for the file and the stamps
+        (UnsupportedDocument, StampDoesNotFit for any page, MissingGlyph,
+        password errors), but never ConfirmationRequired or OutputRefused.
+        ``cancel`` is checked between pages (``Cancelled``). The file isn't
+        changed.
         """
 
     @abc.abstractmethod

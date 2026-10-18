@@ -17,7 +17,7 @@ py -3.14 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
-.\tools\fetch_font.ps1          # bundled stamp font, hash-checked
+.\tools\fetch_font.ps1          # bundled fonts, hash-checked
 ```
 
 ## Running tests
@@ -29,7 +29,18 @@ pytest
 
 The test corpus is synthetic and generated on demand into `tests/corpus/generated/` (not committed). See `tests/corpus/README.md`. Never add real case material to this repository.
 
+## Window
+
+```powershell
+python -m stamper                                  # the drop screen
+python -m stamper "D:\Returns\provider return.pdf"  # straight to the stamp dialog, as dragging a file onto the exe does
+```
+
+Drop one PDF on the window (or use "Choose a file…"), check the fields and placement against the live preview, then "Stamp and save…". The copy is saved as a new file; the window never replaces an existing file or the original. With no arguments, or only existing files and no options, `python -m stamper` opens the window; anything else runs the command line.
+
 ## Command line
+
+`stamper-cli` always runs the command line. `python -m stamper` does too whenever an option is given (add `--` before a lone file name to force it).
 
 ```powershell
 python -m stamper "D:\Returns\provider return.pdf" --set identifier=99-2026-999901 --set "doc_type=Report"
@@ -44,4 +55,4 @@ Exit codes: 0 saved, 1 unexpected error, 2 bad arguments, 3 config problem, 4 fi
 
 GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later), as required by PyMuPDF. See `LICENSE`. If you distribute a modified version, you must make your source available under the same license.
 
-The bundled Atkinson Hyperlegible Mono font is under the SIL Open Font License 1.1; see `assets/fonts/OFL.txt` and `assets/fonts/SOURCE.txt`.
+The bundled Atkinson Hyperlegible Mono and Atkinson Hyperlegible Next fonts are under the SIL Open Font License 1.1; see `assets/fonts/OFL.txt`, `assets/fonts/OFL-AtkinsonHyperlegibleNext.txt` and `assets/fonts/SOURCE.txt`.

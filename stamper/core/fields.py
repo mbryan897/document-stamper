@@ -9,9 +9,10 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import date
 from pathlib import PureWindowsPath
 
-from .config import Config, FieldSpec, FormatSpec
+from .config import Config, FieldSpec, FormatSpec, Profile
 from .patterns import PatternTest
 
 __all__ = [
@@ -19,6 +20,7 @@ __all__ = [
     "ValidationResult",
     "fold_dashes",
     "normalize",
+    "prefill_fields",
     "validate_field",
     "value_from_filename",
 ]
@@ -55,13 +57,17 @@ class ValidationResult:
 
     ``value`` is the normalized value (what gets stamped). ``format`` is the
     display name of the format that matched, if any. ``message`` is written
-    for the end user, for both valid and invalid values.
+    for the end user, for both valid and invalid values. ``date`` is the
+    calendar date a valid value encodes, when the matching format has a
+    year, month and day (``SOYYMMDD-######``), or the value of a ``date``
+    field; otherwise None. Callers decide what a future date means (O-003).
     """
 
     valid: bool
     value: str
     message: str
     format: str | None = None
+    date: date | None = None
 
 
 def _format_test(fmt: FormatSpec, value: str) -> PatternTest:
@@ -79,7 +85,10 @@ def _validate_text(spec: FieldSpec, value: str) -> ValidationResult:
     tests = [(fmt, _format_test(fmt, value)) for fmt in spec.formats]
     for fmt, t in tests:
         if t.ok:
-            return ValidationResult(True, value, f"Matches {fmt.display_name}.", fmt.display_name)
+            encoded = fmt.compiled.date_of(value) if fmt.compiled is not None else None
+            return ValidationResult(
+                True, value, f"Matches {fmt.display_name}.", fmt.display_name, encoded
+            )
     names = ", ".join(f.display_name for f in spec.formats)
     lead = (
         f"{spec.label} must match {names}."
@@ -125,7 +134,7 @@ def validate_field(config: Config, field_name: str, raw: str | None) -> Validati
             return ValidationResult(
                 False, value, f"Enter {spec.label.lower()} as a real date in the form {fmt.source}."
             )
-        return ValidationResult(True, fmt.format(parsed), "", fmt.source)
+        return ValidationResult(True, fmt.format(parsed), "", fmt.source, parsed)
 
     return _validate_text(spec, value)
 
@@ -162,3 +171,12 @@ def value_from_filename(config: Config, field_name: str, filename: str) -> str |
             if compiled.matches(candidate):
                 found.add(candidate)
     return found.pop() if len(found) == 1 else None
+
+
+def prefill_fields(config: Config, profile: Profile) -> list[str]:
+    """The profile's fields that are pre-filled from the filename (``from_filename``).
+
+    These are the fields whose value is dropped from the original-name part of
+    the suggested filename when it's already there (O-008).
+    """
+    return [f for f in profile.fields if config.fields[f].from_filename]

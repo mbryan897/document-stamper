@@ -118,3 +118,36 @@ def count_pixels(pix: pymupdf.Pixmap, rect: tuple[float, float, float, float], t
         row = data[y * stride + x0 * n: y * stride + x1 * n]
         total += sum(1 for r, g, b in zip(row[0::n], row[1::n], row[2::n]) if test(r, g, b))
     return total
+
+
+# ------------------------------------------------------------------ synthetic special files (Phase 3)
+# Same construction as the fixtures in test_pdf_handler.py, as plain
+# functions so the plan and GUI tests can build them too.
+
+
+def make_signed_pdf(corpus_dir: Path, path: Path, source: str = "acroform_filled.pdf") -> Path:
+    """A corpus file whose first form field becomes a filled signature field.
+
+    Tests detection and the confirmation flow, not cryptographic validity.
+    """
+    with pymupdf.open(corpus_dir / source) as d:
+        w = next(iter(d[0].widgets()))
+        sig = d.get_new_xref()
+        d.update_object(sig, "<</Type/Sig/Filter/Adobe.PPKLite/SubFilter/adbe.pkcs7.detached"
+                             "/Contents<00>/ByteRange[0 0 0 0]>>")
+        d.xref_set_key(w.xref, "FT", "/Sig")
+        d.xref_set_key(w.xref, "V", f"{sig} 0 R")
+        d.xref_set_key(d.pdf_catalog(), "AcroForm/SigFlags", "3")
+        d.save(path)
+    return path
+
+
+def make_xfa_pdf(corpus_dir: Path, path: Path) -> Path:
+    """The AcroForm corpus file with an /XFA entry added."""
+    with pymupdf.open(corpus_dir / "acroform_filled.pdf") as d:
+        x = d.get_new_xref()
+        d.update_object(x, "<<>>")
+        d.update_stream(x, b"<xdp:xdp xmlns:xdp='http://ns.adobe.com/xdp/'/>")
+        d.xref_set_key(d.pdf_catalog(), "AcroForm/XFA", f"{x} 0 R")
+        d.save(path)
+    return path

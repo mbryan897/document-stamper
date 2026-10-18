@@ -6,6 +6,7 @@ formats in tests/fixtures/records_sample.json.
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -244,3 +245,38 @@ def test_value_from_filename(records: Config, filename: str, expected: str | Non
 
 def test_prefill_only_for_fields_that_opt_in(records: Config) -> None:
     assert value_from_filename(records, "doc_title", "SO261017-999902.pdf") is None
+
+
+# ------------------------------------------------------------ encoded dates (O-003, D-069)
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("SO261017-999902", date(2026, 10, 17)),
+        ("SO621017-999902", date(2062, 10, 17)),  # the future-date typo case
+        ("SO000229-999902", date(2000, 2, 29)),
+        ("99-2026-999901", None),  # YYYY alone isn't a full date
+    ],
+)
+def test_validation_reports_encoded_date(records: Config, value: str, expected: date | None) -> None:
+    r = validate_field(records, "identifier", value)
+    assert r.valid
+    assert r.date == expected
+
+
+def test_invalid_value_has_no_date(records: Config) -> None:
+    r = validate_field(records, "identifier", "SO261332-999902")
+    assert not r.valid and r.date is None
+
+
+def test_date_field_reports_its_date(records: Config) -> None:
+    r = validate_field(records, "received", "10-17-2026")
+    assert r.valid and r.date == date(2026, 10, 17)
+
+
+def test_date_of_needs_year_month_and_day() -> None:
+    from stamper.core.patterns import compile_pattern
+
+    assert compile_pattern("MMDD-##").date_of("1017-12") is None
+    assert compile_pattern("YYYYMMDD").date_of("20261017") == date(2026, 10, 17)
+    assert compile_pattern("YYYYMMDD").date_of("20260230") is None
+    assert compile_pattern("YYYYMMDD").date_of("2026101") is None

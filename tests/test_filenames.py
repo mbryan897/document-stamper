@@ -12,8 +12,10 @@ from stamper.core.filenames import (
     build_filename,
     clean_part,
     is_reserved_name,
+    remove_value,
     suggest_filename,
 )
+from stamper.core.fields import prefill_fields
 
 FIXTURE = Path(__file__).parent / "fixtures" / "records_sample.json"
 ID = "SO261017-999902"
@@ -159,3 +161,69 @@ def test_output_identical_across_runs() -> None:
 def test_other_separator() -> None:
     name = build_filename([ID, "Court order"], separator=" - ", original_name=None)
     assert name == f"{ID} - Court-order.pdf"
+
+
+# ------------------------------------------------------------ repeated identifier (O-008, D-067)
+@pytest.mark.parametrize(
+    ("original", "value", "expected"),
+    [
+        ("SO261017-999902_provider_return", ID, "provider_return"),
+        ("provider_return_99-2026-999901", "99-2026-999901", "provider_return"),
+        ("provider SO261017-999902 return", ID, "provider return"),
+        ("so261017\u2013999902_return", ID, "return"),  # case and en dash folded
+        ("SO261017-999902_copy_of_SO261017-999902", ID, "copy_of"),
+        ("SO261017-999902", ID, ""),
+        # whole values only (D-040 boundaries)
+        ("XSO261017-999902_return", ID, "XSO261017-999902_return"),
+        ("SO261017-9999021_return", ID, "SO261017-9999021_return"),
+        # not there, or nothing to remove
+        ("provider_return", ID, "provider_return"),
+        ("provider_return", "", "provider_return"),
+    ],
+)
+def test_remove_value(original: str, value: str, expected: str) -> None:
+    assert remove_value(original, value) == expected
+
+
+def _records():
+    cfg = load_config(FIXTURE)
+    return cfg, cfg.default_profile
+
+
+@pytest.mark.parametrize(
+    ("filename", "identifier", "expected"),
+    [
+        # both corpus case-number filenames
+        ("SO261017-999902_provider_return.pdf", ID, f"{ID}_Search-warrant-return_provider_return.pdf"),
+        ("provider_return_99-2026-999901.pdf", "99-2026-999901",
+         "99-2026-999901_Search-warrant-return_provider_return.pdf"),
+        # a different number than the filename's: the original name keeps its own
+        ("provider_return_99-2026-999901.pdf", ID,
+         f"{ID}_Search-warrant-return_provider_return_99-2026-999901.pdf"),
+        # nothing left of the original name: that part is dropped
+        ("SO261017-999902.pdf", ID, f"{ID}_Search-warrant-return.pdf"),
+    ],
+)
+def test_suggest_drops_repeated_identifier(filename: str, identifier: str, expected: str) -> None:
+    cfg, prof = _records()
+    vals = {"identifier": identifier, "doc_type": "Search warrant return"}
+    assert suggest_filename(prof, vals, filename, dedupe=prefill_fields(cfg, prof)) == expected
+
+
+def test_dedupe_only_for_ticked_prefill_fields() -> None:
+    cfg, prof = _records()
+    vals = {"identifier": ID, "doc_type": "Search warrant return"}
+    # identifier not ticked: it stays in the original name, so it isn't lost
+    assert suggest_filename(prof, vals, f"{ID}_return.pdf", ticked=["doc_type"],
+                            dedupe=prefill_fields(cfg, prof)) == f"Search-warrant-return_{ID}_return.pdf"
+    # doc_type isn't a from_filename field: "Return" isn't removed from provider_return
+    vals = {"identifier": ID, "doc_type": "Return"}
+    assert suggest_filename(prof, vals, "provider_return.pdf",
+                            dedupe=prefill_fields(cfg, prof)) == f"{ID}_Return_provider_return.pdf"
+    # without dedupe the Phase 1 behaviour is unchanged
+    assert suggest_filename(prof, vals, f"{ID}_x.pdf") == f"{ID}_Return_{ID}_x.pdf"
+
+
+def test_prefill_fields() -> None:
+    cfg, prof = _records()
+    assert prefill_fields(cfg, prof) == ["identifier"]

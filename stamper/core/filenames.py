@@ -22,6 +22,12 @@ Rules
   ``COM1``, ``LPT¹`` ...) gets ``_`` appended to its base.
 - If nothing is left, the name falls back to ``<original>_stamped``, then
   ``document``.
+- A ticked value that the original name already contains is removed from the
+  original-name part, for the fields the caller names (those with
+  ``from_filename``, D-067): matched as a whole value between non-letters and
+  non-digits, ignoring ASCII case and dash look-alikes (D-040), and removed
+  with one neighbouring run of ``_``, ``-`` or spaces. If nothing is left of
+  the original name, that part is dropped.
 
 The same inputs always give the same name.
 """
@@ -43,6 +49,7 @@ __all__ = [
     "build_filename",
     "clean_part",
     "is_reserved_name",
+    "remove_value",
     "suggest_filename",
 ]
 
@@ -57,6 +64,7 @@ _RESERVED = frozenset(
 _HYPHEN_RUN = re.compile(r"-{2,}")
 _WHITESPACE = re.compile(r"\s+")
 _MIN_PART = 8  # don't shorten a part below this unless nothing else works
+_JOINERS = "_- "  # what may sit between a removed value and the rest of the name
 
 
 def _len16(text: str) -> int:
@@ -167,6 +175,41 @@ def build_filename(
     return stem + ext
 
 
+def _fold(text: str) -> str:
+    """Dash look-alikes to ``-`` and ASCII letters to upper case, length kept."""
+    from .fields import fold_dashes  # late import: fields imports config, which imports this
+
+    return "".join(c.upper() if c.isascii() else c for c in fold_dashes(text))
+
+
+def remove_value(original: str, value: str) -> str:
+    """The original name with every whole occurrence of ``value`` taken out.
+
+    Each occurrence goes with one neighbouring run of ``_``, ``-`` or spaces:
+    the run after it when it starts the name, otherwise the run before it.
+    Returns ``original`` unchanged when the value isn't there.
+    """
+    if not value.strip():
+        return original
+    folded = _fold(original)
+    needle = re.escape(_fold(value.strip()))
+    rx = re.compile(rf"(?<![A-Za-z0-9]){needle}(?![A-Za-z0-9])", re.ASCII)
+    spans = [m.span() for m in rx.finditer(folded)]
+    if not spans:
+        return original
+    out = original
+    for start, end in reversed(spans):
+        left, right = start, end
+        while left > 0 and out[left - 1] in _JOINERS:
+            left -= 1
+        if left == 0:
+            left = start
+            while right < len(out) and out[right] in _JOINERS:
+                right += 1
+        out = out[:left] + out[right:]
+    return out.strip(_JOINERS)
+
+
 def suggest_filename(
     profile: Profile,
     values: Mapping[str, str],
@@ -174,19 +217,29 @@ def suggest_filename(
     *,
     ticked: Sequence[str] | None = None,
     max_length: int = MAX_FILENAME_LENGTH,
+    dedupe: Sequence[str] = (),
 ) -> str:
     """Suggested name for a stamped copy, using a profile's ``output_name``.
 
     ``values`` holds normalized field values plus ``date`` if it's ticked.
     ``ticked`` is the File name selector's choice, in order; None means the
     profile's defaults. The extension comes from ``original_filename``.
+    ``dedupe`` names fields whose ticked value is removed from the original
+    name when it's already there (O-008); pass ``prefill_fields(...)``.
     """
     src = PureWindowsPath(original_filename)
     chosen = profile.output_name.fields if ticked is None else ticked
+    original: str | None = None
+    if profile.output_name.include_original_name:
+        original = src.stem
+        for f in chosen:
+            if f in dedupe:
+                original = remove_value(original, values.get(f, ""))
+        original = original or None
     return build_filename(
         [values.get(f, "") for f in chosen],
         separator=profile.output_name.separator,
-        original_name=src.stem if profile.output_name.include_original_name else None,
+        original_name=original,
         extension=src.suffix or ".pdf",
         max_length=max_length,
         fallback_name=src.stem,
