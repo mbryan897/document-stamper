@@ -61,7 +61,7 @@ General → "Add to the Send to menu" puts Document Stamper in Explorer's right-
 This makes two unsigned test builds:
 
 - `dist\DocumentStamper.exe`: one file that runs by itself from any folder or drive. Each launch unpacks its support files to a temporary folder first, so it takes a few seconds to open. Put `config.json` next to it to carry your profiles with it.
-- `dist\DocumentStamper\`: the folder build (fallback if antivirus objects to the one-file exe). Copy the whole folder; it holds `DocumentStamper.exe`, `stamper-cli.exe` for scripts, and `_internal\`.
+- `dist\DocumentStamper-folder\`: the folder build (fallback if antivirus objects to the one-file exe). Copy the whole folder; its `DocumentStamper.exe` is a small launcher that needs `_internal\` beside it. It also holds `stamper-cli.exe` for scripts.
 
 Run the build from a normal (not administrator) terminal.
 

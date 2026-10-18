@@ -1,4 +1,8 @@
-# PyInstaller spec: the DocumentStamper folder (D-087), kept as a fallback (D-092).
+# PyInstaller spec: the DocumentStamper-folder build (D-087), kept as a fallback (D-092).
+#
+# Output: dist\DocumentStamper-folder\. Its DocumentStamper.exe is only a small
+# launcher for _internal\ and does NOT run on its own; for a single file that
+# runs by itself use dist\DocumentStamper.exe (stamper-onefile.spec).
 #
 #   DocumentStamper.exe  windowed; the drop screen, drag onto it, Send to
 #   stamper-cli.exe      console; the command line for scripts
@@ -46,5 +50,5 @@ COLLECT(  # noqa: F821
     cli.binaries,
     cli.datas,
     upx=False,
-    name="DocumentStamper",
+    name="DocumentStamper-folder",
 )

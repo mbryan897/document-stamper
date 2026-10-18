@@ -2,12 +2,16 @@
 #   .\packaging\build.ps1
 #
 #   dist\DocumentStamper.exe   one file; runs by itself from any folder or drive
-#   dist\DocumentStamper\      folder fallback: DocumentStamper.exe + stamper-cli.exe + _internal\
+#   dist\DocumentStamper-folder\  folder fallback: DocumentStamper.exe + stamper-cli.exe + _internal\
+#                               (copy the whole folder; its exe does not run on its own)
 #
 # Unsigned test builds. Run from a normal (not administrator) terminal.
 
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path -Parent $PSScriptRoot)
+
+# The folder build used to be dist\DocumentStamper\; remove it so its small exe can't be mistaken for the one-file exe.
+if (Test-Path "dist\DocumentStamper" -PathType Container) { Remove-Item "dist\DocumentStamper" -Recurse -Force }
 
 foreach ($spec in "packaging\stamper-onefile.spec", "packaging\stamper.spec") {
     python -m PyInstaller --noconfirm --clean --distpath dist --workpath build $spec
@@ -15,7 +19,7 @@ foreach ($spec in "packaging\stamper-onefile.spec", "packaging\stamper.spec") {
 }
 
 $one = Join-Path (Get-Location) "dist\DocumentStamper.exe"
-$folder = Join-Path (Get-Location) "dist\DocumentStamper"
+$folder = Join-Path (Get-Location) "dist\DocumentStamper-folder"
 if (-not (Test-Path $one)) { throw "dist\DocumentStamper.exe is missing." }
 foreach ($exe in "DocumentStamper.exe", "stamper-cli.exe") {
     if (-not (Test-Path (Join-Path $folder $exe))) { throw "$exe is missing from $folder." }
