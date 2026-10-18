@@ -15,8 +15,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import QUrl
-from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QFileDialog, QInputDialog, QLineEdit, QMessageBox, QWidget
+from PySide6.QtGui import QColor, QDesktopServices
+from PySide6.QtWidgets import (
+    QColorDialog,
+    QFileDialog,
+    QInputDialog,
+    QLineEdit,
+    QMessageBox,
+    QWidget,
+)
 
 __all__ = ["Services", "native_services"]
 
@@ -30,7 +37,8 @@ class Services:
     in the suggested file's folder with its name filled in.
     ``confirm(parent, title, text, yes_label)`` returns True for the yes button.
     ``ask_import_file`` and ``ask_export_path`` pick config files for
-    Profile settings (Phase 4).
+    Profile settings (Phase 4). ``ask_color(parent, current)`` opens the color
+    wheel and returns ``#RRGGBB`` (D-094).
     """
 
     ask_open_file: Callable[[QWidget, Path | None], Path | None]
@@ -42,6 +50,7 @@ class Services:
     confirm: Callable[[QWidget, str, str, str], bool] = lambda *_a: False
     ask_import_file: Callable[[QWidget], Path | None] = lambda _p: None
     ask_export_path: Callable[[QWidget, Path], Path | None] = lambda _p, _s: None
+    ask_color: Callable[[QWidget, str], str | None] = lambda _p, _c: None
 
 
 def _ask_open_file(parent: QWidget, start: Path | None) -> Path | None:
@@ -102,6 +111,11 @@ def _ask_export_path(parent: QWidget, suggested: Path) -> Path | None:
     return path if path.suffix.lower() == ".json" else path.with_name(path.name + ".json")
 
 
+def _ask_color(parent: QWidget, current: str) -> str | None:
+    color = QColorDialog.getColor(QColor(current), parent, "Choose a stamp color")
+    return color.name().upper() if color.isValid() else None
+
+
 def _open_file(path: Path) -> None:
     if sys.platform == "win32":
         os.startfile(path)  # type: ignore[attr-defined]  # the user's PDF viewer
@@ -129,4 +143,5 @@ def native_services() -> Services:
         confirm=_confirm,
         ask_import_file=_ask_import_file,
         ask_export_path=_ask_export_path,
+        ask_color=_ask_color,
     )

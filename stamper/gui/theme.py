@@ -1,4 +1,4 @@
-"""Colours and the application style sheet.
+"""Colors and the application style sheet.
 
 Cool blue-grey ground, white surfaces. Stamp-ink blue is kept for what ends
 up on the document and for the main action; amber is for warnings.
@@ -160,4 +160,8 @@ QToolButton#insert:focus {{ border: 3px solid {_C["ink"]}; }}
 QMenu {{ background: {_C["surface"]}; border: 1px solid {_C["border"]}; padding: 4px; }}
 QMenu::item {{ padding: 6px 18px; }}
 QMenu::item:selected {{ background: {_C["ink_tint"]}; }}
+QFrame#colorPanel {{ background: {_C["surface"]}; }}
+QToolButton#swatch {{ padding: 2px; border: 1.5px solid transparent; border-radius: 5px; }}
+QToolButton#swatch:hover {{ border-color: {_C["border_strong"]}; }}
+QToolButton#swatch:focus {{ border-color: {_C["ink"]}; }}
 """

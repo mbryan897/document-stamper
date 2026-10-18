@@ -78,7 +78,7 @@ FONT_FILE = "AtkinsonHyperlegibleMono-Regular.ttf"
 FONT_RESOURCE = "StampMono"  # resource name inside each page
 BOX_PADDING_PT = 2.5  # white space between the text and the box edge
 SHRINK_STEP_PT = 0.5
-PREVIEW_OUTLINE_RGB = (0.85, 0.55, 0.0)  # amber, the interface's warning colour
+PREVIEW_OUTLINE_RGB = (0.85, 0.55, 0.0)  # amber, the interface's warning color
 _EPS = 1e-6
 
 

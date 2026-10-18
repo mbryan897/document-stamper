@@ -22,7 +22,7 @@ The first stamp keeps its template with that part removed and the separator
 touching it trimmed, as D-041 tidies an empty value: the run on its left, or
 the run on its right when nothing precedes it. The new stamp gets the part's
 text exactly, at the chosen bottom anchor, along the top, with the original
-stamp's size, colour, margin and box.
+stamp's size, color, margin and box.
 
 Nothing here imports Qt.
 """

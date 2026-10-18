@@ -64,6 +64,7 @@ from ..core.patterns import PatternError, explain, parse_date_format
 from ..core.template import BUILTIN_TOKENS, TemplateError, builtin_values, render
 from ..handlers.base import StampJob
 from ..handlers.pdf import same_file, write_sample_page
+from .color_picker import ColorButton, light_color_note
 from .config_draft import ConfigDraft, DraftRefused, diff_summary, sample_values
 from .engine import EngineClient, EngineFailure
 from .services import Services
@@ -427,16 +428,14 @@ class StampEditor(QFrame):
         self.size.setSuffix(" pt")
         self.size.setValue(float(data.get("font_size_pt", 9.0)))
         self.size.valueChanged.connect(lambda v: self._set("font_size_pt", round(v, 1)))
-        self.color = QLineEdit(data.get("color", "#2B3A8F"))
-        self.color.setObjectName("code")
-        self.color.setMaxLength(7)
-        self.color.textEdited.connect(lambda t: self._set("color", t.strip(), debounce=True))
+        self.color = ColorButton(data.get("color", "#2B3A8F"), page.owner.services.ask_color)
+        self.color.changed.connect(self._color_changed)
         self.box = QCheckBox("White box behind the stamp")
         self.box.setChecked(bool(data.get("background_box", True)))
         self.box.toggled.connect(lambda on: self._set("background_box", on))
         for r, (text, w) in enumerate((("Position", self.anchor), ("Direction", self.direction),
                                         ("Margin", self.margin), ("Text size", self.size),
-                                        ("Colour", self.color))):
+                                        ("Color", self.color))):
             lab = _label(text, "muted", wrap=False)
             lab.setBuddy(w)
             w.setAccessibleName(f"Stamp {index + 1} {text.lower()}")
@@ -446,6 +445,9 @@ class StampEditor(QFrame):
         grid.setColumnStretch(1, 1)
         grid.setColumnStretch(3, 1)
         lay.addLayout(grid)
+        self.color_note = _label("", "msgBad")
+        lay.addWidget(self.color_note)
+        self._show_color_note()
 
     def _insert_menu(self) -> QMenu:
         menu = QMenu(self)
@@ -465,6 +467,15 @@ class StampEditor(QFrame):
             self.text.setCursorPosition(self.text.cursorPosition() - back)
         self.text.setFocus()
         self._text_edited(self.text.text())
+
+    def _color_changed(self, hex_color: str) -> None:
+        self._set("color", hex_color)
+        self._show_color_note()
+
+    def _show_color_note(self) -> None:
+        note = light_color_note(self.color.color())
+        self.color_note.setText(note)
+        self.color_note.setVisible(bool(note))
 
     def _text_edited(self, text: str) -> None:
         self._set("text", text, debounce=True)
