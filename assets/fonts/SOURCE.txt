@@ -1,0 +1,15 @@
+Atkinson Hyperlegible Mono, Regular (static cut)
+
+Source:   https://github.com/googlefonts/atkinson-hyperlegible-next-mono
+Commit:   154d50362016cc3e873eb21d242cd0772384c8f9 (2024-11-20)
+Files:    fonts/ttf/AtkinsonHyperlegibleMono-Regular.ttf
+          OFL.txt
+License:  SIL Open Font License 1.1 (OFL.txt, beside this file)
+
+SHA-256
+  AtkinsonHyperlegibleMono-Regular.ttf  2c9a7b9fabebd5c746a808d8a1ef2f52e618850caad6ec4fd9f5c48f56e1c1af
+  OFL.txt                               1ebb31cf7393164f20d10c1d48406cddb5314feff8465531cf1e4ba37e9dd740
+
+Fetch or re-fetch with tools\fetch_font.ps1, which checks both hashes.
+The font is embedded in every stamped PDF (D-006, D-057). Documents made
+with the font are not covered by the OFL's distribution conditions.

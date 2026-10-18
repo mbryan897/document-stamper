@@ -27,9 +27,17 @@ Built by `tools/make_corpus.py` with PyMuPDF. `pytest` builds any that are missi
 
 Case numbers in filenames are fabricated (9999xx suffixes) and only need to match the format.
 
+## Built inside the tests (Phase 2)
+
+`tests/test_pdf_handler.py` derives three more files from the corpus in a temp folder on every run, so detection is always tested even without hand-made samples:
+
+- **Signature-shaped field:** the AcroForm file with one field turned into a filled `/Sig` field and `SigFlags 3`. Tests detection and the confirmation flow, not cryptographic validity.
+- **XFA:** the AcroForm file with an `/XFA` stream added to the AcroForm dictionary.
+- **Damaged:** `letter_portrait.pdf` with its `startxref` offset broken, which MuPDF repairs on open.
+
 ## Files to add by hand
 
-These can't be produced well with PyMuPDF alone. Put them in `tests/corpus/manual/` once made, and only commit them if they contain nothing but placeholder text.
+These can't be produced well with PyMuPDF alone. Put them in `tests/corpus/manual/` once made, and only commit them if they contain nothing but placeholder text. `test_manual_samples` uses them when present and skips with a reason when they aren't.
 
 ### Digitally signed PDF (`signed.pdf`)
 - Make a placeholder PDF with the generator, then sign it with a **self-signed test certificate**, never an agency or personal certificate.
@@ -42,7 +50,7 @@ These can't be produced well with PyMuPDF alone. Put them in `tests/corpus/manua
 - Expected: clear error naming XFA as unsupported.
 
 ### Damaged file (`damaged_xref.pdf`)
-- Derive from a generated file: copy `letter_portrait.pdf`, then corrupt the cross-reference data, e.g. overwrite the `startxref` offset with a wrong number, or truncate the last few hundred bytes so the trailer is gone. A short script in `tools/` can do this reproducibly when Phase 2 needs it.
+- Derive from a generated file: copy `letter_portrait.pdf`, then corrupt the cross-reference data, e.g. overwrite the `startxref` offset with a wrong number, or truncate the last few hundred bytes so the trailer is gone.
 - Expected: repaired by PyMuPDF and stamped, or a clear error.
 
 ### Large file by size (200+ MB)

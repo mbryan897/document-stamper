@@ -1,25 +1,30 @@
-"""Entry point for ``python -m stamper``. Phase 0: print the version and exit."""
+"""Entry point for ``python -m stamper`` and ``stamper.exe``.
+
+With arguments, runs the command line. With none, prints a short usage
+message; the window arrives in Phase 3.
+"""
 
 from __future__ import annotations
 
 import sys
-from importlib.metadata import PackageNotFoundError, version
+from collections.abc import Sequence
 
-DIST_NAME = "document-stamper"
+from .cli import build_parser, get_version
+from .cli import main as cli_main
 
-
-def get_version() -> str:
-    """Return the installed package version, or a marker if not installed."""
-    try:
-        return version(DIST_NAME)
-    except PackageNotFoundError:
-        return "0+unknown (not installed; run: python -m pip install -e .)"
+__all__ = ["get_version", "main"]
 
 
-def main() -> int:
-    """Print the program name and version."""
-    print(f"Document Stamper {get_version()}")
-    return 0
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run the command line, or print usage when there are no arguments."""
+    args = list(sys.argv[1:] if argv is None else argv)
+    if not args:
+        parser = build_parser()
+        sys.stdout.write(f"Document Stamper {get_version()}\n")
+        parser.print_usage(sys.stdout)
+        sys.stdout.write("Run stamper --help for all options. The window isn't available yet.\n")
+        return 0
+    return cli_main(args)
 
 
 if __name__ == "__main__":
