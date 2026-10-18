@@ -38,7 +38,10 @@ class Services:
     ``confirm(parent, title, text, yes_label)`` returns True for the yes button.
     ``ask_import_file`` and ``ask_export_path`` pick config files for
     Profile settings (Phase 4). ``ask_color(parent, current)`` opens the color
-    wheel and returns ``#RRGGBB`` (D-094).
+    wheel and returns ``#RRGGBB`` (D-094). ``ask_open_files(parent, start)``
+    picks one or more PDFs for "Choose files…" (D-109); None in a test's
+    Services falls back to ``ask_open_file``. ``ask_folder(parent, start)``
+    picks the output folder for a batch (D-110).
     """
 
     ask_open_file: Callable[[QWidget, Path | None], Path | None]
@@ -51,11 +54,24 @@ class Services:
     ask_import_file: Callable[[QWidget], Path | None] = lambda _p: None
     ask_export_path: Callable[[QWidget, Path], Path | None] = lambda _p, _s: None
     ask_color: Callable[[QWidget, str], str | None] = lambda _p, _c: None
+    ask_open_files: Callable[[QWidget, Path | None], list[Path] | None] | None = None
+    ask_folder: Callable[[QWidget, Path], Path | None] = lambda _p, _s: None
 
 
 def _ask_open_file(parent: QWidget, start: Path | None) -> Path | None:
     name, _ = QFileDialog.getOpenFileName(
         parent, "Choose a PDF to stamp", str(start or ""), "PDF files (*.pdf)")
+    return Path(name) if name else None
+
+
+def _ask_open_files(parent: QWidget, start: Path | None) -> list[Path] | None:
+    names, _ = QFileDialog.getOpenFileNames(
+        parent, "Choose PDFs to stamp", str(start or ""), "PDF files (*.pdf)")
+    return [Path(n) for n in names] if names else None
+
+
+def _ask_folder(parent: QWidget, start: Path) -> Path | None:
+    name = QFileDialog.getExistingDirectory(parent, "Save the stamped copies in", str(start))
     return Path(name) if name else None
 
 
@@ -144,4 +160,6 @@ def native_services() -> Services:
         ask_import_file=_ask_import_file,
         ask_export_path=_ask_export_path,
         ask_color=_ask_color,
+        ask_open_files=_ask_open_files,
+        ask_folder=_ask_folder,
     )

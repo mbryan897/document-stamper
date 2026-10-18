@@ -30,8 +30,8 @@ def make_app() -> QApplication:
 def run_window(files: Sequence[Path] = ()) -> int:
     """Show the window and run until it's closed; returns the exit code.
 
-    No files: the drop screen. One file: its stamp dialog. Several: the drop
-    screen with a message, since batch stamping is out of scope.
+    No files: the drop screen. One file: its stamp dialog. Several: the files
+    screen, to order them and choose Combine or Batch (D-100).
     """
     app = make_app()
     window = MainWindow()

@@ -242,16 +242,16 @@ class StampDialog(QWidget):
         lay.setSpacing(12)
 
         head = QHBoxLayout()
-        name = QLabel(self.path.name)
+        head_name, head_meta = self._head_texts()
+        name = QLabel(head_name)
         name.setObjectName("fileName")
         name.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         name.setMinimumWidth(60)
         name.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        size_mb = self.path.stat().st_size / (1024 * 1024) if self.path.exists() else 0.0
-        pages = "1 page" if self.info.page_count == 1 else f"{self.info.page_count} pages"
-        size = f"{size_mb:.1f} MB" if size_mb >= 0.1 else "under 0.1 MB"
-        meta = QLabel(f"{pages}, {size}")
+        self.head_name = name
+        meta = QLabel(head_meta)
         meta.setObjectName("muted")
+        self.head_meta = meta
         head.addWidget(name, 1)
         head.addWidget(meta)
         head.addSpacing(12)
@@ -276,6 +276,7 @@ class StampDialog(QWidget):
         head.addWidget(self.page_label)
         head.addWidget(self.next_button)
         lay.addLayout(head)
+        self._extend_head(lay)
 
         well = QFrame()
         well.setObjectName("previewWell")
@@ -296,12 +297,47 @@ class StampDialog(QWidget):
         well_lay.addWidget(self.preview, 1)
         well_lay.addWidget(self.preview_holder, 1)
         self.preview_well = well
-        lay.addWidget(well, 1)
+        lay.addWidget(self._wrap_well(well), 1)
 
         hint = QLabel("The amber dashed line shows what the stamp covers. It isn't printed.")
         hint.setObjectName("muted")
         lay.addWidget(hint)
         return box
+
+    # Hooks for the multi-file dialogs (D-108); single-file behaviour is the default.
+
+    def _head_texts(self) -> tuple[str, str]:
+        """The file name and the "N pages, size" line above the preview."""
+        size_mb = self.path.stat().st_size / (1024 * 1024) if self.path.exists() else 0.0
+        pages = "1 page" if self.info.page_count == 1 else f"{self.info.page_count} pages"
+        size = f"{size_mb:.1f} MB" if size_mb >= 0.1 else "under 0.1 MB"
+        return self.path.name, f"{pages}, {size}"
+
+    def _extend_head(self, layout: QVBoxLayout) -> None:
+        """Add widgets under the preview header (none for one file)."""
+
+    def _wrap_well(self, well: QFrame) -> QWidget:
+        """The widget holding the preview well (the well itself for one file)."""
+        return well
+
+    def _title_text(self) -> str:
+        return "Stamp this document"
+
+    def _name_source(self) -> str:
+        """The original file name the suggested name is built from."""
+        return self.path.name
+
+    def _accept_flags(self) -> tuple[bool, bool]:
+        """``(accept_signature_loss, accept_restrictions)`` for the save."""
+        return (bool(self.signature_tick and self.signature_tick.isChecked()),
+                bool(self.restriction_tick and self.restriction_tick.isChecked()))
+
+    def _save_folder(self) -> Path:
+        """The folder Save As starts in."""
+        return self.path.parent
+
+    def _progress_text(self, done: int, total: int) -> str:
+        return f"Stamping page {done + 1} of {total}…"
 
     def _build_panel(self) -> QWidget:
         panel = QWidget()
@@ -322,7 +358,7 @@ class StampDialog(QWidget):
         form.setSpacing(18)
         self.form = body
 
-        title = QLabel("Stamp this document")
+        title = QLabel(self._title_text())
         title.setObjectName("h1")
         sub = QLabel(f"Profile: {self.profile.name}")
         sub.setObjectName("muted")
@@ -734,7 +770,7 @@ class StampDialog(QWidget):
     def suggested_name(self) -> str:
         """The suggested file name for the stamped copy (D-016, D-067)."""
         values = {**self.values(), "date": self.config.settings.date_formatter.format(self.today)}
-        return suggest_filename(self.profile, values, self.path.name, ticked=self.ticked(),
+        return suggest_filename(self.profile, values, self._name_source(), ticked=self.ticked(),
                                 dedupe=prefill_fields(self.config, self.profile))
 
     def _update_name(self) -> None:
@@ -1033,7 +1069,7 @@ class StampDialog(QWidget):
     def _save(self) -> None:
         if not self.save_button.isEnabled():
             return
-        suggested = self.path.parent / self.suggested_name()
+        suggested = self._save_folder() / self.suggested_name()
         out = self.services.ask_save_path(self, suggested)
         if out is None:
             return
@@ -1053,14 +1089,15 @@ class StampDialog(QWidget):
         self.save_error.hide()
         self.progress.setRange(0, self.info.page_count)
         self.progress.setValue(0)
-        self.progress_label.setText(f"Stamping page 1 of {self.info.page_count}…")
+        self.progress_label.setText(self._progress_text(0, self.info.page_count))
         self.progress_row.show()
         self.cancel_button.setEnabled(True)
         self._update_button()
+        accept_signature, accept_restrictions = self._accept_flags()
         self.engine.apply(ApplyRequest(
             path=self.path, job=self.job(), out_path=out, password=self.password,
-            accept_signature_loss=bool(self.signature_tick and self.signature_tick.isChecked()),
-            accept_restrictions=bool(self.restriction_tick and self.restriction_tick.isChecked()),
+            accept_signature_loss=accept_signature,
+            accept_restrictions=accept_restrictions,
         ))
 
     def _cancel_save(self) -> None:
@@ -1078,7 +1115,7 @@ class StampDialog(QWidget):
             self.progress_label.setText("Saving…")
             self.cancel_button.setEnabled(False)
         else:
-            self.progress_label.setText(f"Stamping page {done + 1} of {total}…")
+            self.progress_label.setText(self._progress_text(done, total))
 
     def _end_save(self) -> None:
         self.saving = False

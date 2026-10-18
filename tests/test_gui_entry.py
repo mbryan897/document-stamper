@@ -10,7 +10,7 @@ import pytest
 from pytestqt.qtbot import QtBot
 
 import stamper.__main__ as entry
-from stamper.gui.main_window import MainWindow, several_files_message
+from stamper.gui.main_window import MainWindow
 from tests.gui_support import FakeServices, fake, open_dialog, window  # noqa: F401 - fixtures
 from tests.stamping import RECORDS_CONFIG, make_xfa_pdf
 
@@ -84,11 +84,11 @@ def test_stamper_cli_entry_point_always_runs_the_cli(corpus_dir: Path, tmp_path:
 # ------------------------------------------------------------ the drop screen
 
 
-def test_several_files_message(qtbot: QtBot, window: MainWindow, corpus_dir: Path) -> None:
+def test_several_files_open_the_files_screen(qtbot: QtBot, window: MainWindow, corpus_dir: Path) -> None:
+    # Replaces the D-063 refusal (Phase 4.5, D-100): several files go to the files screen.
     window.open_files([corpus_dir / "letter_portrait.pdf", corpus_dir / "rotate_90.pdf"])
-    assert window.stack.currentWidget() is window.drop
-    assert window.drop.message.text() == several_files_message(2)
-    assert several_files_message(2) == "Drop one file at a time. 2 files were dropped; none were opened."
+    qtbot.waitUntil(lambda: window.stack.currentWidget() is window.files_screen, timeout=15000)
+    assert [p.name for p in window.files_screen.paths()] == ["letter_portrait.pdf", "rotate_90.pdf"]
 
 
 def test_not_a_pdf(qtbot: QtBot, window: MainWindow, tmp_path: Path) -> None:

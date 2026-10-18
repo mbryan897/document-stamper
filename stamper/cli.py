@@ -1,5 +1,10 @@
 """Command line: ``stamper INPUT.pdf --set identifier=... [options]``.
 
+Several files need a mode (D-112): ``stamper --combine A.pdf B.pdf --out X.pdf``
+makes one stamped file from them in the order given; ``stamper --batch A.pdf
+B.pdf --out-dir D`` stamps each one separately. Without a mode, several files
+are refused with exit code 2, as before.
+
 Every argument works the same in PowerShell and cmd: no commas, braces or
 ``@`` in the syntax. Quote a whole ``--set`` argument when its value has
 spaces: ``--set "doc_type=Search warrant return"``.
@@ -16,7 +21,7 @@ import argparse
 import getpass
 import os
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import date
 from enum import IntEnum
 from pathlib import Path
@@ -26,10 +31,12 @@ from .core.config import Config, ConfigError, Profile, load_config
 from .core.fields import prefill_fields, validate_field, value_from_filename
 from .core.filenames import suggest_filename
 from .core.locations import builtin_config_path, find_config
+from .core.multi import agree_from_filenames, combined_original_name, disagreement_note
 from .core.patterns import parse_date_format
 from .handlers.base import (
     Cancelled,
     ConfirmationRequired,
+    DocumentInfo,
     MissingGlyph,
     OutputRefused,
     PasswordRequired,
@@ -39,10 +46,13 @@ from .handlers.base import (
     UnsupportedDocument,
     WrongPassword,
 )
-from .handlers.pdf import PdfHandler
+from .handlers.batch import BatchItem, BatchOutcome, Status, check_batch, run_batch
+from .handlers.combine import CombineInput, combine_pdfs
+from .handlers.pdf import PdfHandler, same_file
 
 __all__ = [
-    "ExitCode", "build_parser", "default_config_path", "get_version", "located_config_path", "main",
+    "ExitCode", "batch_exit_code", "build_parser", "default_config_path", "get_version",
+    "located_config_path", "main", "several_files_usage",
 ]
 
 DIST_NAME = "document-stamper"
@@ -61,6 +71,7 @@ class ExitCode(IntEnum):
     CONFIRM = 7
     OUTPUT_REFUSED = 8
     DOES_NOT_FIT = 9
+    PARTIAL = 10  # a batch saved some files but not all (D-112)
     INTERRUPTED = 130
 
 
@@ -102,11 +113,23 @@ def build_parser() -> argparse.ArgumentParser:
             '--set "doc_type=Search warrant return"\n\n'
             "Exit codes: 0 saved, 1 unexpected error, 2 bad arguments, 3 config problem, "
             "4 field values invalid, 5 file can't be stamped, 6 password missing or wrong, "
-            "7 confirmation flag needed, 8 output refused, 9 stamp doesn't fit."
+            "7 confirmation flag needed, 8 output refused, 9 stamp doesn't fit, "
+            "10 a batch saved some files but not all.\n\n"
+            "Several files:\n"
+            "  stamper --combine A.pdf B.pdf C.pdf --out exhibit.pdf --set identifier=...\n"
+            "    one stamped file, pages in the order the files are given\n"
+            "  stamper --batch A.pdf B.pdf --out-dir D:\\Stamped --set identifier=...\n"
+            "    one stamped copy of each file\n"
+            "  --password-for FILE PASSWORD gives one file's password (repeat for each file)."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("input", type=Path, help="the PDF to stamp")
+    p.add_argument("input", type=Path, nargs="+", help="the PDF to stamp (several with --combine or --batch)")
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument("--combine", action="store_true",
+                      help="combine several PDFs, in the order given, into one stamped file")
+    mode.add_argument("--batch", action="store_true",
+                      help="stamp each of several PDFs, saving one stamped copy of each")
     p.add_argument("--set", dest="sets", action="append", default=[], metavar="NAME=VALUE",
                    help="a field value, e.g. identifier=99-2026-999901 (repeat for each field)")
     p.add_argument("--profile", help="profile name (default: the config's default profile)")
@@ -123,6 +146,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="read the PDF password from this environment variable")
     pw.add_argument("--password-stdin", action="store_true",
                     help="read the PDF password from the first line of standard input")
+    p.add_argument("--password-for", dest="passwords_for", nargs=2, action="append", default=[],
+                   metavar=("FILE", "PASSWORD"),
+                   help="with --combine or --batch: the password for one file (repeat for each)")
     p.add_argument("--no-box", action="store_true", help="don't draw the white box behind the stamp")
     p.add_argument("--accept-signature-loss", action="store_true",
                    help="stamp a digitally signed file; the copy's signature won't validate")
@@ -136,6 +162,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--quiet", action="store_true", help="print only errors")
     p.add_argument("--version", action="version", version=f"Document Stamper {get_version()}")
     return p
+
+
+Say = Callable[[str], None]
 
 
 class _Fail(Exception):
@@ -173,7 +202,7 @@ def _get_password(args: argparse.Namespace, stdin: TextIO) -> str | None:
     return None
 
 
-def _run(args: argparse.Namespace, out: TextIO, stdin: TextIO) -> ExitCode:
+def _run(args: argparse.Namespace, out: TextIO, stdin: TextIO, err: TextIO | None = None) -> ExitCode:
     say = (lambda msg: None) if args.quiet else (lambda msg: out.write(msg + "\n"))
 
     # Config and profile
@@ -193,7 +222,15 @@ def _run(args: argparse.Namespace, out: TextIO, stdin: TextIO) -> ExitCode:
 
     raw = _parse_sets(args.sets, profile, config)
 
-    src: Path = args.input
+    if args.combine or args.batch:
+        return _run_multi(args, config, profile, raw, say, stdin, err or sys.stderr)
+    if len(args.input) > 1:
+        raise _Fail(ExitCode.USAGE, several_files_usage(len(args.input)))
+    if args.passwords_for:
+        raise _Fail(ExitCode.USAGE,
+                    "--password-for is for --combine and --batch. For one file use --password-env or --password-stdin.")
+
+    src: Path = args.input[0]
     handler = PdfHandler()
     if not src.is_file():
         raise _Fail(ExitCode.UNSUPPORTED, f"Can't find the file {src}.")
@@ -281,6 +318,251 @@ def _run(args: argparse.Namespace, out: TextIO, stdin: TextIO) -> ExitCode:
     return ExitCode.OK
 
 
+# ------------------------------------------------------------------ several files (D-112)
+
+
+def several_files_usage(count: int) -> str:
+    """The refusal for several files without a mode (D-063, now naming the two modes)."""
+    return (f"{count} files were given. Add --combine to make one stamped file from them "
+            "(pages in the order given) or --batch to stamp each one separately.")
+
+
+def _validate_all(config: Config, profile: Profile, raw: dict[str, str]) -> dict[str, str]:
+    values: dict[str, str] = {}
+    failures: list[str] = []
+    for name in profile.fields:
+        result = validate_field(config, name, raw.get(name))
+        if result.valid:
+            values[name] = result.value
+        else:
+            hint = f" (use --set {name}=...)" if name not in raw else ""
+            failures.append(f"{result.message}{hint}")
+    if failures:
+        raise _Fail(ExitCode.INVALID_FIELDS,
+                    "Can't stamp until these are fixed:\n" + "\n".join(f"  - {f}" for f in failures))
+    return values
+
+
+def _multi_inputs(paths: Sequence[Path], handler: PdfHandler) -> list[Path]:
+    if len(paths) < 2:
+        raise _Fail(ExitCode.USAGE, "--combine and --batch need at least two files.")
+    for p in paths:
+        if not p.is_file():
+            raise _Fail(ExitCode.UNSUPPORTED, f"Can't find the file {p}.")
+        if not handler.can_open(p):
+            raise _Fail(ExitCode.UNSUPPORTED, f"{p.name} isn't a PDF file.")
+    for i, p in enumerate(paths):
+        for q in paths[:i]:
+            if same_file(p, q):
+                raise _Fail(ExitCode.USAGE, f"{p.name} is given more than once.")
+    return list(paths)
+
+
+def _multi_passwords(
+    args: argparse.Namespace, paths: Sequence[Path], handler: PdfHandler, stdin: TextIO,
+) -> tuple[dict[Path, str | None], dict[Path, DocumentInfo]]:
+    """Each file's password and DocumentInfo; asks in a console, else names the flag."""
+    given: list[tuple[Path, str]] = [(Path(f), pw) for f, pw in args.passwords_for]
+    for f, _ in given:
+        if not any(same_file(f, p) or f.name == p.name and f.parent == Path(".") for p in paths):
+            raise _Fail(ExitCode.USAGE, f"--password-for {f}: that file isn't one of the inputs.")
+    shared = _get_password(args, stdin)
+    passwords: dict[Path, str | None] = {}
+    infos: dict[Path, DocumentInfo] = {}
+    for p in paths:
+        pw = next((v for f, v in given if same_file(f, p) or (f.parent == Path(".") and f.name == p.name)),
+                  shared)
+        try:
+            infos[p] = handler.inspect(p, pw)
+        except PasswordRequired:
+            if pw is None and stdin.isatty():
+                pw = getpass.getpass(f"Password for {p.name}: ")
+                infos[p] = handler.inspect(p, pw)
+            else:
+                raise _Fail(ExitCode.PASSWORD,
+                            f"{p.name} needs a password to open. Give it with --password-for "
+                            f'"{p}" PASSWORD.') from None
+        passwords[p] = pw
+    return passwords, infos
+
+
+def batch_exit_code(outcomes: Sequence[BatchOutcome]) -> ExitCode:
+    """0 when every file was saved, 10 when some were, else the shared reason's code (or 1)."""
+    saved = sum(1 for o in outcomes if o.status == Status.SAVED)
+    if saved == len(outcomes):
+        return ExitCode.OK
+    if saved:
+        return ExitCode.PARTIAL
+    codes: set[ExitCode] = set()
+    for o in outcomes:
+        if o.status == Status.SKIPPED:
+            codes.add(ExitCode.OUTPUT_REFUSED)
+        elif o.status in (Status.CANCELLED, Status.NOT_STARTED):
+            codes.add(ExitCode.INTERRUPTED)
+        else:
+            code = next((c for kind, c in _ERROR_CODES if isinstance(o.error, kind)), ExitCode.ERROR)
+            codes.add(code)
+    return codes.pop() if len(codes) == 1 else ExitCode.ERROR
+
+
+def _run_multi(
+    args: argparse.Namespace, config: Config, profile: Profile, raw: dict[str, str],
+    say: Say, stdin: TextIO, err: TextIO,
+) -> ExitCode:
+    handler = PdfHandler()
+    paths = _multi_inputs(args.input, handler)
+    if args.batch and args.out:
+        raise _Fail(ExitCode.USAGE, "--batch saves one copy per file: use --out-dir for the folder, not --out.")
+
+    # Pre-fill: only when every file name that has a value agrees (D-106).
+    for name in profile.fields:
+        if name in raw:
+            continue
+        agreement = agree_from_filenames(config, name, [p.name for p in paths])
+        if agreement.value is not None:
+            raw[name] = agreement.value
+            say(f"{config.fields[name].label} taken from the file names: {agreement.value}")
+        elif agreement.conflict:
+            say(f"Note: {disagreement_note(config.fields[name].label, agreement)}")
+    values = _validate_all(config, profile, raw)
+
+    passwords, infos = _multi_passwords(args, paths, handler, stdin)
+    for p in paths:
+        if infos[p].xfa:
+            raise _Fail(ExitCode.UNSUPPORTED,
+                        f"{p.name} is an XFA form, which this tool can't stamp. "
+                        "Print it to PDF first, then stamp the printed copy.")
+    signed = [p.name for p in paths if infos[p].signed]
+    restricted = [p.name for p in paths if infos[p].restricted]
+
+    today = date.today()
+    ticked = args.name_fields if args.name_fields else None
+    if ticked:
+        allowed = [*profile.fields, "date"]
+        bad = [f for f in ticked if f not in allowed]
+        if bad:
+            raise _Fail(ExitCode.USAGE,
+                        f"--name-field {bad[0]} isn't available. Choose from: {', '.join(allowed)}.")
+    name_values = {**values, "date": parse_date_format(config.settings.date_format).format(today)}
+    dedupe = prefill_fields(config, profile)
+    job = StampJob.from_profile(config, profile, values,
+                                background_box=False if args.no_box else None, today=today)
+
+    if args.combine:
+        return _run_combine(args, handler, paths, passwords, job, name_values, ticked, dedupe,
+                            profile, signed, restricted, say)
+    return _run_batch(args, handler, paths, passwords, job, name_values, ticked, dedupe,
+                      profile, signed, restricted, say, err)
+
+
+def _confirmations(args: argparse.Namespace, signed: list[str], restricted: list[str], what: str) -> None:
+    if signed and not args.accept_signature_loss:
+        raise _Fail(ExitCode.CONFIRM,
+                    f"These files are digitally signed: {', '.join(signed)}. {what} won't carry a valid "
+                    "signature; the originals keep theirs. Add --accept-signature-loss to go ahead.")
+    if restricted and not args.accept_restrictions:
+        raise _Fail(ExitCode.CONFIRM,
+                    f"These files have owner restrictions that don't allow changes: {', '.join(restricted)}. "
+                    "Add --accept-restrictions to go ahead.")
+
+
+def _run_combine(
+    args: argparse.Namespace, handler: PdfHandler, paths: list[Path], passwords: dict[Path, str | None],
+    job: StampJob, name_values: dict[str, str], ticked: list[str] | None, dedupe: list[str],
+    profile: Profile, signed: list[str], restricted: list[str], say: Say,
+) -> ExitCode:
+    first = paths[0]
+    if args.out:
+        out_path: Path = args.out
+    else:
+        folder: Path = args.out_dir or first.parent
+        out_path = folder / suggest_filename(profile, name_values, combined_original_name(first),
+                                             ticked=ticked, dedupe=dedupe)
+    for p in paths:
+        if same_file(p, out_path):
+            raise _Fail(ExitCode.OUTPUT_REFUSED,
+                        f"The combined file can't be saved over one of the originals ({p.name}). "
+                        "Choose a different name or folder.")
+    if args.dry_run:
+        say(f"Would save: {out_path}")
+        say("Pages in this order: " + ", ".join(p.name for p in paths))
+        if signed and not args.accept_signature_loss:
+            say("Needs --accept-signature-loss: " + ", ".join(signed))
+        if restricted and not args.accept_restrictions:
+            say("Needs --accept-restrictions: " + ", ".join(restricted))
+        if out_path.exists() and not args.overwrite:
+            say("Needs --overwrite or another name: the output file already exists.")
+        return ExitCode.OK
+    if out_path.exists() and not args.overwrite:
+        raise _Fail(ExitCode.OUTPUT_REFUSED, f"{out_path} already exists. Choose another name, or allow overwriting.")
+    if not out_path.parent.is_dir():
+        raise _Fail(ExitCode.OUTPUT_REFUSED, f"The folder {out_path.parent} doesn't exist.")
+    _confirmations(args, signed, restricted, "The combined file")
+
+    combined = combine_pdfs(
+        [CombineInput(p, passwords[p]) for p in paths], out_path.parent,
+        accept_signature_loss=args.accept_signature_loss,
+        accept_restrictions=args.accept_restrictions,
+    )
+    try:
+        result = handler.apply(combined.path, job, out_path,
+                               accept_signature_loss=True,  # confirmed above for every signed source
+                               overwrite=args.overwrite)
+    finally:
+        combined.cleanup()
+    for note in combined.notes:
+        say(f"Note: {note}")
+    if combined.protection_warning():
+        say(f"Note: {combined.protection_warning()}")
+    for w in result.warnings:
+        say(f"Note: {w}")
+    say(f"Saved: {result.output_path} ({result.pages_stamped} pages from {len(paths)} files)")
+    return ExitCode.OK
+
+
+def _run_batch(
+    args: argparse.Namespace, handler: PdfHandler, paths: list[Path], passwords: dict[Path, str | None],
+    job: StampJob, name_values: dict[str, str], ticked: list[str] | None, dedupe: list[str],
+    profile: Profile, signed: list[str], restricted: list[str], say: Say, err: TextIO,
+) -> ExitCode:
+    items = [
+        BatchItem(p, (args.out_dir or p.parent) / suggest_filename(
+            profile, name_values, p.name, ticked=ticked, dedupe=dedupe), passwords[p])
+        for p in paths
+    ]
+    if not args.dry_run:
+        _confirmations(args, signed, restricted, "The stamped copies")
+    checks = check_batch(handler, items, job, overwrite=args.overwrite)
+    if args.dry_run:
+        for c in checks:
+            if c.ok:
+                say(f"Would save: {c.item.out_path}")
+            else:
+                say(f"Would {'skip' if c.status == Status.SKIPPED else 'fail'}: {c.item.path.name}: {c.message}")
+        if signed and not args.accept_signature_loss:
+            say("Needs --accept-signature-loss: " + ", ".join(signed))
+        if restricted and not args.accept_restrictions:
+            say("Needs --accept-restrictions: " + ", ".join(restricted))
+        return ExitCode.OK
+    outcomes = run_batch(
+        handler, checks, job,
+        accept_signature_loss=args.accept_signature_loss,
+        accept_restrictions=args.accept_restrictions,
+        remove_encryption=args.remove_encryption,
+        overwrite=args.overwrite,
+    )
+    for o in outcomes:
+        if o.status == Status.SAVED and o.result is not None:
+            for w in o.result.warnings:
+                say(f"Note ({o.item.path.name}): {w}")
+            say(f"Saved: {o.result.output_path}")
+        else:
+            err.write(f"{o.status.capitalize()}: {o.item.path.name}: {o.message}\n")
+    saved = sum(1 for o in outcomes if o.status == Status.SAVED)
+    say(f"{saved} of {len(outcomes)} files saved.")
+    return batch_exit_code(outcomes)
+
+
 _ERROR_CODES: tuple[tuple[type[StampError], ExitCode], ...] = (
     (PasswordRequired, ExitCode.PASSWORD),
     (WrongPassword, ExitCode.PASSWORD),
@@ -304,9 +586,9 @@ def main(
 ) -> int:
     """Run the command line; returns the exit code."""
     out, err, inp = stdout or sys.stdout, stderr or sys.stderr, stdin or sys.stdin
-    args = build_parser().parse_args(argv)
+    args = build_parser().parse_intermixed_args(argv)
     try:
-        return int(_run(args, out, inp))
+        return int(_run(args, out, inp, err))
     except _Fail as e:
         err.write(f"{e}\n")
         return int(e.code)

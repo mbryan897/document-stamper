@@ -5,8 +5,8 @@ Which interface runs is decided by ``route`` (D-063):
 - no arguments: the window, on the drop screen;
 - only existing files, and nothing that starts with ``-``: the window. One
   file opens its stamp dialog (dragging a file onto the exe, or Send To,
-  passes one bare path); several files open the drop screen with a message,
-  because batch stamping is out of scope;
+  passes one bare path); several files (Send To passes several) open the
+  files screen, to order them and choose Combine or Batch (D-100);
 - anything else: the command line, exactly as in Phase 2. Any option, or
   ``--``, forces the command line: ``stamper -- file.pdf``.
 

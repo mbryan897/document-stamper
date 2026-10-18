@@ -1,10 +1,12 @@
 """The main window: drop screen, stamp dialog and saved screen.
 
-One window, three screens in a stack. The drop screen takes one PDF (drag
-and drop or "Choose a file…") and shows the active profile, with a way to
-switch profiles or open another config file for testing. Problems opening a
-file (not a PDF, missing, XFA, no password) are plain messages on the drop
-screen, which stays put.
+One window, screens in a stack. The drop screen takes PDFs (drag and drop
+or "Choose files…") and shows the active profile, with a way to switch
+profiles or open another config file for testing. One file opens its stamp
+dialog; problems opening it (not a PDF, missing, XFA, no password) are plain
+messages on the drop screen, which stays put. Several files open the files
+screen, where the user orders them and picks Combine or Batch (Phase 4.5,
+``multi.py``).
 
 The window sizes itself to the screen it opens on (D-093): 1200 x 780,
 centred, when that fits; maximized otherwise. No screen in the stack may need
@@ -63,15 +65,34 @@ from ..core.locations import (
 )
 from ..handlers.base import (
     ApplyResult,
+    Cancelled,
     DocumentInfo,
     Handler,
     PasswordRequired,
     StampJob,
     WrongPassword,
 )
+from ..handlers.combine import CombinedFile
 from ..handlers.pdf import PdfHandler
-from .engine import EngineClient, EngineFailure
+from .engine import EngineClient, EngineFailure, TaskContext
 from .fonts import MONO_FAMILY
+from .multi import (
+    BATCH,
+    COMBINE,
+    LARGE_FILE_COUNT,
+    LARGE_PAGE_COUNT,
+    BatchDialog,
+    BatchSavedScreen,
+    BusyScreen,
+    CombineDialog,
+    FilesScreen,
+    PrepareScreen,
+    ScreenedFile,
+    ScreenResult,
+    combine_task,
+    needs_prepare,
+    screen_files,
+)
 from .profiles import ProfileSettings
 from .services import Services, native_services
 from .stamp_dialog import StampDialog, group_warnings
@@ -85,7 +106,6 @@ __all__ = [
     "SavedScreen",
     "WindowFit",
     "fit_to_screen",
-    "several_files_message",
 ]
 
 MAX_CONFIG_PROBLEMS = 6
@@ -128,11 +148,6 @@ def fit_to_screen(
     )
 
 
-def several_files_message(count: int) -> str:
-    """What the drop screen says when more than one file arrives (batch is out of scope)."""
-    return f"Drop one file at a time. {count} files were dropped; none were opened."
-
-
 def _message_frame() -> tuple[QFrame, QLabel]:
     frame = QFrame()
     frame.setObjectName("notice")
@@ -172,14 +187,15 @@ class DropScreen(QWidget):
         il.setContentsMargins(24, 32, 24, 32)
         il.setSpacing(14)
         il.addStretch(1)
-        hero = QLabel("Drop a PDF to stamp")
+        hero = QLabel("Drop PDFs to stamp")
         hero.setObjectName("hero")
         hero.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lead = QLabel("You'll confirm the label and placement before anything is saved.")
+        lead = QLabel("One file, or several to combine or stamp separately. "
+                      "You'll confirm the label and placement before anything is saved.")
         lead.setObjectName("lead")
         lead.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lead.setWordWrap(True)
-        self.choose_button = QPushButton("Choose a file…")
+        self.choose_button = QPushButton("Choose files…")
         self.choose_button.setObjectName("outline")
         self.choose_button.setDefault(True)
         il.addWidget(hero)
@@ -309,8 +325,13 @@ class SavedScreen(QWidget):
         outer.addStretch(1)
         self.result: ApplyResult | None = None
 
-    def show_result(self, result: ApplyResult, *, label: str, identifier: str, signed: bool) -> None:
-        """Fill the screen from an ApplyResult."""
+    def show_result(self, result: ApplyResult, *, label: str, identifier: str, signed: bool,
+                    extra_notes: Sequence[str] = (), original_text: str | None = None) -> None:
+        """Fill the screen from an ApplyResult.
+
+        ``extra_notes`` come first (a combined file's protection warning and
+        bookmarks note, D-111); ``original_text`` replaces the "Original" line.
+        """
         self.result = result
         pages = "The page carries" if result.pages_stamped == 1 else f"All {result.pages_stamped} pages carry"
         if identifier:
@@ -321,10 +342,11 @@ class SavedScreen(QWidget):
         else:
             self.lead.setText(f"{pages} the stamp.")
         self.path_label.setText(str(result.output_path))
-        self.original_label.setText("Unchanged, still digitally signed" if signed else "Unchanged")
+        self.original_label.setText(original_text or (
+            "Unchanged, still digitally signed" if signed else "Unchanged"))
         # Grouped like the dialog's notes (D-066), and capped: one line per shrunk page
         # on a long receipt bundle would push the buttons off the window (D-093).
-        notes = group_warnings(result.warnings)
+        notes = group_warnings([*extra_notes, *result.warnings])
         self.notes.setText("\n".join(f"Note: {w}" for w in notes))
         self.notes.setVisible(bool(notes))
         self.thumbnail.clear()
@@ -380,6 +402,10 @@ class MainWindow(QMainWindow):
         self.profile: Profile | None = None
         self.dialog: StampDialog | None = None
         self.settings: ProfileSettings | None = None
+        self.prepare: PrepareScreen | None = None
+        self._combined: CombinedFile | None = None
+        self._task: tuple[str, int] | None = None  # ("screen" | "add" | "combine", request)
+        self._mode = ""
         self._opening: tuple[int, Path, str | None] | None = None
         self._thumb_req = 0
         self._last_folder: Path | None = (
@@ -389,8 +415,14 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         self.drop = DropScreen()
         self.saved = SavedScreen()
+        self.files_screen = FilesScreen()
+        self.busy = BusyScreen()
+        self.batch_saved = BatchSavedScreen(self.services)
         self.stack.addWidget(self.drop)
         self.stack.addWidget(self.saved)
+        self.stack.addWidget(self.files_screen)
+        self.stack.addWidget(self.busy)
+        self.stack.addWidget(self.batch_saved)
         self.setCentralWidget(self.stack)
 
         self.drop.choose_button.clicked.connect(self.choose_file)
@@ -403,6 +435,16 @@ class MainWindow(QMainWindow):
         self.engine.inspected.connect(self._on_inspected)
         self.engine.inspect_failed.connect(self._on_inspect_failed)
         self.engine.previewed.connect(self._on_thumbnail)
+        self.engine.task_done.connect(self._on_task_done)
+        self.engine.task_failed.connect(self._on_task_failed)
+        self.engine.task_progress.connect(self._on_task_progress)
+        self.files_screen.back.connect(lambda: self.show_drop())
+        self.files_screen.add_requested.connect(self._add_files)
+        self.files_screen.single_chosen.connect(self.open_file)
+        self.files_screen.combine_chosen.connect(lambda: self.choose_mode(COMBINE))
+        self.files_screen.batch_chosen.connect(lambda: self.choose_mode(BATCH))
+        self.busy.cancel.connect(self.engine.cancel)
+        self.batch_saved.another_button.clicked.connect(lambda: self.show_drop())
 
         source = describe(Path(config_path), SourceKind.OTHER) if config_path else find_config(self.locs)
         loaded = self.load_config(source.path, source)
@@ -504,6 +546,8 @@ class MainWindow(QMainWindow):
         """Back to the drop screen, optionally with a message."""
         self._close_dialog()
         self._close_settings()
+        self._close_prepare()
+        self._drop_combined()
         self.stack.setCurrentWidget(self.drop)
         self.drop.show_message(message)
         self.drop.choose_button.setFocus()
@@ -550,15 +594,20 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------ opening a file
 
     def choose_file(self) -> None:
-        """"Choose a file…": the native dialog, PDFs only."""
+        """"Choose files…": the native dialog, PDFs only; one or several."""
+        if self.services.ask_open_files is not None:
+            paths = self.services.ask_open_files(self, self._last_folder)
+            if paths:
+                self.open_files(paths)
+            return
         path = self.services.ask_open_file(self, self._last_folder)
         if path is not None:
             self.open_file(path)
 
     def open_files(self, paths: Sequence[Path]) -> None:
-        """Open what was dropped or passed on the command line: exactly one file."""
+        """Open what was dropped or passed on the command line: one file, or several (D-100)."""
         if len(paths) > 1:
-            self.show_drop(several_files_message(len(paths)))
+            self.open_several(paths)
         elif paths:
             self.open_file(paths[0])
 
@@ -624,6 +673,178 @@ class MainWindow(QMainWindow):
         dialog.focus_first()
         return dialog
 
+    # ------------------------------------------------------------ several files (Phase 4.5)
+
+    def open_several(self, paths: Sequence[Path]) -> None:
+        """Check several files on the engine thread, then show the files screen."""
+        if self.config is None or self.profile is None:
+            self.show_drop("Open a config file that works before choosing PDFs.")
+            return
+        paths = [Path(p) for p in paths]
+        self.show_drop()
+        folder = next((p.parent for p in paths if p.is_file()), None)
+        if folder is not None:
+            self._last_folder = folder
+            self.state.last_folder = str(folder)
+            save_state(self.state, self.locs)
+        self.busy.start(f"Checking {len(paths)} files…")
+        self.stack.setCurrentWidget(self.busy)
+        handler = self.handler
+        self._task = ("screen", self.engine.run_task(lambda ctx: screen_files(handler, paths, ctx=ctx)))
+
+    def _add_files(self) -> None:
+        paths: list[Path] | None
+        if self.services.ask_open_files is not None:
+            paths = self.services.ask_open_files(self, self._last_folder)
+        else:
+            one = self.services.ask_open_file(self, self._last_folder)
+            paths = [one] if one is not None else None
+        if not paths:
+            return
+        already = self.files_screen.paths()
+        handler = self.handler
+        self.busy.start(f"Checking {len(paths)} more file{'s' if len(paths) != 1 else ''}…")
+        self.stack.setCurrentWidget(self.busy)
+        self._task = ("add", self.engine.run_task(
+            lambda ctx: screen_files(handler, paths, already=already, ctx=ctx)))
+
+    def choose_mode(self, mode: str) -> None:
+        """Combine or Batch was clicked: ask what's needed up front, then go on (D-109)."""
+        files = self.files_screen.files()
+        if len(files) < 2:
+            return
+        pages = sum(f.page_count for f in files)
+        if len(files) > LARGE_FILE_COUNT or pages > LARGE_PAGE_COUNT:
+            if not self.services.confirm(
+                    self, "A large set of files",
+                    f"{len(files)} files, {pages} pages in all. This may take a few minutes.",
+                    "Go ahead"):
+                return
+        self._mode = mode
+        if needs_prepare(files, mode):
+            self._close_prepare()
+            prepare = PrepareScreen(files, mode, self.engine)
+            prepare.back.connect(self._back_to_files)
+            prepare.proceed.connect(self._prepared)
+            self.prepare = prepare
+            self.stack.addWidget(prepare)
+            self.stack.setCurrentWidget(prepare)
+            return
+        self._proceed(files, accept_signature=False, accept_restrictions=False)
+
+    def _prepared(self) -> None:
+        assert self.prepare is not None
+        files = self.prepare.files()
+        for f in files:
+            self.files_screen.update_file(f)
+        sig, res = self.prepare.accepted()
+        self._proceed(files, accept_signature=sig, accept_restrictions=res)
+
+    def _proceed(self, files: list[ScreenedFile], *, accept_signature: bool, accept_restrictions: bool) -> None:
+        if self._mode == BATCH:
+            self._show_batch(files, accept_signature, accept_restrictions)
+            return
+        self.busy.start(f"Combining {len(files)} files…", "Pages go in the order shown.")
+        self.stack.setCurrentWidget(self.busy)
+        handler = self.handler
+
+        def run(ctx: TaskContext) -> object:
+            return combine_task(files, accept_signature_loss=accept_signature,
+                                accept_restrictions=accept_restrictions, ctx=ctx, handler=handler)
+
+        self._task = ("combine", self.engine.run_task(run))
+
+    def _back_to_files(self, message: str = "") -> None:
+        self._close_dialog()
+        self._close_prepare()
+        self._drop_combined()
+        self.stack.setCurrentWidget(self.files_screen)
+        self.files_screen.show_message(message)
+
+    def _on_task_progress(self, req: int, done: int, total: int, text: str) -> None:
+        if self._task is not None and self._task[1] == req:
+            self.busy.report(done, total, text)
+
+    def _on_task_done(self, req: int, result: object) -> None:
+        if self._task is None or self._task[1] != req:
+            return
+        kind, _ = self._task
+        self._task = None
+        if kind in ("screen", "add"):
+            assert isinstance(result, ScreenResult)
+            self.files_screen.set_files(result, append=kind == "add")
+            if kind == "screen" and not result.usable:
+                lines = "\n".join(f"• {n} {r}." for n, r in result.removed)
+                self.show_drop(f"None of the files can be stamped:\n{lines}")
+                return
+            self.stack.setCurrentWidget(self.files_screen)
+            self.files_screen.list.setFocus()
+        elif kind == "combine":
+            combined, info = result  # type: ignore[misc]
+            self._combined = combined
+            self._show_combine(combined, info)
+
+    def _on_task_failed(self, req: int, failure: EngineFailure) -> None:
+        if self._task is None or self._task[1] != req:
+            return
+        kind, _ = self._task
+        self._task = None
+        if kind == "screen":
+            self.show_drop("Checking the files was cancelled." if isinstance(failure.error, Cancelled)
+                           else failure.message)
+        elif kind == "add":
+            self.stack.setCurrentWidget(self.files_screen)
+        else:
+            self._back_to_files("Combining was cancelled. Nothing was saved." if isinstance(failure.error, Cancelled)
+                                else failure.message)
+
+    def _show_combine(self, combined: CombinedFile, info: DocumentInfo) -> CombineDialog:
+        assert self.config is not None and self.profile is not None
+        self._close_dialog()
+        self._close_prepare()
+        dialog = CombineDialog(config=self.config, profile=self.profile, combined=combined, info=info,
+                               engine=self.engine, services=self.services, today=self.today)
+        dialog.cancelled.connect(lambda: self._back_to_files())
+        dialog.saved.connect(self._on_saved)
+        self.dialog = dialog
+        self.stack.addWidget(dialog)
+        self.stack.setCurrentWidget(dialog)
+        dialog.focus_first()
+        return dialog
+
+    def _show_batch(self, files: list[ScreenedFile], accept_signature: bool, accept_restrictions: bool) -> BatchDialog:
+        assert self.config is not None and self.profile is not None
+        self._close_dialog()
+        self._close_prepare()
+        dialog = BatchDialog(config=self.config, profile=self.profile, files=files,
+                             accept_signature_loss=accept_signature, accept_restrictions=accept_restrictions,
+                             engine=self.engine, handler=self.handler, services=self.services, today=self.today)
+        dialog.cancelled.connect(lambda: self._back_to_files())
+        dialog.batch_saved.connect(self._on_batch_saved)
+        self.dialog = dialog
+        self.stack.addWidget(dialog)
+        self.stack.setCurrentWidget(dialog)
+        dialog.focus_first()
+        return dialog
+
+    def _on_batch_saved(self, outcomes: list[object]) -> None:
+        self._close_dialog()
+        self.batch_saved.show_outcomes(outcomes)  # type: ignore[arg-type]
+        self.stack.setCurrentWidget(self.batch_saved)
+
+    def _close_prepare(self) -> None:
+        if self.prepare is not None:
+            self.prepare.dispose()
+            self.stack.removeWidget(self.prepare)
+            self.prepare.deleteLater()
+            self.prepare = None
+
+    def _drop_combined(self) -> None:
+        """Remove the temporary combined file, after whatever the engine is doing with it (D-055)."""
+        combined, self._combined = self._combined, None
+        if combined is not None:
+            self.engine.run_task(lambda _ctx: combined.cleanup(), clear_cancel=False)
+
     # ------------------------------------------------------------ saved
 
     def _on_saved(self, result: ApplyResult) -> None:
@@ -636,8 +857,16 @@ class MainWindow(QMainWindow):
         first = dialog.info.pages[0]
         ratio = self.devicePixelRatioF() or 1.0
         thumb_dpi = int(min(THUMB_W / (first.width / 72), THUMB_H / (first.height / 72)) * ratio * 1.5)
+        extra: list[str] = []
+        original: str | None = None
+        if isinstance(dialog, CombineDialog):
+            extra = dialog.saved_notes()
+            n = len(dialog.originals)
+            original = (f"All {n} files unchanged" + (", signed files still signed" if dialog.combined.signed else ""))
         self._close_dialog()
-        self.saved.show_result(result, label=label, identifier=ident, signed=signed)
+        self._drop_combined()
+        self.saved.show_result(result, label=label, identifier=ident, signed=signed,
+                               extra_notes=extra, original_text=original)
         self.stack.setCurrentWidget(self.saved)
         self._thumb_req = self.engine.preview(
             result.output_path, 1, StampJob(stamps=(), values={}), password, max(24, thumb_dpi))
@@ -665,7 +894,7 @@ class MainWindow(QMainWindow):
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802 - Qt name
         """Accept files dragged over the drop and saved screens."""
-        if self.stack.currentWidget() in (self.drop, self.saved) and self._dropped_paths(event):
+        if self.stack.currentWidget() in (self.drop, self.saved, self.batch_saved) and self._dropped_paths(event):
             event.acceptProposedAction()
             self.drop.set_dragging(True)
         else:
@@ -676,10 +905,10 @@ class MainWindow(QMainWindow):
         self.drop.set_dragging(False)
 
     def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802 - Qt name
-        """Open the dropped file (one at a time)."""
+        """Open the dropped file, or the files screen for several."""
         self.drop.set_dragging(False)
         paths = self._dropped_paths(event)
-        if not paths or self.stack.currentWidget() not in (self.drop, self.saved):
+        if not paths or self.stack.currentWidget() not in (self.drop, self.saved, self.batch_saved):
             event.ignore()
             return
         event.acceptProposedAction()
@@ -691,5 +920,9 @@ class MainWindow(QMainWindow):
         """Cancel any save and wait for the engine, so no temporary file is left (D-055)."""
         self._close_dialog()
         self._close_settings()
+        self._close_prepare()
+        combined, self._combined = self._combined, None
         self.engine.shutdown()
+        if combined is not None:
+            combined.cleanup()  # the engine has stopped, so nothing holds the file open
         super().closeEvent(event)

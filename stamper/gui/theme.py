@@ -70,7 +70,7 @@ QFrame#dropInner {{ border: 2px dashed {_C["ink"]}; border-radius: 14px; backgro
 QFrame#warning, QFrame#notice {{
     background: {_C["amber_bg"]}; border: 1px solid {_C["amber_border"]}; border-radius: 10px;
 }}
-QFrame#warning QLabel, QFrame#notice QLabel, QFrame#warning QCheckBox {{
+QFrame#warning QLabel, QFrame#notice QLabel {{
     color: {_C["amber_text"]}; font-size: 14px; background: transparent;
 }}
 QFrame#info {{
@@ -132,6 +132,7 @@ QToolButton#pageNav:disabled {{ color: {_C["border_strong"]}; }}
 
 QCheckBox {{ spacing: 8px; min-height: 26px; }}
 QCheckBox::indicator {{ width: 17px; height: 17px; }}
+/* No background rule on QCheckBox inside notices: it hid the tick box (D-113). */
 
 QProgressBar {{
     min-height: 12px; max-height: 12px; border: 0; border-radius: 6px;
