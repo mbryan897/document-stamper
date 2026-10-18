@@ -65,6 +65,7 @@ from ..core.locations import (
     load_state,
     locations,
     save_state,
+    work_dir,
 )
 from ..core.pending import Leftover
 from ..handlers.base import (
@@ -76,7 +77,7 @@ from ..handlers.base import (
     StampJob,
     WrongPassword,
 )
-from ..handlers.combine import CombinedFile
+from ..handlers.combine import CombinedFile, remove_stale_temp
 from ..handlers.pdf import PdfHandler
 from .engine import EngineClient, EngineFailure, TaskContext
 from .fonts import MONO_FAMILY
@@ -500,6 +501,7 @@ class MainWindow(QMainWindow):
         loaded = self.load_config(source.path, source)
         # Keep the reason on screen when the config can't be used.
         self.show_drop("" if loaded else self.drop.message.text())
+        remove_stale_temp(work_dir())  # combine folders left by a stopped run (D-120)
         self.check_leftovers()
 
     # ------------------------------------------------------------ partial copies (D-124)

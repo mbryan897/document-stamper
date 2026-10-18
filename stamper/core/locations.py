@@ -70,6 +70,7 @@ __all__ = [
     "save_state",
     "save_target",
     "user_dir",
+    "work_dir",
 ]
 
 APP_FOLDER_NAME = "DocumentStamper"
@@ -135,6 +136,11 @@ def local_dir() -> Path:
     if local:
         return Path(local) / APP_FOLDER_NAME
     return Path.home() / ".local" / "share" / APP_FOLDER_NAME
+
+
+def work_dir() -> Path:
+    """Where combining builds its working copy (D-115): ``local_dir()\\work``."""
+    return local_dir() / "work"
 
 
 def builtin_config_path() -> Path:

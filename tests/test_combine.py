@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import os
-from collections.abc import Callable
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import pymupdf
@@ -17,7 +16,6 @@ from stamper.handlers.combine import (
     CombineInput,
     combine_pdfs,
     field_suffix,
-    remove_stale_temp,
 )
 from stamper.handlers.pdf import PdfHandler
 from tests.gui_support import copy_to
@@ -230,18 +228,6 @@ def test_cancel_mid_combine_leaves_nothing(corpus_dir: Path, tmp_path: Path) -> 
     with pytest.raises(Cancelled):
         combine_pdfs(inputs, tmp_path, accept_signature_loss=True, cancel=cancel)
     assert _temp_folders(tmp_path) == []
-
-
-def test_stale_temp_folders_swept(tmp_path: Path) -> None:
-    old = tmp_path / f"{TEMP_PREFIX}deadbeef"
-    old.mkdir()
-    (old / "x.pdf").write_bytes(b"%PDF-")
-    new = tmp_path / f"{TEMP_PREFIX}cafef00d"
-    new.mkdir()
-    long_ago = time.time() - 3 * 24 * 3600
-    os.utime(old, (long_ago, long_ago))
-    assert remove_stale_temp(tmp_path) == [old]
-    assert not old.exists() and new.exists()
 
 
 def test_large_file_plus_four(corpus_dir: Path, tmp_path: Path, record_property: Callable[[str, object], None]) -> None:

@@ -23,7 +23,6 @@ combining and the batch run there as tasks.
 
 from __future__ import annotations
 
-import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date
@@ -67,7 +66,7 @@ from ..handlers.base import (
     WrongPassword,
 )
 from ..handlers.batch import BatchCheck, BatchItem, BatchOutcome, Status, check_batch, run_batch
-from ..handlers.combine import CombinedFile, CombineInput, combine_pdfs, remove_stale_temp
+from ..handlers.combine import CombinedFile, CombineInput, combine_pdfs
 from ..handlers.pdf import same_file
 from .engine import EngineClient, EngineFailure, TaskContext
 from .services import Services
@@ -195,22 +194,20 @@ def needs_prepare(files: Sequence[ScreenedFile], mode: str) -> bool:
 
 def combine_task(files: Sequence[ScreenedFile], *, accept_signature_loss: bool,
                  accept_restrictions: bool, ctx: TaskContext, handler: Handler) -> tuple[CombinedFile, DocumentInfo]:
-    """Combine on the engine thread, in the first file's folder (or the system temp folder if it can't be written)."""
+    """Combine on the engine thread, in the private work folder (D-115).
+
+    If that can't be used, the working copy goes in the first file's folder and
+    the dialog says why (``CombinedFile.location_warning``).
+    """
     inputs = [CombineInput(f.path, f.password, f.info.fingerprint if f.info else None) for f in files]
-    folder = files[0].path.parent
-    remove_stale_temp(folder)
 
     def progress(done: int, total: int, name: str) -> None:
         ctx.progress(done, total, name)
 
-    kwargs = dict(accept_signature_loss=accept_signature_loss, accept_restrictions=accept_restrictions,
-                  progress=progress, cancel=ctx.cancelled)
-    try:
-        combined = combine_pdfs(inputs, folder, **kwargs)  # type: ignore[arg-type]
-    except StampError as e:
-        if "Can't write to the folder" not in str(e) and "temporary folder" not in str(e):
-            raise
-        combined = combine_pdfs(inputs, Path(tempfile.gettempdir()), **kwargs)  # type: ignore[arg-type]
+    combined = combine_pdfs(inputs, fallback=files[0].path.parent,
+                            accept_signature_loss=accept_signature_loss,
+                            accept_restrictions=accept_restrictions,
+                            progress=progress, cancel=ctx.cancelled)
     try:
         info = handler.inspect(combined.path)
     except Exception:
@@ -856,11 +853,11 @@ class CombineDialog(_MultiMixin, StampDialog):
         self.signature_tick = None
         self.restriction_tick = None
         self.owner_button = None
-        warning = self.combined.protection_warning()
-        if warning:
-            frame, fl = _notice("warning")
-            fl.addWidget(_wrap_label(warning))
-            lay.addWidget(frame)
+        for warning in (self.combined.location_warning(), self.combined.protection_warning()):
+            if warning:
+                frame, fl = _notice("warning")
+                fl.addWidget(_wrap_label(warning))
+                lay.addWidget(frame)
         lines = [f"Pages in this order: {', '.join(visible(s.path.name) for s in self.combined.sources)}."]
         if self.combined.signed:
             lines.append(f"Signed files ({_names(self.combined.signed)}) were confirmed; the originals stay signed.")
@@ -914,7 +911,7 @@ class CombineDialog(_MultiMixin, StampDialog):
 
     def saved_notes(self) -> list[str]:
         """Notes for the saved screen: the protection warning, then the combine notes."""
-        notes = [self.combined.protection_warning()] if self.combined.protected else []
+        notes = [w for w in (self.combined.location_warning(), self.combined.protection_warning()) if w]
         return notes + list(self.combined.notes)
 
 

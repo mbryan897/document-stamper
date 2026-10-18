@@ -21,6 +21,7 @@ from stamper.gui.main_window import MINIMUM_SIZE, MainWindow
 from stamper.gui.multi import BatchDialog, CombineDialog, PrepareScreen
 from stamper.gui.stamp_dialog import StampDialog
 from stamper.handlers.batch import Status
+from stamper.core.locations import work_dir
 from stamper.handlers.combine import TEMP_PREFIX
 from stamper.handlers.pdf import PdfHandler
 from tests.gui_support import (  # noqa: F401 - fixtures
@@ -46,7 +47,13 @@ CASE = "99-2026-999901"
 
 
 def _temp_left(folder: Path) -> list[Path]:
-    return [p for p in folder.iterdir() if p.name.startswith(TEMP_PREFIX)]
+    """Combine working folders left: in the private work folder (D-115), or in ``folder`` (the fallback)."""
+    places = [work_dir(), folder]
+    return [p for place in places if place.is_dir() for p in place.iterdir() if p.name.startswith(TEMP_PREFIX)]
+
+
+def _in_output_folder(folder: Path) -> list[str]:
+    return sorted(p.name for p in folder.iterdir() if p.name.startswith("~"))
 
 
 def open_several(qtbot: QtBot, w: MainWindow, paths: list[Path]) -> None:
@@ -252,6 +259,7 @@ def test_back_from_combine_removes_the_temp_file(qtbot: QtBot, window: MainWindo
     window.files_screen.combine_button.click()
     d = wait_dialog(qtbot, window, CombineDialog)
     assert _temp_left(tmp_path)
+    assert _in_output_folder(tmp_path) == []  # the working copy is in the private folder (D-115)
     d.cancel_button.click()
     assert window.stack.currentWidget() is window.files_screen
     qtbot.waitUntil(lambda: not _temp_left(tmp_path), timeout=WAIT_MS)
@@ -307,7 +315,7 @@ def test_cancel_mid_combine(qtbot: QtBot, window: MainWindow, corpus_dir: Path, 
 
     real = multi.combine_pdfs
 
-    def slow_combine(inputs, folder, **kw):  # type: ignore[no-untyped-def]
+    def slow_combine(inputs, folder=None, **kw):  # type: ignore[no-untyped-def]
         progress = kw["progress"]
 
         def slow(done: int, total: int, name: str) -> None:

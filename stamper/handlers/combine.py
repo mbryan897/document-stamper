@@ -1,9 +1,12 @@
 """Combine several PDFs into one temporary PDF, ready for the unchanged single-file pipeline (D-095).
 
 The window and the command line call ``combine_pdfs`` with the files in the
-order the user chose. It writes one unencrypted PDF inside a new hidden
-folder, ``~stamper-combine-<random>``, in the folder given (normally the
-output folder). The temporary file is named after the first source file, so
+order the user chose. It writes one unencrypted PDF inside a new folder,
+``~stamper-combine-<random>``, in the private work folder
+``%LOCALAPPDATA%\\DocumentStamper\\work`` (D-115). If that can't be used (it
+can't be written, is short of space, or is on a network drive), it falls back
+to a hidden folder of the same name in the output folder and says so
+(``CombinedFile.location_warning``). The temporary file is named after the first source file, so
 ``{original_name}`` in a stamp or a document property means the first file's
 name (D-104) without any change to the handler. Then ``plan``,
 ``render_preview`` and ``apply`` run on that file exactly as on a single
@@ -22,8 +25,10 @@ Evidentiary-integrity notes (for manual review)
   accessibility tags are not carried over; the result says so.
 - The combined file has no password or restrictions (D-096). It exists only
   inside the temporary folder, which is removed on save, cancel, failure and
-  close (D-055), with an ``atexit`` fallback and a start-up sweep for
-  folders left by a crash.
+  close (D-055), with an ``atexit`` fallback. Folders left by a crash are
+  swept only when they carry the app's ``.stamper-work`` marker, their
+  process has stopped, and they hold nothing but plain files: no links,
+  junctions or subfolders (D-120). Nothing is ever deleted by name alone.
 - No hashing (D-007). The source file names and page ranges are recorded in
   the ``StamperSources`` document property (names only, never folders).
 """
@@ -31,9 +36,12 @@ Evidentiary-integrity notes (for manual review)
 from __future__ import annotations
 
 import atexit
+import json
+import os
 import re
 import secrets
 import shutil
+import stat
 import sys
 import time
 from collections.abc import Callable, Sequence
@@ -42,6 +50,7 @@ from pathlib import Path
 
 import pymupdf
 
+from ..core.locations import work_dir
 from .base import (
     CancelCheck,
     Cancelled,
@@ -64,9 +73,12 @@ __all__ = [
     "field_suffix",
     "remove_stale_temp",
     "rename_clashing_fields",
+    "work_folder_problem",
 ]
 
 TEMP_PREFIX = "~stamper-combine-"
+MARKER_NAME = ".stamper-work"
+SPACE_MARGIN = 64 * 1024 * 1024  # room kept free beyond the combined file's size
 SOURCES_PROPERTY = "StamperSources"
 STALE_AFTER_S = 24 * 60 * 60
 _REF = re.compile(r"(\d+)\s+0\s+R")
@@ -80,7 +92,7 @@ _LIVE: set[Path] = set()  # temporary folders still in use; removed at exit if l
 
 def _cleanup_at_exit() -> None:
     for folder in list(_LIVE):
-        shutil.rmtree(folder, ignore_errors=True)
+        _remove_own_folder(folder)
         _LIVE.discard(folder)
 
 
@@ -135,6 +147,7 @@ class CombinedFile:
     signed: tuple[str, ...] = ()
     renamed_fields: dict[str, list[tuple[str, str]]] = field(default_factory=dict)
     notes: tuple[str, ...] = ()
+    fallback_reason: str = ""  # why the private work folder wasn't used (D-115); empty when it was
 
     @property
     def page_count(self) -> int:
@@ -155,9 +168,18 @@ class CombinedFile:
         return ("The combined file is saved without a password or restrictions. "
                 f"Protected files in it: {', '.join(self.protected)}.")
 
+    def location_warning(self) -> str:
+        """The D-115 note when the working copy sits in the output folder; empty otherwise."""
+        if not self.fallback_reason:
+            return ""
+        unprotected = (" Files in it had a password, and that working copy is unprotected."
+                       if self.protected else "")
+        return (f"Your private work folder couldn't be used ({self.fallback_reason}), so the combined "
+                f"working copy is in {self.folder.parent} until you close this window.{unprotected}")
+
     def cleanup(self) -> None:
         """Remove the temporary folder. Safe to call more than once."""
-        shutil.rmtree(self.folder, ignore_errors=True)
+        _remove_own_folder(self.folder)
         _LIVE.discard(self.folder)
 
     def __enter__(self) -> CombinedFile:
@@ -182,7 +204,29 @@ def _hide(folder: Path) -> None:
         pass
 
 
-def _make_temp_folder(parent: Path) -> Path:
+_FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+
+
+def _is_link(st: os.stat_result) -> bool:
+    return stat.S_ISLNK(st.st_mode) or bool(getattr(st, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT)
+
+
+def _app_version() -> str:
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("document-stamper")
+    except PackageNotFoundError:
+        return "unknown"
+
+
+def _write_marker(folder: Path) -> None:
+    """``.stamper-work``: which process made the folder and when, so a sweep can tell it's ours (D-120)."""
+    data = {"pid": os.getpid(), "started": time.time(), "version": _app_version()}
+    (folder / MARKER_NAME).write_text(json.dumps(data), encoding="utf-8")
+
+
+def _make_temp_folder(parent: Path, *, hide: bool = True) -> Path:
     if not parent.is_dir():
         raise StampError(f"The folder {parent} doesn't exist.")
     for _ in range(20):
@@ -193,35 +237,146 @@ def _make_temp_folder(parent: Path) -> Path:
             continue
         except OSError as e:
             raise StampError(f"Can't write to the folder {parent} ({e.strerror or e}).") from None
-        _hide(folder)
         _LIVE.add(folder)
+        try:
+            _write_marker(folder)
+        except OSError as e:
+            _remove_own_folder(folder)
+            _LIVE.discard(folder)
+            raise StampError(f"Can't write to the folder {parent} ({e.strerror or e}).") from None
+        if hide:
+            _hide(folder)
         return folder
     raise StampError(f"Can't create a temporary folder in {parent}.")
 
 
-def remove_stale_temp(parent: Path, *, older_than_s: float = STALE_AFTER_S) -> list[Path]:
-    """Remove ``~stamper-combine-*`` folders older than ``older_than_s`` in ``parent``.
+def _remove_own_folder(folder: Path) -> None:
+    """Remove a work folder this process made: its plain files, any link (never its target), then itself."""
+    try:
+        entries = list(os.scandir(folder))
+    except OSError:
+        return
+    for entry in entries:
+        try:
+            st = entry.stat(follow_symlinks=False)
+            if _is_link(st):
+                # The link itself goes; what it points to is never touched.
+                (os.rmdir if entry.is_dir(follow_symlinks=False) or stat.S_ISDIR(st.st_mode) else os.unlink)(entry.path)
+            elif stat.S_ISREG(st.st_mode):
+                os.unlink(entry.path)
+        except OSError:
+            pass
+    try:
+        os.rmdir(folder)
+    except OSError:
+        pass
 
-    Folders left by a crash or a power cut; a folder still in use by this
-    process is never removed. Returns the folders removed.
+
+def _on_network_drive(path: Path) -> bool:
+    """True for a UNC path or a mapped network drive (Windows); False elsewhere."""
+    text = str(path)
+    if text.startswith("\\\\?\\UNC\\"):
+        return True
+    if text.startswith("\\\\?\\"):
+        text = text[4:]
+    if text.startswith("\\\\"):
+        return True
+    if sys.platform != "win32":
+        return False
+    import ctypes
+
+    drive = os.path.splitdrive(os.path.abspath(text))[0]
+    if not drive:
+        return False
+    kernel32 = ctypes.WinDLL("kernel32")  # type: ignore[attr-defined]
+    kernel32.GetDriveTypeW.argtypes = [ctypes.c_wchar_p]
+    kernel32.GetDriveTypeW.restype = ctypes.c_uint
+    return kernel32.GetDriveTypeW(drive + "\\") == 4  # DRIVE_REMOTE
+
+
+def _size_text(n: int) -> str:
+    mb = n / (1024 * 1024)
+    return f"{mb / 1024:.1f} GB" if mb >= 1024 else f"{max(mb, 0.1):.1f} MB"
+
+
+def work_folder_problem(folder: Path, needed: int) -> str:
+    """Why the private work folder can't take a combine of about ``needed`` bytes; empty if it can (D-115)."""
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        return f"it can't be created: {e.strerror or e}"
+    try:
+        real = folder.resolve()
+    except OSError:
+        real = folder
+    if _on_network_drive(real):
+        return f"it's on a network drive ({real})"
+    try:
+        free = shutil.disk_usage(folder).free
+    except OSError as e:
+        return f"its free space can't be read: {e.strerror or e}"
+    if free < needed + SPACE_MARGIN:
+        return f"{_size_text(free)} free there, about {_size_text(needed + SPACE_MARGIN)} needed"
+    return ""
+
+
+def remove_stale_temp(parent: Path, *, older_than_s: float = STALE_AFTER_S,
+                      alive: Callable[[int], bool] | None = None) -> list[Path]:
+    """Remove work folders a stopped run left in ``parent``; returns those removed (D-120).
+
+    A folder is removed only if all of these hold: its name starts with
+    ``~stamper-combine-``; it isn't a link or junction; it holds a readable
+    ``.stamper-work`` marker; the process named in the marker has stopped, or
+    the marker is older than ``older_than_s``; and everything in it is a
+    plain file (no links, junctions or subfolders). Only those files are
+    deleted, then the empty folder. A folder still in use by this process is
+    never touched. Anything else is left alone, whatever its name.
     """
+    from ..core.pending import pid_alive
+
+    is_alive = alive if alive is not None else pid_alive
     removed: list[Path] = []
     try:
-        entries = list(Path(parent).iterdir())
+        entries = list(os.scandir(parent))
     except OSError:
         return removed
     now = time.time()
     for entry in entries:
-        if not entry.name.startswith(TEMP_PREFIX) or entry in _LIVE:
+        folder = Path(entry.path)
+        if not entry.name.startswith(TEMP_PREFIX) or folder in _LIVE:
             continue
         try:
-            if not entry.is_dir() or now - entry.stat().st_mtime < older_than_s:
-                continue
+            st = entry.stat(follow_symlinks=False)
         except OSError:
             continue
-        shutil.rmtree(entry, ignore_errors=True)
-        if not entry.exists():
-            removed.append(entry)
+        if _is_link(st) or not stat.S_ISDIR(st.st_mode):
+            continue
+        try:
+            marker = json.loads((folder / MARKER_NAME).read_text(encoding="utf-8"))
+            pid = int(marker["pid"])
+            started = float(marker["started"])
+        except (OSError, ValueError, KeyError, TypeError):
+            continue  # no marker of ours: not ours to delete
+        if is_alive(pid) and now - started < older_than_s:
+            continue
+        try:
+            inside = list(os.scandir(folder))
+            plain = all(stat.S_ISREG(e.stat(follow_symlinks=False).st_mode)
+                        and not _is_link(e.stat(follow_symlinks=False)) for e in inside)
+        except OSError:
+            continue
+        if not plain:
+            continue
+        for e in inside:
+            try:
+                os.unlink(e.path)
+            except OSError:
+                pass
+        try:
+            os.rmdir(folder)
+        except OSError:
+            continue
+        removed.append(folder)
     return removed
 
 
@@ -424,16 +579,45 @@ def _copy_attachments(src: pymupdf.Document, out: pymupdf.Document, label: str) 
     return count
 
 
+def _private_or_fallback(inputs: Sequence[CombineInput], fallback: Path | None) -> tuple[Path, str]:
+    """The temporary folder: private work folder first, else ``fallback`` with the reason (D-115)."""
+    needed = 0
+    for item in inputs:
+        try:
+            needed += Path(item.path).stat().st_size
+        except OSError:
+            pass
+    private = work_dir()
+    reason = work_folder_problem(private, needed)
+    if not reason:
+        remove_stale_temp(private)
+        try:
+            return _make_temp_folder(private, hide=False), ""
+        except StampError as e:
+            reason = str(e).rstrip(".")
+    if fallback is None:
+        raise StampError(f"Your private work folder can't be used ({reason}), so the files weren't combined.")
+    remove_stale_temp(Path(fallback))
+    return _make_temp_folder(Path(fallback)), reason
+
+
 def combine_pdfs(
     inputs: Sequence[CombineInput],
-    folder: Path,
+    folder: Path | None = None,
     *,
+    fallback: Path | None = None,
     accept_signature_loss: bool = False,
     accept_restrictions: bool = False,
     progress: CombineProgress | None = None,
     cancel: CancelCheck | None = None,
 ) -> CombinedFile:
-    """Combine ``inputs``, in order, into one temporary PDF inside ``folder``.
+    """Combine ``inputs``, in order, into one temporary PDF.
+
+    With ``folder`` (tests), the temporary folder goes there. Without it, it
+    goes in the private work folder (D-115); if that can't be used, in
+    ``fallback`` (the output folder) with ``fallback_reason`` set on the
+    result, or StampError when there is no fallback. Stopped runs' folders
+    are swept first from whichever folder is used (D-120).
 
     Raises the handler's errors for a source (PasswordRequired, WrongPassword,
     UnsupportedDocument for a damaged or XFA file, SourceChanged for a source
@@ -477,7 +661,11 @@ def combine_pdfs(
             "Confirm to combine them anyway; the combined file has no restrictions.")
 
     first = Path(inputs[0].path)
-    temp = _make_temp_folder(Path(folder))
+    reason = ""
+    if folder is not None:
+        temp = _make_temp_folder(Path(folder))
+    else:
+        temp, reason = _private_or_fallback(inputs, fallback)
     target = temp / first.name if first.suffix.lower() == ".pdf" else temp / f"{first.stem}.pdf"
     out = pymupdf.open()
     try:
@@ -571,4 +759,5 @@ def combine_pdfs(
         signed=tuple(signed),
         renamed_fields=renamed,
         notes=tuple(notes),
+        fallback_reason=reason,
     )

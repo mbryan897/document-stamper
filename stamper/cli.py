@@ -552,7 +552,7 @@ def _run_combine(
     _confirmations(args, signed, restricted, "The combined file")
 
     combined = combine_pdfs(
-        [CombineInput(p, passwords[p], seen[p]) for p in paths], out_path.parent,
+        [CombineInput(p, passwords[p], seen[p]) for p in paths], fallback=out_path.parent,
         accept_signature_loss=args.accept_signature_loss,
         accept_restrictions=args.accept_restrictions,
     )
@@ -562,6 +562,8 @@ def _run_combine(
                                overwrite=args.overwrite)
     finally:
         combined.cleanup()
+    if combined.location_warning():
+        say(f"Note: {combined.location_warning()}")
     for note in combined.notes:
         say(f"Note: {note}")
     if combined.protection_warning():
