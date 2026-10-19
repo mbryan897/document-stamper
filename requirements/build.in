@@ -1,0 +1,6 @@
+# The packaged build (packaging\build.ps1): the app plus PyInstaller and the
+# build backend, so the project installs without fetching anything unpinned.
+-r runtime.in
+pyinstaller==6.22.3
+setuptools==84.0.0
+wheel==0.48.0

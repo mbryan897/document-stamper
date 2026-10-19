@@ -54,9 +54,16 @@ General → "Add to the Send to menu" puts Document Stamper in Explorer's right-
 
 ## Test build
 
+Builds use hash-locked dependencies (`requirements\*.lock`), so the exe contains exactly the packages that were tested. With Python 3.14 and the dev venv active:
+
 ```powershell
+python -m pip install pip-tools==7.6.2 pip-audit==2.10.1   # first time only
+.\tools\lock.ps1                                           # after changing requirements\*.in
+python -m pip install --require-hashes -r requirements\dev.lock
 .\packaging\build.ps1
 ```
+
+`build.ps1` checks the Python version, runs `pip-audit` on `requirements\build.lock` (it needs the network), installs only from the lock into a fresh `.venv-build`, and writes `dist\SHA256SUMS.txt`. `pip-audit` sees advisories filed against the PyPI packages, not CVEs in the MuPDF library inside PyMuPDF; when PyMuPDF changes, check its MuPDF version against NVD or OSV by hand.
 
 This makes two unsigned test builds:
 

@@ -1,0 +1,6 @@
+# What the app needs at run time. Exact pins, the same as pyproject.toml
+# (D-021); tests/test_requirements.py checks the two agree.
+# Lock with tools\lock.ps1 on Windows, Python 3.14 (D-117).
+PyMuPDF==1.28.2
+PySide6==6.12.0
+pydantic==2.14.1

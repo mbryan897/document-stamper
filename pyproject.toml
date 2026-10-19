@@ -34,6 +34,8 @@ dev = [
     "pytest==9.1.1",
     "pytest-qt==4.5.0",
     "pyinstaller==6.22.3",
+    "pip-tools==7.6.2",  # locks requirements\*.in with hashes (D-117)
+    "pip-audit==2.10.1",  # checks the locks for known vulnerabilities before a build
 ]
 
 [project.urls]
