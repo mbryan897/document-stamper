@@ -47,7 +47,7 @@ from ..handlers.base import (
     StampDoesNotFit,
     StampJob,
 )
-from ..handlers.pdf import same_file
+from ..handlers.pdf import PROPERTIES_NOTE_PREFIX, same_file
 from .engine import ApplyRequest, EngineClient, EngineFailure
 from .page_numbers import (
     CHOICE_LABELS,
@@ -80,6 +80,11 @@ def _pages_text(pages: Sequence[int]) -> str:
     more = len(pages) - len(listed)
     body = ", ".join(listed[:-1]) + f" and {listed[-1]}" if not more else ", ".join(listed) + f" and {more} more"
     return f"pages {body}"
+
+
+def _before_saving(warnings: Sequence[str]) -> list[str]:
+    """The plan's notes without the document-properties line, which belongs on the saved screen (D-125)."""
+    return [w for w in warnings if not w.startswith(PROPERTIES_NOTE_PREFIX)]
 
 
 def group_warnings(warnings: Sequence[str]) -> list[str]:
@@ -917,7 +922,7 @@ class StampDialog(QWidget):
             self.notes_frame.hide()
         else:
             assert self._plan is not None
-            notes = group_warnings(self._plan.warnings)
+            notes = group_warnings(_before_saving(self._plan.warnings))
             if notes:
                 title = QLabel("Before you save")
                 title.setStyleSheet("font-weight: 700;")
@@ -951,7 +956,7 @@ class StampDialog(QWidget):
 
     def plan_warnings(self) -> list[str]:
         """The notes shown under "Before you save" (empty if none or not checked yet)."""
-        return group_warnings(self._plan.warnings) if self._plan is not None else []
+        return group_warnings(_before_saving(self._plan.warnings)) if self._plan is not None else []
 
     # ------------------------------------------------------------ the button
 

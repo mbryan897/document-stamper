@@ -89,6 +89,17 @@ def is_frozen() -> bool:
     return bool(getattr(sys, "frozen", False))
 
 
+def _override(name: str) -> str | None:
+    """A folder override from the environment, for source runs and tests only.
+
+    The packaged app ignores them (D-121): a variable planted in a user's
+    environment can't point the app at another config or work folder.
+    """
+    if is_frozen():
+        return None
+    return os.environ.get(name) or None
+
+
 def resource_dir() -> Path:
     """Where ``assets/`` and ``config/default.json`` are.
 
@@ -103,7 +114,7 @@ def resource_dir() -> Path:
 
 def app_dir() -> Path:
     """The folder whose ``config.json`` comes first: the exe's folder, or the repo root."""
-    override = os.environ.get("STAMPER_APP_DIR")
+    override = _override("STAMPER_APP_DIR")
     if override:
         return Path(override)
     if is_frozen():
@@ -113,7 +124,7 @@ def app_dir() -> Path:
 
 def user_dir() -> Path:
     """``%APPDATA%\\DocumentStamper``; elsewhere ``~/.config/DocumentStamper``."""
-    override = os.environ.get("STAMPER_USER_DIR")
+    override = _override("STAMPER_USER_DIR")
     if override:
         return Path(override)
     appdata = os.environ.get("APPDATA")
@@ -129,7 +140,7 @@ def local_dir() -> Path:
     Elsewhere ``~/.local/share/DocumentStamper``. ``STAMPER_LOCAL_DIR`` overrides
     it for tests.
     """
-    override = os.environ.get("STAMPER_LOCAL_DIR")
+    override = _override("STAMPER_LOCAL_DIR")
     if override:
         return Path(override)
     local = os.environ.get("LOCALAPPDATA")
@@ -329,6 +340,7 @@ class AppState:
 
     last_profile: str | None = None
     last_folder: str | None = None
+    last_config: str | None = None  # the config found at the last start-up (D-121)
     extra: dict[str, object] = field(default_factory=dict)  # keys from newer versions, kept as-is
 
     def to_json(self) -> str:
@@ -336,6 +348,7 @@ class AppState:
         data: dict[str, object] = dict(self.extra)
         data["last_profile"] = self.last_profile
         data["last_folder"] = self.last_folder
+        data["last_config"] = self.last_config
         return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
 
@@ -350,9 +363,11 @@ def load_state(locs: Locations | None = None) -> AppState:
         return AppState()
     profile = data.pop("last_profile", None)
     folder = data.pop("last_folder", None)
+    config = data.pop("last_config", None)
     return AppState(
         last_profile=profile if isinstance(profile, str) else None,
         last_folder=folder if isinstance(folder, str) else None,
+        last_config=config if isinstance(config, str) else None,
         extra=data,
     )
 

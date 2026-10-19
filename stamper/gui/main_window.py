@@ -275,9 +275,14 @@ class DropScreen(QWidget):
         outer.addWidget(self.config_label)
         outer.addStretch(1)
 
-    def show_message(self, text: str) -> None:
-        """A plain message under the drop target; empty hides it."""
+    def show_message(self, text: str, *, warning: bool = False) -> None:
+        """A message under the drop target, plain or amber; empty hides it."""
         self.message.setText(text)
+        name = "warning" if warning and text else "notice"
+        if self.message_frame.objectName() != name:
+            self.message_frame.setObjectName(name)
+            self.message_frame.style().unpolish(self.message_frame)
+            self.message_frame.style().polish(self.message_frame)
         self.message_frame.setVisible(bool(text))
 
     def show_leftovers(self, text: str, count: int) -> None:
@@ -502,7 +507,23 @@ class MainWindow(QMainWindow):
         # Keep the reason on screen when the config can't be used.
         self.show_drop("" if loaded else self.drop.message.text())
         remove_stale_temp(work_dir())  # combine folders left by a stopped run (D-120)
+        if loaded:
+            self._note_config_change()
         self.check_leftovers()
+
+    def _note_config_change(self) -> None:
+        """Say so when the config found at start-up isn't the one found last time (D-121)."""
+        if self.source is None or self.source.kind is SourceKind.OTHER or self.config_path is None:
+            return
+        now, before = str(self.config_path), self.state.last_config
+        if before and before != now:
+            self.drop.show_message(
+                "This is a different config from last time. "
+                f"Now: {visible(now)} ({self.source.kind.description}). Before: {visible(before)}. "
+                "Check the profile and fields before you stamp.", warning=True)
+        if before != now:
+            self.state.last_config = now
+            save_state(self.state, self.locs)
 
     # ------------------------------------------------------------ partial copies (D-124)
 

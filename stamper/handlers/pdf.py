@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 import tempfile
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
@@ -169,6 +170,128 @@ def _page_list(numbers: list[int]) -> str:
     return f"page{'s' if len(numbers) > 1 else ''} {shown}{more}"
 
 
+_ACTION_KINDS = {
+    "JavaScript": "JavaScript",
+    "Launch": "an action that opens another file or program",
+    "SubmitForm": "a form that sends its data somewhere",
+    "ImportData": "an action that imports data",
+    "GoToR": "links that open other PDF files",
+    "GoToE": "links into attached files",
+}
+_ACTION_RE = re.compile(r"/S\s*/(JavaScript|Launch|SubmitForm|ImportData|GoToR|GoToE)\b")
+_REF_RE = re.compile(r"(\d+)\s+0\s+R")
+
+
+def _action_kinds(doc: pymupdf.Document, xref: int, key: str, found: set[str]) -> None:
+    """Add the kinds of action under ``key`` of object ``xref``, following references a few levels."""
+    kind, val = doc.xref_get_key(xref, key)
+    if kind in ("null", "array") and key == "OpenAction":
+        return  # a destination, not an action
+    if kind == "null":
+        return
+    texts = [val]
+    seen: set[int] = set()
+    for _depth in range(3):
+        refs = [int(m.group(1)) for t in texts for m in _REF_RE.finditer(t)]
+        texts_next = []
+        for r in refs:
+            if r in seen or not 0 < r < doc.xref_length():
+                continue
+            seen.add(r)
+            try:
+                if doc.xref_is_stream(r):
+                    continue  # script text itself; the /S that named it is in the parent
+                texts_next.append(doc.xref_object(r, compressed=True))
+            except Exception:  # an unreadable object is skipped, never fatal
+                continue
+        for t in texts:
+            found.update(m.group(1) for m in _ACTION_RE.finditer(t))
+        texts = texts_next
+        if not texts:
+            break
+    for t in texts:
+        found.update(m.group(1) for m in _ACTION_RE.finditer(t))
+
+
+def active_content(doc: pymupdf.Document) -> tuple[str, ...]:
+    """What the document carries that can act by itself, read without running anything (D-119)."""
+    kinds: set[str] = set()
+    cat = doc.pdf_catalog()
+    if doc.xref_get_key(cat, "Names/JavaScript")[0] != "null":
+        kinds.add("JavaScript")
+    for key in ("OpenAction", "AA"):
+        _action_kinds(doc, cat, key, kinds)
+    attached_annots = 0
+    media = False
+    for page in doc:
+        _action_kinds(doc, page.xref, "AA", kinds)
+        # Every annotation, links and form fields included (page.annots() leaves links out).
+        for xref, _type, _id in page.annot_xrefs():
+            subtype = doc.xref_get_key(xref, "Subtype")[1].lstrip("/")
+            if subtype == "FileAttachment":
+                attached_annots += 1
+            elif subtype in ("RichMedia", "3D", "Screen", "Movie", "Sound"):
+                media = True
+            for key in ("A", "AA", "Parent/AA"):
+                _action_kinds(doc, xref, key, kinds)
+    out = [_ACTION_KINDS[k] for k in _ACTION_KINDS if k in kinds]
+    files = doc.embfile_count() + attached_annots
+    if files:
+        out.append(f"{files} attached file{'s' if files != 1 else ''}")
+    if media:
+        out.append("embedded media")
+    return tuple(out)
+
+
+def _join(items: list[str]) -> str:
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def active_content_notes(info: DocumentInfo) -> list[str]:
+    """Plain notes for active content and earlier revisions (D-119); nothing is removed."""
+    notes: list[str] = []
+    if info.active_content:
+        notes.append(f"This file contains {_join(list(info.active_content))}. "
+                     "The stamped copy keeps them unchanged.")
+    if info.revisions > 1:
+        notes.append(f"This file was edited after it was first saved ({info.revisions} saved versions). "
+                     "The stamped copy keeps only the latest version, as a viewer shows it.")
+    return notes
+
+
+PROPERTIES_NOTE_PREFIX = "Document properties in the copy:"
+_STANDARD_PROPERTIES = ("Title", "Author", "Subject", "Keywords", "Creator", "Producer",
+                        "CreationDate", "ModDate", "Trapped")
+
+
+def _info_keys(doc: pymupdf.Document) -> tuple[list[str], str]:
+    """The Info dictionary's keys and its StamperSources text, without changing the document."""
+    kind, val = doc.xref_get_key(-1, "Info")
+    if kind != "xref":
+        return [], ""
+    xref = int(val.split()[0])
+    sources = doc.xref_get_key(xref, "StamperSources")
+    return list(doc.xref_get_keys(xref)), sources[1] if sources[0] == "string" else ""
+
+
+def properties_note(keys: list[str], sources: str, has_xmp: bool) -> str:
+    """What document properties the copy carries, for whoever discloses it (D-125)."""
+    standard = [k for k in _STANDARD_PROPERTIES if k in keys]
+    custom = sorted(set(keys) - set(_STANDARD_PROPERTIES))
+    parts = [f"{PROPERTIES_NOTE_PREFIX} {', '.join(standard) if standard else 'none of the standard ones'}."]
+    if custom:
+        named = []
+        for k in custom:
+            if k == "StamperSources":
+                count = len([line for line in sources.splitlines() if line.strip()])
+                named.append(f"StamperSources (the {count} source file names)")
+            else:
+                named.append(k)
+        parts.append(f"Custom properties: {', '.join(named)}.")
+    parts.append("XMP metadata: yes, carried over unchanged." if has_xmp else "XMP metadata: none.")
+    return " ".join(parts)
+
+
 def size_notes(info: DocumentInfo) -> list[str]:
     """Soft notes for unusual page sizes and very large files (D-122); never a refusal."""
     notes: list[str] = []
@@ -181,13 +304,13 @@ def size_notes(info: DocumentInfo) -> list[str]:
         notes.append(f"{_page_list(large).capitalize()} {'is' if len(large) == 1 else 'are'} over "
                      f"{LARGE_PAGE_IN:g} inches on a side, so the preview is drawn at a lower resolution.")
     if info.page_count > LARGE_PAGE_COUNT:
-        notes.append(f"{info.path.name} has {info.page_count:,} pages; checking and saving take longer.")
+        notes.append(f"This file has {info.page_count:,} pages; checking and saving take longer.")
     try:
         size = info.path.stat().st_size
     except OSError:
         size = 0
     if size > LARGE_FILE_BYTES:
-        notes.append(f"{info.path.name} is {size / (1024 * 1024):,.0f} MB; checking and saving take longer.")
+        notes.append(f"This file is {size / (1024 * 1024):,.0f} MB; checking and saving take longer.")
     return notes
 
 
@@ -312,6 +435,8 @@ class PdfHandler(Handler):
             has_xmp=bool(xml.strip()),
             has_form_fields=bool(doc.is_form_pdf),
             encryption=encryption,
+            active_content=active_content(doc),
+            revisions=max(1, int(getattr(doc, "version_count", 1) or 1)),
         )
 
     def inspect(self, path: Path, password: str | None = None) -> DocumentInfo:
@@ -540,6 +665,7 @@ class PdfHandler(Handler):
         if info.has_xmp:
             notes.append("The original has XMP metadata, which wasn't updated; only the document properties were.")
         notes.extend(size_notes(info))
+        notes.extend(active_content_notes(info))
         return notes
 
     def plan(
@@ -570,6 +696,9 @@ class PdfHandler(Handler):
                 planned = self._plan_page(page, job, values, warnings)
                 placements.extend(self._placements(page.number + 1, planned))
             written, replaced = self._metadata_plan(doc, job, src.stem, today, warnings)
+            keys, sources = _info_keys(doc)
+            warnings.append(properties_note([*keys, *[k for k in (*written, "ModDate") if k not in keys]],
+                                            sources, info.has_xmp))
         return PlanResult(
             page_count=total,
             warnings=tuple(warnings),
@@ -725,6 +854,8 @@ class PdfHandler(Handler):
             written, replaced = self._write_metadata(doc, job, original_name, today, warnings)
             if cancel is not None and cancel():
                 raise Cancelled("Stamping was cancelled. Nothing was saved.")
+            keys, sources = _info_keys(doc)
+            warnings.append(properties_note(keys, sources, info.has_xmp))
 
             keep = info.encrypted and not remove_encryption
             if info.encrypted and remove_encryption:

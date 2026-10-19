@@ -37,6 +37,7 @@ from .template import BUILTIN_TOKENS, TemplateError, template_tokens
 
 __all__ = [
     "ANCHORS",
+    "MAX_CONFIG_BYTES",
     "SCHEMA_VERSION",
     "Config",
     "ConfigError",
@@ -468,6 +469,9 @@ def parse_config(data: Any, source: str = "") -> Config:
         raise ConfigError(problems, source) from None
 
 
+MAX_CONFIG_BYTES = 1_000_000  # refused before parsing (D-121)
+
+
 def load_config(path: Path) -> Config:
     """Read and validate a config.json file; raises ConfigError.
 
@@ -475,6 +479,13 @@ def load_config(path: Path) -> Config:
     one).
     """
     name = path.name
+    try:
+        size = path.stat().st_size
+    except OSError:
+        size = 0  # read_text below reports a missing or unreadable file
+    if size > MAX_CONFIG_BYTES:
+        raise ConfigError([f"the file is {size / 1_000_000:.1f} MB; a config is never larger than "
+                           f"{MAX_CONFIG_BYTES // 1_000_000} MB, so check it's the right file"], name)
     try:
         text = path.read_text(encoding="utf-8-sig")
     except FileNotFoundError:

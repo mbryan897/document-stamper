@@ -108,7 +108,7 @@ def test_last_profile_and_folder_are_remembered(qtbot: QtBot, fake: FakeServices
     pdf = copy_to(corpus_dir / "letter_portrait.pdf", work)
     open_dialog(qtbot, w, pdf)
     w.close()
-    assert load_state(locs) == AppState("Second", str(work))
+    assert load_state(locs) == AppState("Second", str(work), str(locs.app_config))  # last_config (D-121)
     assert "99-2026" not in locs.state_file.read_text(encoding="utf-8")  # no field values
 
     w2 = _window(qtbot, fake, locs)

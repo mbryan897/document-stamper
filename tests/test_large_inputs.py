@@ -62,5 +62,5 @@ def test_many_pages_and_big_files_get_notes(corpus_dir: Path, monkeypatch: pytes
     monkeypatch.setattr(pdf, "LARGE_PAGE_COUNT", 500)
     monkeypatch.setattr(pdf, "LARGE_FILE_BYTES", 1)
     notes = size_notes(info)
-    assert any("has 520 pages; checking and saving take longer" in n for n in notes)
+    assert "This file has 520 pages; checking and saving take longer." in notes
     assert any("MB; checking and saving take longer" in n for n in notes)

@@ -195,6 +195,8 @@ class DocumentInfo:
     has_form_fields: bool
     encryption: str | None = None
     fingerprint: SourceFingerprint | None = None
+    active_content: tuple[str, ...] = ()  # e.g. "JavaScript", "2 attached files" (D-119); never removed
+    revisions: int = 1  # saved versions in the file: 2 or more means it was edited incrementally
 
 
 @dataclass(frozen=True, slots=True)
