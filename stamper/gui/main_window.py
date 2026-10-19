@@ -34,8 +34,10 @@ from PySide6.QtGui import (
     QDragEnterEvent,
     QDropEvent,
     QGuiApplication,
+    QKeySequence,
     QPixmap,
     QScreen,
+    QShortcut,
     QShowEvent,
 )
 from PySide6.QtWidgets import (
@@ -81,6 +83,7 @@ from ..handlers.combine import CombinedFile, remove_stale_temp
 from ..handlers.pdf import PdfHandler
 from .engine import EngineClient, EngineFailure, TaskContext
 from .fonts import MONO_FAMILY
+from .help import HELP_SHORTCUT, HelpWindow, help_button
 from .multi import (
     BATCH,
     COMBINE,
@@ -263,10 +266,12 @@ class DropScreen(QWidget):
         self.settings_button = QPushButton("Profile settings…")
         self.settings_button.setObjectName("link")
         self.settings_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.help_button = help_button()
         row.addWidget(with_label)
         row.addWidget(self.profile_combo)
         row.addWidget(self.settings_button)
         row.addWidget(self.config_button)
+        row.addWidget(self.help_button)
         row.addStretch(1)
         outer.addLayout(row)
         self.config_label = QLabel("")
@@ -274,6 +279,12 @@ class DropScreen(QWidget):
         self.config_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         outer.addWidget(self.config_label)
         outer.addStretch(1)
+
+    def help_topic(self) -> str:
+        """The help topic for this screen (F1 and the Help button)."""
+        if not self.leftover_frame.isHidden():
+            return "messages#partial-copies-left-behind"
+        return "opening-files"
 
     def show_message(self, text: str, *, warning: bool = False) -> None:
         """A message under the drop target, plain or amber; empty hides it."""
@@ -366,15 +377,21 @@ class SavedScreen(QWidget):
         self.folder_button = QPushButton("Show in folder")
         self.another_button = QPushButton("Stamp another file")
         self.another_button.setObjectName("link")
+        self.help_button = help_button()
         buttons.addWidget(self.open_button)
         buttons.addWidget(self.folder_button)
         buttons.addWidget(self.another_button)
         buttons.addStretch(1)
+        buttons.addWidget(self.help_button)
         right.addLayout(buttons)
         cl.addLayout(right, 1)
         outer.addWidget(card, 0, Qt.AlignmentFlag.AlignHCenter)
         outer.addStretch(1)
         self.result: ApplyResult | None = None
+
+    def help_topic(self) -> str:
+        """The help topic for this screen."""
+        return "saving#the-saved-screen"
 
     def show_result(self, result: ApplyResult, *, label: str, identifier: str, signed: bool,
                     extra_notes: Sequence[str] = (), original_text: str | None = None) -> None:
@@ -455,6 +472,7 @@ class MainWindow(QMainWindow):
         self.settings: ProfileSettings | None = None
         self.prepare: PrepareScreen | None = None
         self._combined: CombinedFile | None = None
+        self.help: HelpWindow | None = None
         self._task: tuple[str, int] | None = None  # ("screen" | "add" | "combine", request)
         self._mode = ""
         self._opening: tuple[int, Path, str | None] | None = None
@@ -497,6 +515,10 @@ class MainWindow(QMainWindow):
         self.busy.cancel.connect(self.engine.cancel)
         self.batch_saved.another_button.clicked.connect(lambda: self.show_drop())
 
+        for screen in (self.drop, self.saved, self.files_screen, self.busy, self.batch_saved):
+            self._wire_help(screen)
+        QShortcut(QKeySequence(HELP_SHORTCUT), self, self.help_for_screen)
+
         self.leftovers: list[Leftover] = []
         self.drop.leftover_delete.clicked.connect(self.delete_leftovers)
         self.drop.leftover_keep.clicked.connect(self.keep_leftovers)
@@ -524,6 +546,34 @@ class MainWindow(QMainWindow):
         if before != now:
             self.state.last_config = now
             save_state(self.state, self.locs)
+
+    # ------------------------------------------------------------ help (D-134)
+
+    def _wire_help(self, screen: QWidget) -> None:
+        """Connect a screen's Help button (and any help links inside it) to the Help window."""
+        button = getattr(screen, "help_button", None)
+        if isinstance(button, QPushButton):
+            button.clicked.connect(lambda _c=False, s=screen: self.show_help(s.help_topic()))
+        requested = getattr(screen, "help_requested", None)
+        if requested is not None:
+            requested.connect(self.show_help)
+
+    def help_topic(self) -> str:
+        """The help topic for the screen showing now."""
+        screen = self.stack.currentWidget()
+        topic = getattr(screen, "help_topic", None)
+        return topic() if callable(topic) else ""
+
+    def help_for_screen(self) -> HelpWindow:
+        """F1: help for the screen showing now."""
+        return self.show_help(self.help_topic())
+
+    def show_help(self, link: str = "") -> HelpWindow:
+        """Open the Help window at a topic (one window, reused)."""
+        if self.help is None:
+            self.help = HelpWindow()
+        self.help.show_topic(link)
+        return self.help
 
     # ------------------------------------------------------------ partial copies (D-124)
 
@@ -668,6 +718,7 @@ class MainWindow(QMainWindow):
             services=self.services, today=self.today, sendto_shortcut=self._sendto_shortcut)
         settings.saved.connect(self._settings_saved)
         settings.closed.connect(lambda: self.show_drop())
+        self._wire_help(settings)
         self.settings = settings
         self.stack.addWidget(settings)
         self.stack.setCurrentWidget(settings)
@@ -770,6 +821,7 @@ class MainWindow(QMainWindow):
         )
         dialog.cancelled.connect(lambda: self.show_drop())
         dialog.saved.connect(self._on_saved)
+        self._wire_help(dialog)
         self.dialog = dialog
         self.stack.addWidget(dialog)
         self.stack.setCurrentWidget(dialog)
@@ -829,6 +881,7 @@ class MainWindow(QMainWindow):
             prepare = PrepareScreen(files, mode, self.engine)
             prepare.back.connect(self._back_to_files)
             prepare.proceed.connect(self._prepared)
+            self._wire_help(prepare)
             self.prepare = prepare
             self.stack.addWidget(prepare)
             self.stack.setCurrentWidget(prepare)
@@ -909,6 +962,7 @@ class MainWindow(QMainWindow):
                                engine=self.engine, services=self.services, today=self.today)
         dialog.cancelled.connect(lambda: self._back_to_files())
         dialog.saved.connect(self._on_saved)
+        self._wire_help(dialog)
         self.dialog = dialog
         self.stack.addWidget(dialog)
         self.stack.setCurrentWidget(dialog)
@@ -924,6 +978,7 @@ class MainWindow(QMainWindow):
                              engine=self.engine, handler=self.handler, services=self.services, today=self.today)
         dialog.cancelled.connect(lambda: self._back_to_files())
         dialog.batch_saved.connect(self._on_batch_saved)
+        self._wire_help(dialog)
         self.dialog = dialog
         self.stack.addWidget(dialog)
         self.stack.setCurrentWidget(dialog)
@@ -1025,6 +1080,10 @@ class MainWindow(QMainWindow):
         self._close_settings()
         self._close_prepare()
         combined, self._combined = self._combined, None
+        if self.help is not None:
+            self.help.close()  # it's a window of its own; it mustn't keep the app running
+            self.help.deleteLater()
+            self.help = None
         self.engine.shutdown()
         if combined is not None:
             combined.cleanup()  # the engine has stopped, so nothing holds the file open

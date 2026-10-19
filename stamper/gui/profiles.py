@@ -67,11 +67,14 @@ from ..handlers.pdf import same_file, write_sample_page
 from .color_picker import ColorButton, light_color_note
 from .config_draft import ConfigDraft, DraftRefused, diff_summary, sample_values
 from .engine import EngineClient, EngineFailure
+from .help import help_button
 from .services import Services
+from .wrap_label import WrapAnywhereLabel
 
-__all__ = ["PATTERN_HELP", "ProfileSettings", "SECTIONS", "plain_problem"]
+__all__ = ["PATTERN_HELP", "ProfileSettings", "SECTIONS", "SECTION_HELP", "plain_problem"]
 
 SECTIONS = ("Profiles", "Fields", "Lists", "General")
+SECTION_HELP = ("profiles-and-stamps", "fields-and-lists", "fields-and-lists#lists", "where-the-config-lives")
 PREVIEW_DEBOUNCE_MS = 150
 PREVIEW_W = 220
 MAX_PROBLEMS = 8
@@ -648,7 +651,8 @@ class ProfilesPage(_Page):
         row.addWidget(self.include_original)
         row.addStretch(1)
         self.form.addLayout(row)
-        self.name_example = _label("", "mono")
+        self.name_example = WrapAnywhereLabel()  # D-137
+        self.name_example.setObjectName("mono")
         self.name_example.setAccessibleName("Example file name")
         self.form.addWidget(self.name_example)
 
@@ -1042,8 +1046,14 @@ class FieldsPage(_Page):
             help_btn = QPushButton("How to write a rule")
             help_btn.setObjectName("link")
             help_btn.setCheckable(True)
+            more = QPushButton("More in Help")
+            more.setObjectName("link")
+            more.setCursor(Qt.CursorShape.PointingHandCursor)
+            more.clicked.connect(lambda: self.owner.help_requested.emit("validation-rules"))
+            self.more_help = more
             row.addWidget(add)
             row.addWidget(help_btn)
+            row.addWidget(more)
             row.addStretch(1)
             self.form.addLayout(row)
             self.help = _label(PATTERN_HELP, "help")
@@ -1420,6 +1430,7 @@ class ProfileSettings(QWidget):
 
     saved = Signal(object)  # the ConfigSource now holding the config
     closed = Signal()
+    help_requested = Signal(str)  # a help topic, from a link inside a section
 
     def __init__(
         self,
@@ -1481,6 +1492,8 @@ class ProfileSettings(QWidget):
         title = _label("Profile settings", "h1", wrap=False)
         head.addWidget(title)
         head.addStretch(1)
+        self.help_button = help_button()
+        head.addWidget(self.help_button)
         bl.addLayout(head)
         self.source_label = _label("", "muted")
         bl.addWidget(self.source_label)
@@ -1571,6 +1584,10 @@ class ProfileSettings(QWidget):
             self.banner.show()
         else:
             self.banner.hide()
+
+    def help_topic(self) -> str:
+        """The help topic for the section showing."""
+        return SECTION_HELP[max(0, self.nav.currentRow())]
 
     def show_section(self, index: int) -> None:
         """Switch to a section: 0 Profiles, 1 Fields, 2 Lists, 3 General."""

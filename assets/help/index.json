@@ -1,0 +1,36 @@
+{
+  "title": "Document Stamper Help",
+  "parts": [
+    {
+      "title": "Using Document Stamper",
+      "topics": [
+        "what-it-does",
+        "opening-files",
+        "stamping-one-file",
+        "protected-files",
+        "several-files",
+        "saving",
+        "messages"
+      ]
+    },
+    {
+      "title": "Setting up profiles",
+      "topics": [
+        "profiles-and-stamps",
+        "fields-and-lists",
+        "validation-rules",
+        "where-the-config-lives",
+        "send-to-and-portable"
+      ]
+    },
+    {
+      "title": "Reference",
+      "topics": [
+        "command-line",
+        "what-changes",
+        "keyboard",
+        "about"
+      ]
+    }
+  ]
+}

@@ -69,6 +69,7 @@ from ..handlers.batch import BatchCheck, BatchItem, BatchOutcome, Status, check_
 from ..handlers.combine import CombinedFile, CombineInput, combine_pdfs
 from ..handlers.pdf import same_file
 from .engine import EngineClient, EngineFailure, TaskContext
+from .help import help_button
 from .services import Services
 from .stamp_dialog import StampDialog, _notice, _wrap_label
 
@@ -280,6 +281,8 @@ class FilesScreen(QWidget):
         self.back_button.setObjectName("link")
         self.back_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.back_button.clicked.connect(self.back.emit)
+        self.help_button = help_button()
+        head.addWidget(self.help_button, 0, Qt.AlignmentFlag.AlignTop)
         head.addWidget(self.back_button, 0, Qt.AlignmentFlag.AlignTop)
         lay.addLayout(head)
         self.lead = _wrap_label("Put the files in order, then choose what to do with them.", "lead")
@@ -359,6 +362,10 @@ class FilesScreen(QWidget):
         lay.addWidget(self.single_button, 0, Qt.AlignmentFlag.AlignLeft)
 
         _centre(outer, card)
+
+    def help_topic(self) -> str:
+        """The help topic for this screen."""
+        return "several-files"
 
     # ---------------------------------------------------------- contents
 
@@ -496,6 +503,10 @@ class BusyScreen(QWidget):
         outer.addWidget(card, 0, Qt.AlignmentFlag.AlignHCenter)
         outer.addStretch(1)
 
+    def help_topic(self) -> str:
+        """The help topic for this screen (checking and combining several files)."""
+        return "several-files"
+
     def start(self, title: str, detail: str = "") -> None:
         """Reset for a new piece of work."""
         self.title.setText(title)
@@ -568,6 +579,8 @@ class PrepareScreen(QWidget):
         self.status = _wrap_label("", "help")
         lay.addWidget(self.status)
         buttons = QHBoxLayout()
+        self.help_button = help_button()
+        buttons.addWidget(self.help_button)
         buttons.addStretch(1)
         self.back_button = QPushButton("Back")
         self.back_button.clicked.connect(self.back.emit)
@@ -582,6 +595,10 @@ class PrepareScreen(QWidget):
         engine.inspected.connect(self._on_inspected)
         engine.inspect_failed.connect(self._on_inspect_failed)
         self._build_body()
+
+    def help_topic(self) -> str:
+        """The help topic for this screen."""
+        return "several-files#before-stamping"
 
     # ---------------------------------------------------------- body
 
@@ -811,6 +828,10 @@ class CombineDialog(_MultiMixin, StampDialog):
     def _title_text(self) -> str:
         return "Stamp the combined file"
 
+    def help_topic(self) -> str:
+        """The help topic for this screen."""
+        return "several-files#stamping-the-combined-file"
+
     def _extend_head(self, layout: QVBoxLayout) -> None:
         row = QHBoxLayout()
         jump = QLabel("Go to file")
@@ -971,6 +992,10 @@ class BatchDialog(_MultiMixin, StampDialog):
 
     def _title_text(self) -> str:
         return f"Stamp {len(self.files)} files"
+
+    def help_topic(self) -> str:
+        """The help topic for this screen."""
+        return "several-files#stamping-each-file-separately"
 
     def _wrap_well(self, well: QFrame) -> QWidget:
         """The file list sits above the preview, not beside it.
@@ -1290,9 +1315,15 @@ class BatchSavedScreen(QWidget):
         buttons.addWidget(self.folder_button)
         buttons.addWidget(self.another_button)
         buttons.addStretch(1)
+        self.help_button = help_button()
+        buttons.addWidget(self.help_button)
         lay.addLayout(buttons)
         _centre(outer, card)
         self.open_buttons: list[QPushButton] = []
+
+    def help_topic(self) -> str:
+        """The help topic for this screen."""
+        return "several-files#the-results"
 
     def show_outcomes(self, outcomes: Sequence[BatchOutcome]) -> None:
         """Fill the list from the batch's outcomes."""

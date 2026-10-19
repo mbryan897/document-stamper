@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "settings": {
+    "date_format": "MM-DD-YYYY"
+  },
+  "taxonomies": {
+    "doc_types": [
+      "Report",
+      "Return",
+      "Order",
+      "Correspondence",
+      "Other"
+    ]
+  },
+  "fields": {
+    "identifier": {
+      "label": "Identifier",
+      "type": "text",
+      "required": true,
+      "normalize": ["trim", "upper", "dashes"],
+      "formats": [
+        { "pattern": "##-YYYY-######" }
+      ],
+      "from_filename": true
+    },
+    "doc_type": {
+      "label": "Document type",
+      "type": "choice",
+      "taxonomy": "doc_types",
+      "required": true
+    },
+    "doc_title": {
+      "label": "Document title",
+      "type": "text",
+      "required": false
+    },
+    "received": {
+      "label": "Date received",
+      "type": "date",
+      "required": false
+    }
+  },
+  "profiles": [
+    {
+      "name": "Standard",
+      "default": true,
+      "fields": ["identifier", "doc_type", "doc_title", "received"],
+      "stamps": [
+        {
+          "text": "{identifier}  |  {doc_type}  |  Page {page} of {total}",
+          "anchor": "top-right",
+          "direction": "along-top",
+          "margin_in": 0.25,
+          "font_size_pt": 9,
+          "color": "#2B3A8F",
+          "background_box": true,
+          "pages": "all"
+        }
+      ],
+      "output_name": {
+        "fields": ["identifier", "doc_type"],
+        "separator": "_",
+        "include_original_name": true
+      },
+      "metadata": {
+        "Identifier": "{identifier}"
+      }
+    },
+    {
+      "name": "Right edge",
+      "fields": ["identifier", "doc_type"],
+      "stamps": [
+        {
+          "text": "{identifier}  |  Page {page} of {total}",
+          "anchor": "top-right",
+          "direction": "along-right"
+        }
+      ],
+      "output_name": {
+        "fields": ["identifier"],
+        "separator": "_",
+        "include_original_name": true
+      }
+    }
+  ]
+}

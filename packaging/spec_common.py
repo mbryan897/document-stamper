@@ -17,6 +17,7 @@ DATAS = [
     (str(ROOT / "assets" / "fonts" / "*.ttf"), "assets/fonts"),
     (str(ROOT / "assets" / "fonts" / "*.txt"), "assets/fonts"),
     (str(ROOT / "config" / "default.json"), "config"),
+    (str(ROOT / "assets" / "help"), "assets/help"),  # the Help window's topics and pictures (D-133)
     (str(ROOT / "LICENSE"), "."),
     *copy_metadata("document-stamper"),  # so --version reports the real version
 ]

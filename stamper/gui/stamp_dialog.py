@@ -49,6 +49,7 @@ from ..handlers.base import (
 )
 from ..handlers.pdf import PROPERTIES_NOTE_PREFIX, same_file
 from .engine import ApplyRequest, EngineClient, EngineFailure
+from .help import help_button
 from .page_numbers import (
     CHOICE_LABELS,
     WITH_IDENTIFIER,
@@ -57,6 +58,7 @@ from .page_numbers import (
     page_number_option,
 )
 from .services import Services
+from .wrap_label import WrapAnywhereLabel
 
 __all__ = ["DEBOUNCE_MS", "StampDialog", "describe_date", "group_warnings"]
 
@@ -328,6 +330,10 @@ class StampDialog(QWidget):
     def _title_text(self) -> str:
         return "Stamp this document"
 
+    def help_topic(self) -> str:
+        """The help topic for this screen (F1 and the Help button)."""
+        return "stamping-one-file"
+
     def _name_source(self) -> str:
         """The original file name the suggested name is built from."""
         return visible(self.path.name)
@@ -587,7 +593,8 @@ class StampDialog(QWidget):
             self._ticks[name] = box
             ticks.addWidget(box, i // 2, i % 2)
         col.addLayout(ticks)
-        self.name_label = _wrap_label("", "mono")
+        self.name_label = WrapAnywhereLabel()  # a long name must not widen the panel (D-137)
+        self.name_label.setObjectName("mono")
         self.name_label.setAccessibleName("Suggested file name")
         col.addWidget(self.name_label)
         return col
@@ -618,6 +625,8 @@ class StampDialog(QWidget):
         self.status = _wrap_label("", "help")
         lay.addWidget(self.status)
         buttons = QHBoxLayout()
+        self.help_button = help_button()
+        buttons.addWidget(self.help_button)
         buttons.addStretch(1)
         self.cancel_button = QPushButton("Cancel")
         self.cancel_button.clicked.connect(self._escape)

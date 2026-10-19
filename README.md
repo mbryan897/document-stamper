@@ -36,7 +36,19 @@ python -m stamper                                  # the drop screen
 python -m stamper "D:\Returns\provider return.pdf"  # straight to the stamp dialog, as dragging a file onto the exe does
 ```
 
-Drop one PDF on the window (or use "Choose a file…"), check the fields and placement against the live preview, then "Stamp and save…". The copy is saved as a new file; the window never replaces an existing file or the original. With no arguments, or only existing files and no options, `python -m stamper` opens the window; anything else runs the command line.
+Drop one PDF on the window (or use "Choose files…"), check the fields and placement against the live preview, then "Stamp and save…". The copy is saved as a new file; the window never replaces an existing file or the original. With no arguments, or only existing files and no options, `python -m stamper` opens the window; anything else runs the command line.
+
+## Help
+
+Every screen has a Help button, and F1 opens the help at the topic for that screen. The help is the Markdown in [`assets/help`](assets/help/what-it-does.md), shown in the app's own Help window with contents and search, and readable here on GitHub too.
+
+The pictures in `assets/help/images` are taken from the real window on synthetic files:
+
+```powershell
+python tools\make_help_screenshots.py          # all of them; --list shows the groups
+```
+
+Run it after changing a screen. `tests\test_help.py` fails when a topic links to something missing, shows a picture that isn't there, names a button in **bold** that the interface no longer has, or leaves out a button or a command-line option.
 
 ## Profile settings and where the config lives
 
