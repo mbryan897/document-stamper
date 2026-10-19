@@ -5,7 +5,7 @@
 # runs, and removes them when it closes. config.json is looked for next to
 # the exe, so the exe plus its config.json is the portable copy.
 # Build: .\packaging\build.ps1
-# Test build only: no signing, icon or antivirus work yet (Phase 5).
+# Test build: icon in place; no signing, version resource or antivirus work yet (Phase 5).
 
 import sys
 from pathlib import Path
@@ -24,6 +24,7 @@ EXE(  # noqa: F821
     [],
     name="DocumentStamper",
     console=False,
+    icon=spec_common.ICON,
     upx=False,
     runtime_tmpdir=None,
 )

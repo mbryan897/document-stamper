@@ -13,11 +13,16 @@ from PyInstaller.utils.hooks import copy_metadata
 
 ROOT = Path(__file__).resolve().parent.parent
 
+# The exes' own icon: Explorer, the Send to menu, the taskbar when pinned.
+# Made by tools/make_icon.py; the window's icon comes from assets/icon/png.
+ICON = str(ROOT / "assets" / "icon" / "stamper.ico")
+
 DATAS = [
     (str(ROOT / "assets" / "fonts" / "*.ttf"), "assets/fonts"),
     (str(ROOT / "assets" / "fonts" / "*.txt"), "assets/fonts"),
     (str(ROOT / "config" / "default.json"), "config"),
     (str(ROOT / "assets" / "help"), "assets/help"),  # the Help window's topics and pictures (D-133)
+    (str(ROOT / "assets" / "icon" / "png" / "*.png"), "assets/icon/png"),  # window and taskbar icon
     (str(ROOT / "LICENSE"), "."),
     *copy_metadata("document-stamper"),  # so --version reports the real version
 ]

@@ -10,9 +10,11 @@ so there is no new dependency and nothing runs through PowerShell (which
 Constrained Language Mode may block on agency machines).
 
 Target: the exe in a packaged build; from source, ``pythonw.exe -m stamper``
-with the repo as the working folder. A copy of the app that moves (a USB
-stick with a new drive letter) leaves the shortcut pointing at the old
-place; ``status()`` says so and the window offers to re-create it.
+with the repo as the working folder. Icon: the exe's own icon when packaged;
+from source ``assets/icon/stamper.ico``, so the menu doesn't show Python's.
+A copy of the app that moves (a USB stick with a new drive letter) leaves
+the shortcut pointing at the old place; ``status()`` says so and the window
+offers to re-create it.
 
 Nothing here imports Qt. Only ``status`` and ``shortcut_path`` work off
 Windows (for tests); the rest raise ``SendToError``.
@@ -23,11 +25,11 @@ from __future__ import annotations
 import ctypes
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
-from .core.locations import app_dir, is_frozen
+from .core.locations import app_dir, is_frozen, resource_dir
 
 __all__ = [
     "SHORTCUT_NAME",
@@ -54,11 +56,12 @@ class SendToError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class Target:
-    """What the shortcut runs."""
+    """What the shortcut runs, and the icon it shows (not compared: it doesn't change what runs)."""
 
     path: Path
     arguments: str
     working_dir: Path
+    icon: Path | None = field(default=None, compare=False)
 
 
 class SendToState(Enum):
@@ -110,10 +113,12 @@ def target() -> Target:
     """What the shortcut should run for this copy of the app."""
     if is_frozen():
         exe = Path(sys.executable).resolve()
-        return Target(exe, "", exe.parent)
+        return Target(exe, "", exe.parent, exe)
     python = Path(sys.executable).resolve()
     pythonw = python.with_name("pythonw.exe")
-    return Target(pythonw if pythonw.is_file() else python, "-m stamper", app_dir())
+    ico = resource_dir() / "assets" / "icon" / "stamper.ico"
+    return Target(pythonw if pythonw.is_file() else python, "-m stamper", app_dir(),
+                  ico if ico.is_file() else None)
 
 
 def _same(a: Path, b: Path) -> bool:
@@ -147,7 +152,7 @@ def create(shortcut: Path | None = None, what: Target | None = None) -> Path:
         link.set_arguments(what.arguments)
         link.set_working_directory(str(what.working_dir))
         link.set_description(_DESCRIPTION)
-        link.set_icon(str(what.path), 0)
+        link.set_icon(str(what.icon or what.path), 0)
         link.save(str(lnk))
     return lnk
 
