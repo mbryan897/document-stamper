@@ -135,8 +135,8 @@ class CombinedFile:
 
     ``protected`` names sources that had a password or restrictions (the
     combined file has neither, D-096). ``signed`` names signed sources.
-    ``renamed_fields`` maps a source file name to its ``(old, new)`` field
-    names (D-098). ``notes`` are sentences for the stamp dialog and the
+    ``renamed_fields`` maps a source file name (with its place in the order
+    when two sources share a name) to its ``(old, new)`` field names (D-098). ``notes`` are sentences for the stamp dialog and the
     saved screen.
     """
 
@@ -546,8 +546,10 @@ def _rebuild_layers(out: pymupdf.Document, layers: dict[int, _Layers]) -> None:
 # ------------------------------------------------------------------ the combine step
 
 
-def _label(path: Path) -> str:
-    return path.name
+def _labels(paths: Sequence[Path]) -> list[str]:
+    """How the notes name each source: its file name, plus its place when two sources share a name."""
+    names = [p.name for p in paths]
+    return [f"{n} (file {i})" if names.count(n) > 1 else n for i, n in enumerate(names, start=1)]
 
 
 def _toc_for(doc: pymupdf.Document, label: str, offset: int) -> list[list[object]]:
@@ -681,11 +683,12 @@ def combine_pdfs(
         scripted: list[str] = []
         attachments = 0
         labelled = False
+        labels = _labels([Path(i.path) for i in inputs])
         for position, item in enumerate(inputs, start=1):
             if cancel is not None and cancel():
                 raise Cancelled("Combining was cancelled. Nothing was saved.")
             src_path = Path(item.path)
-            label = _label(src_path)
+            label = labels[position - 1]
             check_unchanged(src_path, fingerprints[position - 1])
             with handler._open(src_path, item.password) as (doc, _needed):
                 if doc.is_repaired:
