@@ -39,6 +39,8 @@ from tests.stamping import (
     default_job,
     is_dark,
     is_ink,
+    make_signed_pdf,
+    make_xfa_pdf,
     pixel_bbox,
     records_job,
     sha256,
@@ -73,30 +75,13 @@ def _info_dict(doc: pymupdf.Document) -> dict[str, str]:
 @pytest.fixture
 def signed_pdf(corpus_dir: Path, tmp_path: Path) -> Path:
     """AcroForm file whose first field is turned into a filled signature field."""
-    path = tmp_path / "signed_synthetic.pdf"
-    with pymupdf.open(corpus_dir / "acroform_filled.pdf") as d:
-        w = next(iter(d[0].widgets()))
-        sig = d.get_new_xref()
-        d.update_object(sig, "<</Type/Sig/Filter/Adobe.PPKLite/SubFilter/adbe.pkcs7.detached"
-                             "/Contents<00>/ByteRange[0 0 0 0]>>")
-        d.xref_set_key(w.xref, "FT", "/Sig")
-        d.xref_set_key(w.xref, "V", f"{sig} 0 R")
-        d.xref_set_key(d.pdf_catalog(), "AcroForm/SigFlags", "3")
-        d.save(path)
-    return path
+    return make_signed_pdf(corpus_dir, tmp_path / "signed_synthetic.pdf")
 
 
 @pytest.fixture
 def xfa_pdf(corpus_dir: Path, tmp_path: Path) -> Path:
     """AcroForm file with an /XFA entry added."""
-    path = tmp_path / "xfa_synthetic.pdf"
-    with pymupdf.open(corpus_dir / "acroform_filled.pdf") as d:
-        x = d.get_new_xref()
-        d.update_object(x, "<<>>")
-        d.update_stream(x, b"<xdp:xdp xmlns:xdp='http://ns.adobe.com/xdp/'/>")
-        d.xref_set_key(d.pdf_catalog(), "AcroForm/XFA", f"{x} 0 R")
-        d.save(path)
-    return path
+    return make_xfa_pdf(corpus_dir, tmp_path / "xfa_synthetic.pdf")
 
 
 @pytest.fixture
