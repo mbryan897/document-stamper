@@ -217,6 +217,8 @@ def _check_date(groups: dict[str, str | None]) -> DateCheck:
     yyyy, yy = groups.get("yyyy"), groups.get("yy")
     mm, dd = groups.get("mm"), groups.get("dd")
     year: int | None = int(yyyy) if yyyy is not None else (2000 + int(yy) if yy is not None else None)
+    if year == 0 and mm is not None and dd is not None:  # a year alone is just 4 digits
+        return DateCheck(False, "year 0000 isn't a real year")
     if mm is not None:
         month = int(mm)
         if not 1 <= month <= 12:

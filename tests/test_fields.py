@@ -282,3 +282,11 @@ def test_date_of_needs_year_month_and_day() -> None:
     assert compile_pattern("YYYYMMDD").date_of("20261017") == date(2026, 10, 17)
     assert compile_pattern("YYYYMMDD").date_of("20260230") is None
     assert compile_pattern("YYYYMMDD").date_of("2026101") is None
+
+
+def test_year_zero_is_refused_not_a_crash() -> None:
+    from stamper.core.patterns import compile_pattern
+
+    pattern = compile_pattern("SOYYYYMMDD-##")
+    assert not pattern.test("SO00000101-01").ok
+    assert pattern.date_of("SO00000101-01") is None  # date(0, 1, 1) would raise
