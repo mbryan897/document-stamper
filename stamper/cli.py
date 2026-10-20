@@ -36,6 +36,7 @@ from .core.fields import prefill_fields, validate_field, value_from_filename
 from .core.filenames import suggest_filename, visible
 from .core.locations import builtin_config_path, find_config
 from .core.multi import agree_from_filenames, combined_original_name, disagreement_note
+from .core.paths import FileIndex, same_file
 from .core.patterns import parse_date_format
 from .handlers.base import (
     Cancelled,
@@ -54,7 +55,7 @@ from .handlers.base import (
 )
 from .handlers.batch import BatchItem, BatchOutcome, Status, check_batch, run_batch
 from .handlers.combine import CombineInput, combine_pdfs
-from .handlers.pdf import PdfHandler, same_file
+from .handlers.pdf import PdfHandler
 
 __all__ = [
     "ExitCode", "batch_exit_code", "build_parser", "default_config_path", "get_version",
@@ -372,10 +373,11 @@ def _multi_inputs(paths: Sequence[Path], handler: PdfHandler) -> list[Path]:
             raise _Fail(ExitCode.UNSUPPORTED, f"Can't find the file {p}.")
         if not handler.can_open(p):
             raise _Fail(ExitCode.UNSUPPORTED, f"{p.name} isn't a PDF file.")
-    for i, p in enumerate(paths):
-        for q in paths[:i]:
-            if same_file(p, q):
-                raise _Fail(ExitCode.USAGE, f"{p.name} is given more than once.")
+    seen: FileIndex[Path] = FileIndex()
+    for p in paths:
+        if seen.find(p) is not None:
+            raise _Fail(ExitCode.USAGE, f"{p.name} is given more than once.")
+        seen.add(p, p)
     return list(paths)
 
 

@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
 from ..core.config import ANCHORS, Config, Profile, StampSpec
 from ..core.fields import MAX_VALUE_LENGTH, ValidationResult, prefill_fields, validate_field, value_from_filename
 from ..core.filenames import suggest_filename, visible
+from ..core.paths import same_file
 from ..core.template import TemplateError, template_tokens
 from ..handlers.base import (
     ApplyResult,
@@ -47,7 +48,7 @@ from ..handlers.base import (
     StampDoesNotFit,
     StampJob,
 )
-from ..handlers.pdf import PROPERTIES_NOTE_PREFIX, same_file
+from ..handlers.pdf import PROPERTIES_NOTE_PREFIX
 from .engine import ApplyRequest, EngineClient, EngineFailure
 from .help import help_button
 from .page_numbers import (

@@ -82,6 +82,15 @@ def test_two_files_saving_to_one_name(corpus_dir: Path, tmp_path: Path) -> None:
     assert over[0].status == Status.FAILED and "one of the originals" in over[0].message
 
 
+def test_a_failed_file_doesnt_take_its_name(corpus_dir: Path, tmp_path: Path) -> None:
+    # The first file can't be stamped, so the second may use the name they share.
+    tiny = make_tiny(tmp_path / "tiny.pdf")
+    a = copy_to(corpus_dir / "letter_portrait.pdf", tmp_path)
+    same = tmp_path / "out.pdf"
+    checks = check_batch(PdfHandler(), [BatchItem(tiny, same), BatchItem(a, same)], default_job())
+    assert [c.status for c in checks] == [Status.FAILED, Status.OK]
+
+
 def test_cancel_mid_batch_keeps_saved_copies(corpus_dir: Path, tmp_path: Path) -> None:
     items = [BatchItem(copy_to(corpus_dir / n, tmp_path), tmp_path / f"out_{n}")
              for n in ("letter_portrait.pdf", "rotate_mixed.pdf", "mixed_sizes.pdf")]

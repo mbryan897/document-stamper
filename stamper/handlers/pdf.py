@@ -44,6 +44,7 @@ from ..core.geometry import (
     visible_to_unrotated,
 )
 from ..core.locations import resource_dir
+from ..core.paths import same_file
 from ..core.patterns import parse_date_format
 from ..core.template import builtin_values, render
 from .base import (
@@ -75,7 +76,6 @@ __all__ = [
     "PdfHandler",
     "SHRINK_STEP_PT",
     "font_path",
-    "same_file",
     "stamp_font",
     "write_sample_page",
 ]
@@ -141,19 +141,6 @@ def _hex_to_rgb(color: str) -> tuple[float, float, float]:
 
 def _inches(points: float) -> str:
     return f"{points / 72:.1f}"
-
-
-def _strip_long_prefix(path: str) -> str:
-    if path.startswith("\\\\?\\UNC\\"):
-        return "\\\\" + path[8:]
-    if path.startswith("\\\\?\\"):
-        return path[4:]
-    return path
-
-
-def _canonical(path: Path) -> str:
-    raw = _strip_long_prefix(os.fspath(path))
-    return os.path.normcase(os.path.realpath(os.path.abspath(raw)))
 
 
 def preview_zoom(rect: pymupdf.Rect, dpi: float) -> float:
@@ -313,21 +300,6 @@ def size_notes(info: DocumentInfo) -> list[str]:
     if size > LARGE_FILE_BYTES:
         notes.append(f"This file is {size / (1024 * 1024):,.0f} MB; checking and saving take longer.")
     return notes
-
-
-def same_file(a: Path, b: Path) -> bool:
-    """True if two paths name the same file.
-
-    Handles relative paths, letter case (on Windows), ``\\\\?\\`` prefixes,
-    8.3 short names and links: canonical paths are compared first, then
-    ``os.path.samefile`` when both exist.
-    """
-    if _canonical(a) == _canonical(b):
-        return True
-    try:
-        return os.path.exists(a) and os.path.exists(b) and os.path.samefile(a, b)
-    except OSError:
-        return False
 
 
 @dataclass(frozen=True, slots=True)

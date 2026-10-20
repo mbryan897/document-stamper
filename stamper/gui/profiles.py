@@ -60,10 +60,11 @@ from ..core.config import ANCHORS, Config, ConfigError, Profile, load_config
 from ..core.fields import MAX_VALUE_LENGTH, validate_field, value_from_filename
 from ..core.filenames import suggest_filename
 from ..core.locations import ConfigSource, Locations, SourceKind, describe, save_config, save_target
+from ..core.paths import same_file
 from ..core.patterns import PatternError, explain, parse_date_format, regex_risk
 from ..core.template import BUILTIN_TOKENS, TemplateError, builtin_values, render
 from ..handlers.base import StampJob
-from ..handlers.pdf import same_file, write_sample_page
+from ..handlers.pdf import write_sample_page
 from .color_picker import ColorButton, light_color_note
 from .config_draft import ConfigDraft, DraftRefused, diff_summary, sample_values
 from .engine import EngineClient, EngineFailure

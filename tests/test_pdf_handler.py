@@ -29,7 +29,7 @@ from stamper.handlers.base import (
     UnsupportedDocument,
     WrongPassword,
 )
-from stamper.handlers.pdf import FONT_FILE, PdfHandler, font_path, same_file
+from stamper.handlers.pdf import FONT_FILE, PdfHandler, font_path
 from tests.stamping import (
     DEFAULT_VALUES,
     FAKE_ID,
@@ -214,13 +214,6 @@ def test_refuses_windows_path_variants(corpus_dir: Path, tmp_path: Path) -> None
         with pytest.raises(OutputRefused):
             H.apply(src, default_job(), v, overwrite=True)
     assert sha256(src) == before
-
-
-def test_same_file_helper(tmp_path: Path) -> None:
-    a = tmp_path / "a.pdf"
-    a.write_bytes(b"%PDF-1.7")
-    assert same_file(a, tmp_path / "." / "a.pdf")
-    assert not same_file(a, tmp_path / "b.pdf")
 
 
 def test_refuses_existing_output_unless_overwrite(corpus_dir: Path, tmp_path: Path) -> None:

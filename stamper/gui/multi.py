@@ -53,6 +53,7 @@ from PySide6.QtWidgets import (
 from ..core.config import Config, Profile
 from ..core.filenames import visible
 from ..core.multi import FilenameAgreement, agree_from_filenames, combined_original_name, disagreement_note
+from ..core.paths import FileIndex, same_file
 from ..core.template import TemplateError, template_tokens
 from ..handlers.base import (
     Cancelled,
@@ -66,7 +67,6 @@ from ..handlers.base import (
 )
 from ..handlers.batch import BatchCheck, BatchItem, BatchOutcome, Status, check_batch, run_batch
 from ..handlers.combine import CombinedFile, CombineInput, combine_pdfs
-from ..handlers.pdf import same_file
 from .engine import EngineClient, EngineFailure, TaskContext
 from .help import help_button
 from .services import Services
@@ -135,7 +135,7 @@ def screen_files(handler: Handler, paths: Sequence[Path], *, already: Sequence[P
     """
     usable: list[ScreenedFile] = []
     removed: list[tuple[str, str]] = []
-    seen: list[Path] = list(already)
+    seen: FileIndex[Path] = FileIndex((p, p) for p in already)
     for i, raw in enumerate(paths):
         if ctx is not None:
             if ctx.cancelled():
@@ -145,7 +145,7 @@ def screen_files(handler: Handler, paths: Sequence[Path], *, already: Sequence[P
         if not path.is_file():
             removed.append((path.name, "can't be found"))
             continue
-        if any(same_file(path, p) for p in seen):
+        if seen.find(path) is not None:
             removed.append((path.name, "is listed twice"))
             continue
         if not handler.can_open(path):
@@ -155,7 +155,7 @@ def screen_files(handler: Handler, paths: Sequence[Path], *, already: Sequence[P
             info = handler.inspect(path)
         except (PasswordRequired, WrongPassword):
             usable.append(ScreenedFile(path, None))
-            seen.append(path)
+            seen.add(path, path)
             continue
         except UnsupportedDocument as e:
             removed.append((path.name, _reason(str(e), path.name)))
@@ -167,7 +167,7 @@ def screen_files(handler: Handler, paths: Sequence[Path], *, already: Sequence[P
             removed.append((path.name, "is an XFA form (print it to PDF first)"))
             continue
         usable.append(ScreenedFile(path, info))
-        seen.append(path)
+        seen.add(path, path)
     if ctx is not None:
         ctx.progress(len(paths), len(paths), "")
     return ScreenResult(tuple(usable), tuple(removed))
