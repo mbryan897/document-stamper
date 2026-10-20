@@ -182,6 +182,20 @@ def test_save_keeps_one_backup(tmp_path: Path) -> None:
     assert load_config(loc.backup_path(out)) == load_config(RECORDS_CONFIG)
 
 
+def test_save_refuses_a_file_changed_since_it_was_loaded(tmp_path: Path) -> None:
+    out = tmp_path / "config.json"
+    shutil.copyfile(DEFAULT_CONFIG, out)
+    loaded = loc.describe(out, SourceKind.APP).digest
+    loc.save_config(load_config(RECORDS_CONFIG), out, expect=loaded)  # unchanged: saves
+    theirs = out.read_bytes()
+    with pytest.raises(loc.ConfigChanged, match="changed by someone else"):
+        loc.save_config(load_config(DEFAULT_CONFIG), out, expect=loaded)  # changed since: refused
+    assert out.read_bytes() == theirs
+    with pytest.raises(loc.ConfigChanged):
+        loc.save_config(load_config(DEFAULT_CONFIG), tmp_path / "new.json", expect=loaded)
+    loc.save_config(load_config(DEFAULT_CONFIG), tmp_path / "new.json", expect=None)  # no file expected
+
+
 def test_save_without_backup(tmp_path: Path) -> None:
     out = tmp_path / "export.json"
     shutil.copyfile(DEFAULT_CONFIG, out)

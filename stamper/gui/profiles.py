@@ -1691,7 +1691,7 @@ class ProfileSettings(QWidget):
         if not self.can_save() or self.valid_config is None or self.target is None:
             return
         try:
-            save_config(self.valid_config, self.target.path)
+            save_config(self.valid_config, self.target.path, expect=self.target.digest)
         except OSError as e:
             self.say(f"Couldn't save to {self.target.path}: {e.strerror or e}. Nothing was changed.")
             return

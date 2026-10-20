@@ -195,6 +195,16 @@ def test_rename_profile_and_save(qtbot: QtBot, records_window: MainWindow, locs:
     assert w.drop.profile_combo.currentText() == "Records"
 
 
+def test_save_refuses_a_config_someone_else_saved(qtbot: QtBot, records_window: MainWindow, locs: Locations) -> None:
+    s = _settings(records_window)
+    _type(qtbot, s.profiles_page.name, "Mine")
+    theirs = load_config(RECORDS_CONFIG).to_json().replace("Records submission", "Theirs")
+    locs.app_config.write_text(theirs, encoding="utf-8")  # a colleague saved meanwhile
+    s.save()
+    assert locs.app_config.read_text(encoding="utf-8") == theirs
+    assert records_window.stack.currentWidget() is s and "changed by someone else" in s.status.text()
+
+
 def test_problem_blocks_save_and_is_listed(qtbot: QtBot, records_window: MainWindow) -> None:
     s = _settings(records_window)
     ed = s.profiles_page.stamp_editors[0]
