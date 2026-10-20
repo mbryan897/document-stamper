@@ -9,6 +9,7 @@ from pathlib import Path
 import pymupdf
 
 from stamper.core.config import Config, load_config
+from stamper.core.geometry import Direction, _check_rotation
 from stamper.handlers.base import StampJob
 from tools import make_corpus
 
@@ -118,6 +119,33 @@ def count_pixels(pix: pymupdf.Pixmap, rect: tuple[float, float, float, float], t
         row = data[y * stride + x0 * n: y * stride + x1 * n]
         total += sum(1 for r, g, b in zip(row[0::n], row[1::n], row[2::n]) if test(r, g, b))
     return total
+
+
+# ------------------------------------------------------------------ geometry references
+# Plain formulas the tests compare PyMuPDF and the placement code against.
+
+
+def visible_size(crop_width: float, crop_height: float, rotation: int) -> tuple[float, float]:
+    """Visible page size from the unrotated CropBox size and ``/Rotate``."""
+    r = _check_rotation(rotation)
+    return (crop_height, crop_width) if r in (90, 270) else (crop_width, crop_height)
+
+
+def unrotated_vector_to_visible(vec: tuple[float, float], rotation: int) -> tuple[float, float]:
+    """Turn a direction in unrotated coordinates into the visible one.
+
+    A page with ``/Rotate`` r is shown turned r degrees clockwise.
+    """
+    r = _check_rotation(rotation)
+    dx, dy = vec
+    for _ in range(r // 90):
+        dx, dy = -dy, dx  # 90 degrees clockwise with y pointing down
+    return (dx, dy)
+
+
+def visible_direction(direction: Direction) -> tuple[float, float]:
+    """The unit vector a reader's eye follows, in visible coordinates."""
+    return (1.0, 0.0) if direction == "along-top" else (0.0, 1.0)
 
 
 # ------------------------------------------------------------------ synthetic special files (Phase 3)

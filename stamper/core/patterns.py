@@ -43,11 +43,9 @@ __all__ = [
     "PatternTest",
     "TokenKind",
     "compile_pattern",
-    "example",
     "explain",
     "parse_date_format",
     "regex_risk",
-    "test_value",
 ]
 
 
@@ -432,19 +430,6 @@ def compile_pattern(source: str) -> CompiledPattern:
 def explain(source: str) -> str:
     """Describe a pattern in plain English; raises PatternError."""
     return compile_pattern(source).explain()
-
-
-def example(source: str, today: date) -> str:
-    """A value that fits a pattern (see ``CompiledPattern.example``); raises PatternError."""
-    return compile_pattern(source).example(today)
-
-
-def test_value(source: str, value: str) -> PatternTest:
-    """Test one value against a pattern; raises PatternError for a bad pattern."""
-    return compile_pattern(source).test(value)
-
-
-test_value.__test__ = False  # type: ignore[attr-defined]  # not a pytest test
 
 
 class DateFormat:

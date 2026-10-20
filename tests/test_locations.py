@@ -99,12 +99,13 @@ def test_an_invalid_file_is_still_chosen_and_reported(locs: Locations) -> None:
     locs.app_config.write_text('{"schema_version": 1}', encoding="utf-8")
     assert loc.find_config(locs).path == locs.app_config
     with pytest.raises(ConfigError, match="config.json"):
-        loc.load_located(locs)
+        load_config(loc.find_config(locs).path)
 
 
 def test_load_located(locs: Locations) -> None:
     shutil.copyfile(RECORDS_CONFIG, locs.app_config)
-    cfg, src = loc.load_located(locs)
+    src = loc.find_config(locs)
+    cfg = load_config(src.path)
     assert src.kind is SourceKind.APP
     assert cfg.default_profile.name == load_config(RECORDS_CONFIG).default_profile.name
 

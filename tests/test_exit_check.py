@@ -23,7 +23,6 @@ from pathlib import Path
 
 import pytest
 
-from stamper.core.geometry import unrotated_vector_to_visible
 from stamper.handlers.pdf import BOX_PADDING_PT, PdfHandler
 from tests.stamping import (
     FAKE_ID,
@@ -33,6 +32,7 @@ from tests.stamping import (
     password_for,
     pixel_bbox,
     sha256,
+    unrotated_vector_to_visible,
 )
 from tools import make_corpus
 

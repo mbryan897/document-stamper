@@ -14,12 +14,10 @@ from stamper.core.geometry import (
     TextMetrics,
     insert_rotation,
     place,
-    unrotated_vector_to_visible,
-    visible_direction,
     visible_rect_to_unrotated,
-    visible_size,
     visible_to_unrotated,
 )
+from tests.stamping import unrotated_vector_to_visible, visible_direction, visible_size
 
 MARGIN = 18.0
 PAD = 2.5

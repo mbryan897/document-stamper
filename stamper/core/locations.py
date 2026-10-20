@@ -45,7 +45,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
-from .config import Config, load_config, parse_config
+from .config import Config, parse_config
 
 __all__ = [
     "APP_FOLDER_NAME",
@@ -64,7 +64,6 @@ __all__ = [
     "find_config",
     "folder_is_writable",
     "is_frozen",
-    "load_located",
     "load_state",
     "local_dir",
     "locations",
@@ -274,12 +273,6 @@ def find_config(locs: Locations | None = None) -> ConfigSource:
     if locs.user_config.is_file():
         return describe(locs.user_config, SourceKind.USER)
     return describe(locs.builtin, SourceKind.BUILTIN)
-
-
-def load_located(locs: Locations | None = None) -> tuple[Config, ConfigSource]:
-    """Find and load the config; raises ConfigError naming the file found."""
-    source = find_config(locs)
-    return load_config(source.path), source
 
 
 def save_target(source: ConfigSource, locs: Locations | None = None) -> ConfigSource | None:
