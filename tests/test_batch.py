@@ -236,6 +236,18 @@ def test_cli_batch_ctrl_c_reports_the_saved_copies(corpus_dir: Path, tmp_path: P
     assert signal.getsignal(signal.SIGINT) is signal.default_int_handler  # put back afterwards
 
 
+@pytest.mark.parametrize("which", [0, 1])
+def test_cli_combine_never_saves_over_an_original(corpus_dir: Path, tmp_path: Path, which: int) -> None:
+    a = copy_to(corpus_dir / "letter_portrait.pdf", tmp_path)
+    b = copy_to(corpus_dir / "rotate_90.pdf", tmp_path)
+    before = {p: sha256(p) for p in (a, b)}
+    target = (a, b)[which]
+    r = Run(["--combine", str(a), str(b), "--out", str(target), "--overwrite", *BASE])
+    assert r.code == ExitCode.OUTPUT_REFUSED, r.stderr
+    assert "one of the originals" in r.stderr
+    assert {p: sha256(p) for p in (a, b)} == before
+
+
 def test_cli_batch_refuses_out(corpus_dir: Path, tmp_path: Path) -> None:
     r = Run(["--batch", str(corpus_dir / "letter_portrait.pdf"), str(corpus_dir / "rotate_90.pdf"),
              "--out", str(tmp_path / "x.pdf"), *BASE])
