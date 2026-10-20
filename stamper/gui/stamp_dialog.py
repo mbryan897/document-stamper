@@ -336,7 +336,7 @@ class StampDialog(QWidget):
 
     def _name_source(self) -> str:
         """The original file name the suggested name is built from."""
-        return visible(self.path.name)
+        return self.path.name
 
     def _accept_flags(self) -> tuple[bool, bool]:
         """``(accept_signature_loss, accept_restrictions)`` for the save."""
@@ -782,10 +782,10 @@ class StampDialog(QWidget):
         """The File name selector's ticked fields, in display order."""
         return [n for n, box in self._ticks.items() if box.isChecked()]
 
-    def suggested_name(self) -> str:
-        """The suggested file name for the stamped copy (D-016, D-067)."""
+    def suggested_name(self, original: str | None = None) -> str:
+        """The suggested file name for the stamped copy of ``original`` (default: this file) (D-016, D-067)."""
         values = {**self.values(), "date": self.config.settings.date_formatter.format(self.today)}
-        return suggest_filename(self.profile, values, self._name_source(), ticked=self.ticked(),
+        return suggest_filename(self.profile, values, original or self._name_source(), ticked=self.ticked(),
                                 dedupe=prefill_fields(self.config, self.profile))
 
     def _update_name(self) -> None:

@@ -51,8 +51,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.config import Config, Profile
-from ..core.fields import prefill_fields
-from ..core.filenames import suggest_filename, visible
+from ..core.filenames import visible
 from ..core.multi import FilenameAgreement, agree_from_filenames, combined_original_name, disagreement_note
 from ..core.template import TemplateError, template_tokens
 from ..handlers.base import (
@@ -1129,9 +1128,7 @@ class BatchDialog(_MultiMixin, StampDialog):
 
     def name_for(self, path: Path) -> str:
         """The suggested name for one file's copy."""
-        values = {**self.values(), "date": self.config.settings.date_formatter.format(self.today)}
-        return suggest_filename(self.profile, values, path.name, ticked=self.ticked(),
-                                dedupe=prefill_fields(self.config, self.profile))
+        return self.suggested_name(path.name)
 
     def items(self) -> list[BatchItem]:
         """Where each file's copy goes, with its password."""
