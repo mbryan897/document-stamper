@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
 from ..core.config import ANCHORS, Config, Profile, StampSpec
 from ..core.fields import MAX_VALUE_LENGTH, ValidationResult, prefill_fields, validate_field, value_from_filename
 from ..core.filenames import suggest_filename, visible
-from ..core.paths import same_file
+from ..core.paths import same_file, size_text
 from ..core.template import TemplateError, template_tokens
 from ..handlers.base import (
     ApplyResult,
@@ -314,9 +314,8 @@ class StampDialog(QWidget):
 
     def _head_texts(self) -> tuple[str, str]:
         """The file name and the "N pages, size" line above the preview."""
-        size_mb = self.path.stat().st_size / (1024 * 1024) if self.path.exists() else 0.0
         pages = "1 page" if self.info.page_count == 1 else f"{self.info.page_count} pages"
-        size = f"{size_mb:.1f} MB" if size_mb >= 0.1 else "under 0.1 MB"
+        size = size_text(self.path.stat().st_size) if self.path.exists() else size_text(0)
         return visible(self.path.name), f"{pages}, {size}"
 
     def _extend_head(self, layout: QVBoxLayout) -> None:

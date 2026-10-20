@@ -78,6 +78,7 @@ __all__ = [
     "font_path",
     "stamp_font",
     "write_sample_page",
+    "xfa_refusal",
 ]
 
 FONT_FILE = "AtkinsonHyperlegibleMono-Regular.ttf"
@@ -252,12 +253,23 @@ _STANDARD_PROPERTIES = ("Title", "Author", "Subject", "Keywords", "Creator", "Pr
                         "CreationDate", "ModDate", "Trapped")
 
 
+def xfa_refusal(name: str) -> str:
+    """Why an XFA form isn't stamped, and what to do instead."""
+    return (f"{name} is an XFA form, which this tool can't stamp. "
+            "Print it to PDF first, then stamp the printed copy.")
+
+
+def _info_dict(doc: pymupdf.Document) -> int:
+    """The document Info dictionary's xref, or 0 when there is none."""
+    kind, val = doc.xref_get_key(-1, "Info")
+    return int(val.split()[0]) if kind == "xref" else 0
+
+
 def _info_keys(doc: pymupdf.Document) -> tuple[list[str], str]:
     """The Info dictionary's keys and its StamperSources text, without changing the document."""
-    kind, val = doc.xref_get_key(-1, "Info")
-    if kind != "xref":
+    xref = _info_dict(doc)
+    if not xref:
         return [], ""
-    xref = int(val.split()[0])
     sources = doc.xref_get_key(xref, "StamperSources")
     return list(doc.xref_get_keys(xref)), sources[1] if sources[0] == "string" else ""
 
@@ -623,10 +635,7 @@ class PdfHandler(Handler):
     @staticmethod
     def _refuse_xfa(info: DocumentInfo) -> None:
         if info.xfa:
-            raise UnsupportedDocument(
-                f"{info.path.name} is an XFA form, which this tool can't stamp. "
-                "Print it to PDF first, then stamp the printed copy."
-            )
+            raise UnsupportedDocument(xfa_refusal(info.path.name))
 
     @staticmethod
     def _document_notes(info: DocumentInfo) -> list[str]:
@@ -694,9 +703,8 @@ class PdfHandler(Handler):
 
     @staticmethod
     def _info_xref(doc: pymupdf.Document) -> int:
-        kind, val = doc.xref_get_key(-1, "Info")
-        if kind == "xref":
-            return int(val.split()[0])
+        if xref := _info_dict(doc):
+            return xref
         xref = doc.get_new_xref()
         doc.update_object(xref, "<<>>")
         doc.xref_set_key(-1, "Info", f"{xref} 0 R")
@@ -716,8 +724,7 @@ class PdfHandler(Handler):
         base = {**job.values, "original_name": original_name, "date": fmt.format(today)}
         written: dict[str, str] = {}
         replaced: dict[str, tuple[str, str]] = {}
-        kind, val = doc.xref_get_key(-1, "Info")
-        info = int(val.split()[0]) if kind == "xref" else 0
+        info = _info_dict(doc)
         for key, template in job.metadata.items():
             value = render(template, base)
             if not value:

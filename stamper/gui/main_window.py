@@ -80,7 +80,7 @@ from ..handlers.base import (
     WrongPassword,
 )
 from ..handlers.combine import CombinedFile, remove_stale_temp
-from ..handlers.pdf import PdfHandler
+from ..handlers.pdf import PdfHandler, xfa_refusal
 from .engine import EngineClient, EngineFailure, TaskContext
 from .fonts import MONO_FAMILY
 from .help import HELP_SHORTCUT, HelpWindow, help_button
@@ -793,9 +793,7 @@ class MainWindow(QMainWindow):
         _, path, password = self._opening
         self._opening = None
         if info.xfa:
-            self.show_drop(
-                f"{visible(path.name)} is an XFA form, which this tool can't stamp. "
-                "Print it to PDF first, then stamp the printed copy.")
+            self.show_drop(xfa_refusal(visible(path.name)))
             return
         self.show_dialog(path, info, password)
 

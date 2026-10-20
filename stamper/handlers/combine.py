@@ -38,7 +38,6 @@ from __future__ import annotations
 import atexit
 import json
 import os
-import re
 import secrets
 import shutil
 import stat
@@ -51,6 +50,7 @@ from pathlib import Path
 import pymupdf
 
 from ..core.locations import work_dir
+from ..core.paths import is_link, size_text
 from .base import (
     CancelCheck,
     Cancelled,
@@ -60,7 +60,7 @@ from .base import (
     UnsupportedDocument,
     check_unchanged,
 )
-from .pdf import PdfHandler
+from .pdf import _REF_RE, PdfHandler, xfa_refusal
 
 __all__ = [
     "SOURCES_PROPERTY",
@@ -81,7 +81,6 @@ MARKER_NAME = ".stamper-work"
 SPACE_MARGIN = 64 * 1024 * 1024  # room kept free beyond the combined file's size
 SOURCES_PROPERTY = "StamperSources"
 STALE_AFTER_S = 24 * 60 * 60
-_REF = re.compile(r"(\d+)\s+0\s+R")
 _MARK = "StamperOCG"  # private key used while copying layers, removed afterwards
 
 CombineProgress = Callable[[int, int, str], None]
@@ -204,11 +203,6 @@ def _hide(folder: Path) -> None:
         pass
 
 
-_FILE_ATTRIBUTE_REPARSE_POINT = 0x400
-
-
-def _is_link(st: os.stat_result) -> bool:
-    return stat.S_ISLNK(st.st_mode) or bool(getattr(st, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT)
 
 
 def _app_version() -> str:
@@ -259,7 +253,7 @@ def _remove_own_folder(folder: Path) -> None:
     for entry in entries:
         try:
             st = entry.stat(follow_symlinks=False)
-            if _is_link(st):
+            if is_link(st):
                 # The link itself goes; what it points to is never touched.
                 (os.rmdir if entry.is_dir(follow_symlinks=False) or stat.S_ISDIR(st.st_mode) else os.unlink)(entry.path)
             elif stat.S_ISREG(st.st_mode):
@@ -294,11 +288,6 @@ def _on_network_drive(path: Path) -> bool:
     return kernel32.GetDriveTypeW(drive + "\\") == 4  # DRIVE_REMOTE
 
 
-def _size_text(n: int) -> str:
-    mb = n / (1024 * 1024)
-    return f"{mb / 1024:.1f} GB" if mb >= 1024 else f"{max(mb, 0.1):.1f} MB"
-
-
 def work_folder_problem(folder: Path, needed: int) -> str:
     """Why the private work folder can't take a combine of about ``needed`` bytes; empty if it can (D-115)."""
     try:
@@ -316,7 +305,7 @@ def work_folder_problem(folder: Path, needed: int) -> str:
     except OSError as e:
         return f"its free space can't be read: {e.strerror or e}"
     if free < needed + SPACE_MARGIN:
-        return f"{_size_text(free)} free there, about {_size_text(needed + SPACE_MARGIN)} needed"
+        return f"{size_text(free)} free there, about {size_text(needed + SPACE_MARGIN)} needed"
     return ""
 
 
@@ -349,7 +338,7 @@ def remove_stale_temp(parent: Path, *, older_than_s: float = STALE_AFTER_S,
             st = entry.stat(follow_symlinks=False)
         except OSError:
             continue
-        if _is_link(st) or not stat.S_ISDIR(st.st_mode):
+        if is_link(st) or not stat.S_ISDIR(st.st_mode):
             continue
         try:
             marker = json.loads((folder / MARKER_NAME).read_text(encoding="utf-8"))
@@ -362,7 +351,7 @@ def remove_stale_temp(parent: Path, *, older_than_s: float = STALE_AFTER_S,
         try:
             inside = list(os.scandir(folder))
             plain = all(stat.S_ISREG(e.stat(follow_symlinks=False).st_mode)
-                        and not _is_link(e.stat(follow_symlinks=False)) for e in inside)
+                        and not is_link(e.stat(follow_symlinks=False)) for e in inside)
         except OSError:
             continue
         if not plain:
@@ -393,7 +382,7 @@ def _root_fields(doc: pymupdf.Document) -> list[int]:
     roots: list[int] = []
     kind, val = doc.xref_get_key(doc.pdf_catalog(), "AcroForm/Fields")
     if kind == "array":
-        roots.extend(int(m.group(1)) for m in _REF.finditer(val))
+        roots.extend(int(m.group(1)) for m in _REF_RE.finditer(val))
     seen = set(roots)
     for page in doc:
         for w in page.widgets():
@@ -472,7 +461,7 @@ def _refs(doc: pymupdf.Document, xref: int, key: str) -> list[int]:
     kind, val = doc.xref_get_key(xref, key)
     if kind != "array":
         return []
-    return [int(m.group(1)) for m in _REF.finditer(val)]
+    return [int(m.group(1)) for m in _REF_RE.finditer(val)]
 
 
 @dataclass
@@ -665,9 +654,7 @@ def combine_pdfs(
         info = handler.inspect(Path(item.path), item.password)
         fingerprints.append(item.expect or info.fingerprint)
         if info.xfa:
-            raise UnsupportedDocument(
-                f"{info.path.name} is an XFA form, which this tool can't stamp. "
-                "Print it to PDF first, then stamp the printed copy.")
+            raise UnsupportedDocument(xfa_refusal(info.path.name))
         if info.signed:
             signed.append(info.path.name)
         if info.restricted:
@@ -773,7 +760,7 @@ def combine_pdfs(
         out.save(target, garbage=1, deflate=True)
     except BaseException:
         out.close()
-        shutil.rmtree(temp, ignore_errors=True)
+        _remove_own_folder(temp)
         _LIVE.discard(temp)
         raise
     out.close()

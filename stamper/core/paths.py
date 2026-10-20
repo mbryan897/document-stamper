@@ -1,10 +1,10 @@
-"""Do two paths name the same file?
+"""Files on disk: do two paths name the same file, is this a link, how big is it (in words).
 
-Used everywhere a copy must never land on an original, or a file mustn't be
-listed twice. ``same_file`` compares two paths; ``FileIndex`` answers the same
-question for one path against many, with one look at the disk per path
-instead of one per pair, so checking a few hundred files on a network share
-stays quick.
+The same-file checks are used everywhere a copy must never land on an
+original, or a file mustn't be listed twice. ``same_file`` compares two
+paths; ``FileIndex`` answers the same question for one path against many,
+with one look at the disk per path instead of one per pair, so checking a
+few hundred files on a network share stays quick.
 
 Nothing here imports Qt or PyMuPDF.
 """
@@ -12,11 +12,12 @@ Nothing here imports Qt or PyMuPDF.
 from __future__ import annotations
 
 import os
+import stat
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Generic, TypeVar
 
-__all__ = ["FileIndex", "same_file"]
+__all__ = ["FileIndex", "is_link", "same_file", "size_text"]
 
 T = TypeVar("T")
 
@@ -54,6 +55,19 @@ def same_file(a: Path, b: Path) -> bool:
         return True
     ident = _identity(a)
     return ident is not None and ident == _identity(b)
+
+
+def is_link(st: os.stat_result) -> bool:
+    """True for a symbolic link, or on Windows any reparse point (a junction, a mount point)."""
+    return stat.S_ISLNK(st.st_mode) or bool(getattr(st, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+
+
+def size_text(n: int) -> str:
+    """A file size for a message: "12 KB", "3.4 MB" or "1.2 GB"."""
+    mb = n / (1024 * 1024)
+    if mb >= 1024:
+        return f"{mb / 1024:.1f} GB"
+    return f"{mb:.1f} MB" if mb >= 0.1 else f"{max(1, round(n / 1024))} KB"
 
 
 class FileIndex(Generic[T]):

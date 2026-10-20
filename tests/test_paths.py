@@ -62,3 +62,15 @@ def test_index_looks_at_each_path_once(tmp_path: Path, monkeypatch: pytest.Monke
         assert index.find(f) is None
         index.add(f, f)
     assert calls == 2 * len(files)
+
+
+def test_size_text_is_the_same_everywhere() -> None:
+    assert [paths.size_text(n) for n in (0, 50 * 1024, 3_565_158, 5 * 1024**3 // 4)] == [
+        "1 KB", "50 KB", "3.4 MB", "1.2 GB"]
+
+
+def test_is_link(tmp_path: Path) -> None:
+    a = _file(tmp_path / "a.pdf")
+    (tmp_path / "link.pdf").symlink_to(a)
+    assert paths.is_link(os.lstat(tmp_path / "link.pdf"))
+    assert not paths.is_link(os.lstat(a))

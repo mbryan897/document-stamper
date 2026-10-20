@@ -54,7 +54,7 @@ from .handlers.base import (
 )
 from .handlers.batch import BatchItem, BatchOutcome, Status, check_batch, run_batch
 from .handlers.combine import CombineInput, combine_pdfs
-from .handlers.pdf import PdfHandler
+from .handlers.pdf import PdfHandler, xfa_refusal
 
 __all__ = [
     "ExitCode", "batch_exit_code", "build_parser", "get_version",
@@ -469,9 +469,7 @@ def _run_multi(
     passwords, infos = _multi_passwords(args, paths, handler, stdin)
     for p in paths:
         if infos[p].xfa:
-            raise _Fail(ExitCode.UNSUPPORTED,
-                        f"{p.name} is an XFA form, which this tool can't stamp. "
-                        "Print it to PDF first, then stamp the printed copy.")
+            raise _Fail(ExitCode.UNSUPPORTED, xfa_refusal(p.name))
     signed = [p.name for p in paths if infos[p].signed]
     restricted = [p.name for p in paths if infos[p].restricted]
 
