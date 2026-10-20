@@ -23,6 +23,7 @@ last profile and the last folder a file came from are remembered in
 
 from __future__ import annotations
 
+import gc
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -435,6 +436,15 @@ def _escape(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def _free_closed_screen() -> None:
+    """Free a closed screen's reference cycles now, on the window's thread.
+
+    Left to the garbage collector, they could be freed while it runs on the
+    engine thread, deleting Qt objects off their own thread.
+    """
+    gc.collect()
+
+
 class MainWindow(QMainWindow):
     """The Document Stamper window."""
 
@@ -738,6 +748,7 @@ class MainWindow(QMainWindow):
             self.stack.removeWidget(self.settings)
             self.settings.deleteLater()
             self.settings = None
+            _free_closed_screen()
 
     def _close_dialog(self) -> None:
         if self.dialog is not None:
@@ -745,6 +756,7 @@ class MainWindow(QMainWindow):
             self.stack.removeWidget(self.dialog)
             self.dialog.deleteLater()
             self.dialog = None
+            _free_closed_screen()
 
     # ------------------------------------------------------------ opening a file
 
@@ -998,6 +1010,7 @@ class MainWindow(QMainWindow):
             self.stack.removeWidget(self.prepare)
             self.prepare.deleteLater()
             self.prepare = None
+            _free_closed_screen()
 
     def _drop_combined(self) -> None:
         """Remove the temporary combined file, after whatever the engine is doing with it (D-055)."""

@@ -36,6 +36,7 @@ Evidentiary-integrity notes (for manual review)
 from __future__ import annotations
 
 import atexit
+import gc
 import json
 import os
 import secrets
@@ -640,6 +641,27 @@ def combine_pdfs(
     source unless accepted, and Cancelled. On any error, nothing is left
     behind. The caller must call ``cleanup()`` on the result.
     """
+    try:
+        return _combine(inputs, folder, fallback=fallback, accept_signature_loss=accept_signature_loss,
+                        accept_restrictions=accept_restrictions, progress=progress, cancel=cancel)
+    finally:
+        # PyMuPDF's insert_pdf (its form-field helper) leaves the documents in a
+        # reference cycle. Free them now, on this thread, not whenever the
+        # garbage collector next runs on the window's thread: MuPDF isn't
+        # thread-safe, and the engine thread may be inside it then.
+        gc.collect()
+
+
+def _combine(
+    inputs: Sequence[CombineInput],
+    folder: Path | None,
+    *,
+    fallback: Path | None,
+    accept_signature_loss: bool,
+    accept_restrictions: bool,
+    progress: CombineProgress | None,
+    cancel: CancelCheck | None,
+) -> CombinedFile:
     if len(inputs) < 2:
         raise StampError("Combining needs at least two files.")
     handler = PdfHandler()

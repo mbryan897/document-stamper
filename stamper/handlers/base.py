@@ -16,6 +16,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
+from typing import TypeVar
 
 from ..core.config import Config, Profile, StampSpec
 
@@ -41,10 +42,13 @@ __all__ = [
     "StampPlacement",
     "UnsupportedDocument",
     "WrongPassword",
+    "without_traceback",
 ]
 
 ProgressCallback = Callable[[int, int], None]
 """Called as ``progress(done, total)`` after each page."""
+
+E = TypeVar("E", bound=BaseException)
 
 CancelCheck = Callable[[], bool]
 """Called between pages; returning True stops the job with ``Cancelled``."""
@@ -157,6 +161,26 @@ def check_unchanged(path: Path, expect: SourceFingerprint | None) -> None:
             f"The original, {Path(path).name}, changed after you opened it. "
             "Open it again so the copy matches what you checked."
         )
+
+
+def without_traceback(error: E) -> E:
+    """``error`` with its traceback dropped, and those of the errors it came from.
+
+    A traceback keeps the failed call's frames alive, and with them the PDF
+    objects they held. An error handed to another thread mustn't carry them:
+    they would be freed there, while the engine thread may be inside MuPDF,
+    which isn't thread-safe.
+    """
+    todo: list[BaseException | None] = [error]
+    seen: set[int] = set()
+    while todo:
+        e = todo.pop()
+        if e is None or id(e) in seen:
+            continue
+        seen.add(id(e))
+        e.__traceback__ = None
+        todo += [e.__cause__, e.__context__]
+    return error
 
 
 # ------------------------------------------------------------------ data

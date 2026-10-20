@@ -1460,7 +1460,10 @@ class ProfileSettings(QWidget):
         self._local: dict[str, str] = {}
         self._preview_req = 0
         self._sample_dir = Path(tempfile.mkdtemp(prefix="stamper-sample-"))
-        self._sample = write_sample_page(self._sample_dir / "sample.pdf")
+        self._sample = self._sample_dir / "sample.pdf"
+        # Written on the engine thread, which draws the previews after it in order: the window's
+        # thread never uses PyMuPDF, which isn't thread-safe.
+        self.engine.run_task(lambda _ctx, path=self._sample: write_sample_page(path))
 
         self._debounce = QTimer(self)
         self._debounce.setSingleShot(True)

@@ -27,6 +27,7 @@ from .base import (
     SourceFingerprint,
     StampError,
     StampJob,
+    without_traceback,
 )
 
 __all__ = [
@@ -149,10 +150,10 @@ def check_batch(
             except Cancelled:
                 raise
             except StampError as e:
-                checks.append(BatchCheck(item, Status.FAILED, str(e), error=e))
+                checks.append(BatchCheck(item, Status.FAILED, str(e), error=without_traceback(e)))
             except Exception as e:  # reported per file, never stops the batch
                 checks.append(BatchCheck(item, Status.FAILED, f"Something went wrong ({type(e).__name__}: {e}).",
-                                         error=e))
+                                         error=without_traceback(e)))
             else:
                 checks.append(BatchCheck(item, Status.OK, plan=plan))
                 saving.add(item.out_path, item)  # a later file can't take this name; a failed one's name is free
@@ -216,10 +217,10 @@ def run_batch(
             stopped = True
             outcomes.append(BatchOutcome(item, Status.CANCELLED, "Cancelled while stamping; nothing was saved for this file."))
         except StampError as e:
-            outcomes.append(BatchOutcome(item, Status.FAILED, str(e), error=e))
+            outcomes.append(BatchOutcome(item, Status.FAILED, str(e), error=without_traceback(e)))
         except Exception as e:
             outcomes.append(BatchOutcome(item, Status.FAILED, f"Something went wrong ({type(e).__name__}: {e}).",
-                                         error=e))
+                                         error=without_traceback(e)))
         else:
             outcomes.append(BatchOutcome(item, Status.SAVED, "", result=result))
         done_before += pages
