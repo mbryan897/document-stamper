@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import signal
 from pathlib import Path
 
 import pymupdf
@@ -202,6 +203,28 @@ def test_cli_batch_partial(corpus_dir: Path, tmp_path: Path) -> None:
     again = Run(["--batch", str(a), str(tiny), "--out-dir", str(outdir), *BASE])
     assert again.code == ExitCode.ERROR  # one skipped (exists), one failed: different reasons
     assert "Skipped: letter_portrait.pdf" in again.stderr
+
+
+def test_cli_batch_ctrl_c_reports_the_saved_copies(corpus_dir: Path, tmp_path: Path,
+                                                   monkeypatch: pytest.MonkeyPatch) -> None:
+    files = [copy_to(corpus_dir / "letter_portrait.pdf", tmp_path, f"f{i}.pdf") for i in range(3)]
+    outdir = tmp_path / "out"
+    outdir.mkdir()
+    real_apply = PdfHandler.apply
+
+    def apply_then_ctrl_c(self: PdfHandler, *a: object, **kw: object) -> object:
+        result = real_apply(self, *a, **kw)  # type: ignore[arg-type]
+        signal.raise_signal(signal.SIGINT)  # the user presses Ctrl+C after the first copy is saved
+        return result
+
+    monkeypatch.setattr(PdfHandler, "apply", apply_then_ctrl_c)
+    r = Run(["--batch", *map(str, files), "--out-dir", str(outdir), *BASE])
+    assert r.code == ExitCode.PARTIAL, r.stderr
+    assert "Nothing was saved" not in r.stderr
+    assert "Saved: " in r.stdout and "1 of 3 files saved." in r.stdout
+    assert r.stderr.count("Not started: ") == 2
+    assert len(list(outdir.iterdir())) == 1
+    assert signal.getsignal(signal.SIGINT) is signal.default_int_handler  # put back afterwards
 
 
 def test_cli_batch_refuses_out(corpus_dir: Path, tmp_path: Path) -> None:

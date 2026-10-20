@@ -20,8 +20,11 @@ from __future__ import annotations
 import argparse
 import getpass
 import os
+import signal
 import sys
-from collections.abc import Callable, Sequence
+import threading
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from datetime import date
 from enum import IntEnum
 from pathlib import Path
@@ -574,6 +577,21 @@ def _run_combine(
     return ExitCode.OK
 
 
+@contextmanager
+def _ctrl_c_stops() -> Iterator[threading.Event]:
+    """While inside, Ctrl+C sets the event instead of raising, so a batch stops cleanly and reports what it saved."""
+    stop = threading.Event()
+    try:
+        previous = signal.signal(signal.SIGINT, lambda _sig, _frame: stop.set())
+    except ValueError:  # not the main thread: Ctrl+C can't reach us anyway
+        yield stop
+        return
+    try:
+        yield stop
+    finally:
+        signal.signal(signal.SIGINT, previous)
+
+
 def _run_batch(
     args: argparse.Namespace, handler: PdfHandler, paths: list[Path], passwords: dict[Path, str | None],
     seen: dict[Path, SourceFingerprint | None], job: StampJob, name_values: dict[str, str], ticked: list[str] | None, dedupe: list[str],
@@ -598,13 +616,15 @@ def _run_batch(
         if restricted and not args.accept_restrictions:
             say("Needs --accept-restrictions: " + ", ".join(restricted))
         return ExitCode.OK
-    outcomes = run_batch(
-        handler, checks, job,
-        accept_signature_loss=args.accept_signature_loss,
-        accept_restrictions=args.accept_restrictions,
-        remove_encryption=args.remove_encryption,
-        overwrite=args.overwrite,
-    )
+    with _ctrl_c_stops() as stop:
+        outcomes = run_batch(
+            handler, checks, job,
+            accept_signature_loss=args.accept_signature_loss,
+            accept_restrictions=args.accept_restrictions,
+            remove_encryption=args.remove_encryption,
+            overwrite=args.overwrite,
+            cancel=stop.is_set,
+        )
     for o in outcomes:
         if o.status == Status.SAVED and o.result is not None:
             for w in o.result.warnings:
