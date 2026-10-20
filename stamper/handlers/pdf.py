@@ -23,6 +23,7 @@ import math
 import os
 import re
 import tempfile
+import unicodedata
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
@@ -465,7 +466,7 @@ class PdfHandler(Handler):
                 texts.append(render(spec.text, vals))
         for text in texts:
             for ch in text:
-                if ch.isspace() and ch != " ":
+                if unicodedata.category(ch) in ("Cc", "Zl", "Zp"):  # other spaces, such as U+00A0, are drawn
                     raise MissingGlyph(
                         f"The stamp text contains a line break or tab (U+{ord(ch):04X}); "
                         "stamps are a single line.", ch)

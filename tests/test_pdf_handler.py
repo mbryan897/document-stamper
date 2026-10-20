@@ -329,6 +329,21 @@ def test_line_break_refused(corpus_dir: Path, tmp_path: Path) -> None:
         H.apply(corpus_dir / "letter_portrait.pdf", job, tmp_path / "out.pdf")
 
 
+@pytest.mark.parametrize("ch", ["\t", "\u2028", "\u2029", "\x85"])
+def test_other_line_breaks_refused(corpus_dir: Path, tmp_path: Path, ch: str) -> None:
+    cfg = default_config()
+    job = StampJob.from_profile(cfg, cfg.default_profile, {**DEFAULT_VALUES, "doc_type": f"Court{ch}order"})
+    with pytest.raises(MissingGlyph, match="single line"):
+        H.plan(corpus_dir / "letter_portrait.pdf", job)
+
+
+def test_non_breaking_space_is_drawn(corpus_dir: Path) -> None:
+    # Pasted from Word: U+00A0 is a space the font has, not a line break.
+    cfg = default_config()
+    job = StampJob.from_profile(cfg, cfg.default_profile, {**DEFAULT_VALUES, "doc_type": "Court\u00a0order"})
+    assert H.plan(corpus_dir / "letter_portrait.pdf", job).page_count >= 1
+
+
 # ------------------------------------------------------------------ background box
 
 
