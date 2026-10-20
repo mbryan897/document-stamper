@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -14,6 +15,7 @@ from stamper.handlers.combine import (
     SOURCES_PROPERTY,
     TEMP_PREFIX,
     CombineInput,
+    _bookmarks,
     combine_pdfs,
     field_suffix,
 )
@@ -98,6 +100,42 @@ def test_nested_bookmarks_kept(tmp_path: Path) -> None:
         d.save(b)
     with combine_pdfs([CombineInput(b), CombineInput(a)], tmp_path) as combined, pymupdf.open(combined.path) as doc:
         assert doc.get_toc() == [[1, "b.pdf", 1], [1, "a.pdf", 2], [2, "Intro", 2], [3, "Detail", 3], [2, "End", 4]]
+
+
+def test_bookmarks_read_as_get_toc_reads_them(tmp_path: Path) -> None:
+    src = tmp_path / "nested.pdf"
+    with pymupdf.open() as d:
+        for _ in range(5):
+            d.new_page()
+        d.set_toc([[1, "One", 1], [2, "One.a", 2], [3, "One.a.i", 3], [2, "One.b", 3], [1, "Two", 4],
+                   [2, "Two.a", 5], [1, "Three", 5]])
+        d.save(src)
+    with pymupdf.open(src) as d:
+        assert _bookmarks(d) == [tuple(e) for e in d.get_toc(simple=True)]
+
+
+def test_combine_leaves_no_pdf_objects_for_the_garbage_collector(tmp_path: Path) -> None:
+    # The window's thread runs the collector too; MuPDF objects must be freed on the engine thread.
+    a, b = tmp_path / "a.pdf", tmp_path / "b.pdf"
+    for path in (a, b):
+        with pymupdf.open() as d:
+            d.new_page()
+            d.new_page()
+            d.set_toc([[1, "Intro", 1], [2, "Detail", 2]])
+            d.save(path)
+    gc.collect()
+    gc.disable()
+    gc.set_debug(gc.DEBUG_SAVEALL)
+    try:
+        with combine_pdfs([CombineInput(a), CombineInput(b)], tmp_path):
+            pass
+        gc.collect()
+        left = [type(o).__name__ for o in gc.garbage if "mupdf" in type(o).__module__]
+    finally:
+        gc.set_debug(0)
+        gc.garbage.clear()
+        gc.enable()
+    assert left == []
 
 
 def test_hidden_layers_stay_hidden(tmp_path: Path) -> None:

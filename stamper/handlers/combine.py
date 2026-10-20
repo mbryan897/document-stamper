@@ -552,11 +552,34 @@ def _labels(paths: Sequence[Path]) -> list[str]:
     return [f"{n} (file {i})" if names.count(n) > 1 else n for i, n in enumerate(names, start=1)]
 
 
+def _bookmarks(doc: pymupdf.Document) -> list[tuple[int, str, int]]:
+    """``(level, title, page)`` for each bookmark, as ``get_toc(simple=True)`` gives them (page -1: none).
+
+    Walked here without recursion: ``get_toc``'s recursive helper leaves the
+    document in a reference cycle, which the garbage collector then frees on
+    whichever thread it runs on, the window's thread included, while the
+    engine thread may be inside MuPDF, which isn't thread-safe.
+    """
+    out: list[tuple[int, str, int]] = []
+    stack = [(doc.outline, 1)]
+    while stack:
+        item, level = stack.pop()
+        if not item or not item.this.m_internal:
+            continue
+        page = -1
+        if not item.is_external and item.uri:
+            page = doc.resolve_link(item.uri)[0] + 1 if item.page == -1 else item.page + 1
+        out.append((level, item.title or " ", page))
+        stack.append((item.next, level))  # after this item's children
+        if item.down:
+            stack.append((item.down, level + 1))
+    return out
+
+
 def _toc_for(doc: pymupdf.Document, label: str, offset: int) -> list[list[object]]:
     """The source's bookmark under one top-level bookmark named after it."""
     toc: list[list[object]] = [[1, label, offset + 1]]
-    for entry in doc.get_toc(simple=True):
-        level, title, page = int(entry[0]), str(entry[1]), int(entry[2])
+    for level, title, page in _bookmarks(doc):
         toc.append([level + 1, title, page + offset if page > 0 else offset + 1])
     return toc
 
