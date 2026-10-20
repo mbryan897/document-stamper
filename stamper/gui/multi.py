@@ -143,7 +143,7 @@ def screen_files(handler: Handler, paths: Sequence[Path], *, already: Sequence[P
             ctx.progress(i, len(paths), Path(raw).name)
         path = Path(raw)
         if not path.is_file():
-            removed.append((path.name, "can't be found"))
+            removed.append((path.name, "is a folder" if path.is_dir() else "can't be found"))
             continue
         if seen.find(path) is not None:
             removed.append((path.name, "is listed twice"))

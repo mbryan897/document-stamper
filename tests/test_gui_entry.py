@@ -70,6 +70,24 @@ def test_main_dispatches(monkeypatch: pytest.MonkeyPatch, corpus_dir: Path) -> N
     assert calls == [("window", ()), ("window", (f,)), ("cli", ("--version",))]
 
 
+def test_windowed_exe_opens_the_window_for_a_folder(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # DocumentStamper.exe has no console (sys.stdout is None): Send To on a folder must show something.
+    calls: list[object] = []
+    import stamper.gui.app as app
+
+    monkeypatch.setattr(app, "run_window", lambda files: calls.append(("window", tuple(files))) or 0)
+    monkeypatch.setattr(entry, "cli_main", lambda args: calls.append(("cli", tuple(args))) or 5)
+    monkeypatch.setattr(sys, "stdout", None)
+    assert entry.main([str(tmp_path)]) == 0
+    assert entry.main(["--version"]) == 5  # an option still means the command line
+    assert calls == [("window", (tmp_path,)), ("cli", ("--version",))]
+
+
+def test_window_says_a_folder_isnt_a_file(window: MainWindow, tmp_path: Path) -> None:
+    window.open_file(tmp_path)
+    assert "is a folder" in window.drop.message.text()
+
+
 def test_stamper_cli_entry_point_always_runs_the_cli(corpus_dir: Path, tmp_path: Path) -> None:
     out = tmp_path / "o.pdf"
     p = subprocess.run(

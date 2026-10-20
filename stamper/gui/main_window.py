@@ -772,6 +772,9 @@ class MainWindow(QMainWindow):
         if self.config is None or self.profile is None:
             self.show_drop("Open a config file that works before choosing a PDF.")
             return
+        if path.is_dir():
+            self.show_drop(f"{visible(path.name)} is a folder. Choose the PDF files in it instead.")
+            return
         if not path.is_file():
             self.show_drop(f"Can't find the file {path}.")
             return
