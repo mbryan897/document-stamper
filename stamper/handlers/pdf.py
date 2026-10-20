@@ -321,8 +321,6 @@ class _Planned:
 class PdfHandler(Handler):
     """Stamps PDF files."""
 
-    extensions = (".pdf",)
-
     # ---------------------------------------------------------- opening
 
     def can_open(self, path: Path) -> bool:

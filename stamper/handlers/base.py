@@ -298,9 +298,6 @@ class PlanResult:
 class Handler(abc.ABC):
     """One file format."""
 
-    #: File extensions this handler takes, lowercase with the dot.
-    extensions: tuple[str, ...] = ()
-
     @abc.abstractmethod
     def can_open(self, path: Path) -> bool:
         """True if this handler takes the file (checks content, not just the name)."""

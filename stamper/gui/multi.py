@@ -793,10 +793,6 @@ class _MultiMixin:
             return ""
         return disagreement_note(self.config.fields[name].label, agreement)  # type: ignore[attr-defined]
 
-    def disagreement(self, name: str) -> str:
-        """The amber note naming files whose names disagree for a field (empty if none)."""
-        return self._agreement_note(name)
-
 
 # ------------------------------------------------------------------ combine
 
@@ -1248,11 +1244,6 @@ class BatchDialog(_MultiMixin, StampDialog):
 
         self.progress_label.setText("Stamping…")
         self._run.req = self.engine.run_task(save)
-
-    def _cancel_save(self) -> None:
-        if self.saving and self.cancel_button.isEnabled():
-            self.progress_label.setText("Cancelling…")
-            self.engine.cancel()
 
     def disconnect_engine(self) -> None:
         """Stop listening to the engine, including the batch task signals."""

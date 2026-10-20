@@ -285,11 +285,6 @@ class CompiledPattern:
         m = self.regex.fullmatch(value)
         return m is not None and _check_date(m.groupdict()).ok
 
-    def check_date_parts(self, value: str) -> DateCheck | None:
-        """Date check for a value that fits the shape, or None if it doesn't."""
-        m = self.regex.fullmatch(value)
-        return None if m is None else _check_date(m.groupdict())
-
     def date_of(self, value: str) -> date | None:
         """The calendar date a matching value encodes, or None.
 

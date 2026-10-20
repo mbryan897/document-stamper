@@ -304,8 +304,3 @@ class EngineClient(QObject):
         if self._thread.isRunning():
             self._thread.quit()
             self._thread.wait(timeout_ms)
-
-    @property
-    def thread(self) -> QThread:
-        """The engine thread (tests check that calls run there)."""
-        return self._thread

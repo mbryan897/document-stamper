@@ -202,7 +202,6 @@ class StampDialog(QWidget):
         self._plan_done_revision = -1
         self._last_png: bytes | None = None
         self._preview_done = 0  # last preview request answered
-        self._save_error = ""
 
         self._rows: dict[str, _FieldRow] = {}
         self._ticks: dict[str, QCheckBox] = {}
@@ -304,7 +303,6 @@ class StampDialog(QWidget):
         self.preview_holder.hide()
         well_lay.addWidget(self.preview, 1)
         well_lay.addWidget(self.preview_holder, 1)
-        self.preview_well = well
         lay.addWidget(self._wrap_well(well), 1)
 
         hint = QLabel("The amber dashed line shows what the stamp covers. It isn't printed.")
@@ -822,7 +820,6 @@ class StampDialog(QWidget):
     def _changed(self, *, immediate: bool = False) -> None:
         """Something that changes the stamp changed: redraw and re-check."""
         self.revision += 1
-        self._save_error = ""
         self.save_error.hide()
         self._update_button()
         if immediate:
@@ -1066,7 +1063,6 @@ class StampDialog(QWidget):
     # ------------------------------------------------------------ saving
 
     def _refuse(self, message: str) -> None:
-        self._save_error = message
         self.save_error.setText(message)
         self.save_error.show()
 
