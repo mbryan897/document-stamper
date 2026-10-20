@@ -536,7 +536,8 @@ class _PasswordRow:
         self.edit = edit
         self.status = status
         self.button = button
-        self.req = 0
+        self.req = 0  # the password check in flight, if any
+        self.sent = ""  # the password that check is trying
 
 
 class PrepareScreen(QWidget):
@@ -609,7 +610,7 @@ class PrepareScreen(QWidget):
                 w.deleteLater()
 
     def _build_body(self) -> None:
-        keep = {str(r.file.path): r.edit.text() for r in self._rows}
+        keep = {str(r.file.path): r for r in self._rows}  # typed text and any check in flight
         self._clear_body()
         self._rows = []
         locked = [f for f in self._files if f.needs_password]
@@ -622,13 +623,17 @@ class PrepareScreen(QWidget):
             for i, f in enumerate(locked):
                 name = QLabel(visible(f.path.name))
                 name.setWordWrap(True)
-                edit = QLineEdit(keep.get(str(f.path), ""))
+                old = keep.get(str(f.path))
+                edit = QLineEdit(old.edit.text() if old else "")
                 edit.setEchoMode(QLineEdit.EchoMode.Password)
                 edit.setAccessibleName(f"Password for {visible(f.path.name)}")
                 button = QPushButton("Check")
                 button.setObjectName("small")
                 status = _wrap_label("", "msgNeutral")
                 row = _PasswordRow(f, edit, status, button)
+                if old is not None and old.req:
+                    row.req, row.sent = old.req, old.sent
+                    status.setText("Checking…")
                 edit.returnPressed.connect(lambda r=row: self.check_password(r))
                 button.clicked.connect(lambda _c=False, r=row: self.check_password(r))
                 grid.addWidget(name, i * 2, 0)
@@ -694,7 +699,8 @@ class PrepareScreen(QWidget):
             row.status.setText("Type the password first.")
             return
         row.status.setText("Checking…")
-        row.req = self.engine.inspect(row.file.path, row.edit.text())
+        row.sent = row.edit.text()
+        row.req = self.engine.inspect(row.file.path, row.sent)
 
     def _row_for(self, req: int) -> _PasswordRow | None:
         return next((r for r in self._rows if r.req == req and req), None)
@@ -703,12 +709,9 @@ class PrepareScreen(QWidget):
         row = self._row_for(req)
         if row is None:
             return
-        updated = replace(row.file, info=info, password=row.edit.text())
+        updated = replace(row.file, info=info, password=row.sent)  # what was tried, not what's typed now
         self._files = [updated if f.path == row.file.path else f for f in self._files]
-        self._build_body()  # the file may turn out to be signed or restricted
-        done = next((r for r in self._rows if r.file.path == updated.path), None)
-        if done is not None:
-            done.status.setText("Opens the file.")
+        self._build_body()  # the file may turn out to be signed or restricted; its row goes
 
     def _on_inspect_failed(self, req: int, failure: EngineFailure) -> None:
         row = self._row_for(req)

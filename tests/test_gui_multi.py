@@ -362,6 +362,24 @@ def test_cancel_mid_batch_keeps_saved_copies(qtbot: QtBot, slow_window: MainWind
 # ------------------------------------------------------------ batch
 
 
+def test_two_locked_files_checked_at_once(qtbot: QtBot, window: MainWindow, corpus_dir: Path,
+                                         tmp_path: Path) -> None:
+    one = copy_to(corpus_dir / "encrypted_user_password.pdf", tmp_path, "locked_one.pdf")
+    two = copy_to(corpus_dir / "encrypted_user_password.pdf", tmp_path, "locked_two.pdf")
+    open_several(qtbot, window, [one, two, copy_to(corpus_dir / "rotate_90.pdf", tmp_path)])
+    window.files_screen.batch_button.click()
+    screen = prepare(qtbot, window)
+    rows = screen.password_rows()
+    assert len(rows) == 2
+    for _name, edit in rows:  # Check both before either answer arrives
+        edit.setText(PW)
+        edit.returnPressed.emit()
+    rows[1][1].setText("typed-after-check")  # edited while its check runs
+    qtbot.waitUntil(lambda: all(not f.needs_password for f in screen.files()), timeout=WAIT_MS)
+    assert {f.path.name: f.password for f in screen.files() if f.path.name.startswith("locked")} == {
+        "locked_one.pdf": PW, "locked_two.pdf": PW}
+
+
 def test_batch_five_files(qtbot: QtBot, window: MainWindow, fake: FakeServices, corpus_dir: Path,
                           tmp_path: Path) -> None:
     locked = copy_to(corpus_dir / "encrypted_user_password.pdf", tmp_path)
