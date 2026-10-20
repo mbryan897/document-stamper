@@ -419,3 +419,12 @@ def test_cross_check_messages_name_location() -> None:
 
 def test_config_object_is_returned() -> None:
     assert isinstance(parse_config(minimal()), Config)
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf")])
+def test_nan_or_infinity_refused_at_load(bad: float) -> None:
+    # json.loads accepts NaN and Infinity; a margin of NaN passed "< 0.25" and failed every page later.
+    data = minimal()
+    data["profiles"][0]["stamps"][0]["margin_in"] = bad
+    with pytest.raises(ConfigError, match="margin_in"):
+        parse_config(json.loads(json.dumps(data)))

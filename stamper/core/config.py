@@ -87,7 +87,7 @@ class ConfigError(Exception):
 
 
 class _Model(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)  # json.loads accepts NaN
 
 
 class Settings(_Model):
