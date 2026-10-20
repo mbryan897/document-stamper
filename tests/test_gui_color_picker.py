@@ -23,7 +23,7 @@ from stamper.gui.color_picker import (
 )
 from stamper.gui.main_window import MainWindow
 from stamper.gui.profiles import ProfileSettings
-from tests.gui_support import TODAY, FakeServices, fake  # noqa: F401
+from tests.gui_support import TODAY, FakeServices, close_window, fake  # noqa: F401
 from tests.stamping import DEFAULT_CONFIG, RECORDS_CONFIG
 
 # ------------------------------------------------------------ the palette
@@ -78,7 +78,7 @@ def settings(qtbot: QtBot, fake: FakeServices, tmp_path: Path) -> Iterator[Profi
     s = w.open_settings()
     assert s is not None
     yield s
-    w.close()
+    close_window(w)
 
 
 def test_label_is_spelled_color(settings: ProfileSettings) -> None:

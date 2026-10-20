@@ -713,6 +713,7 @@ class MainWindow(QMainWindow):
             return None
         self._close_dialog()
         self._close_settings()
+        self._opening = None  # a file still opening mustn't replace these settings when it's ready
         settings = ProfileSettings(
             config=self.config, source=self.source, locs=self.locs, engine=self.engine,
             services=self.services, today=self.today, sendto_shortcut=self._sendto_shortcut)
@@ -1076,6 +1077,9 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 - Qt name
         """Cancel any save and wait for the engine, so no temporary file is left (D-055)."""
+        if self.settings is not None and not self.settings.may_leave():
+            event.ignore()  # unsaved profile settings: the user chose to keep editing
+            return
         self._close_dialog()
         self._close_settings()
         self._close_prepare()

@@ -29,6 +29,7 @@ from tests.gui_support import (  # noqa: F401 - fixtures
     WAIT_MS,
     FakeServices,
     choose,
+    close_window,
     copy_to,
     fake,
     type_into,
@@ -276,7 +277,7 @@ def test_closing_the_window_removes_the_temp_file(qtbot: QtBot, fake: FakeServic
     w.files_screen.combine_button.click()
     wait_dialog(qtbot, w, CombineDialog)
     assert _temp_left(tmp_path)
-    w.close()
+    close_window(w)
     assert not _temp_left(tmp_path)
 
 
@@ -306,7 +307,7 @@ def slow_window(qtbot: QtBot, fake: FakeServices) -> Iterator[MainWindow]:
     w.resize(1200, 780)
     w.show()
     yield w
-    w.close()
+    close_window(w)
 
 
 def test_cancel_mid_combine(qtbot: QtBot, window: MainWindow, corpus_dir: Path, tmp_path: Path,

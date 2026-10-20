@@ -1700,13 +1700,16 @@ class ProfileSettings(QWidget):
         self._update_source()
         self.saved.emit(self.source)
 
+    def may_leave(self) -> bool:
+        """True if there are no unsaved changes, or the user agrees to discard them."""
+        return not self.draft.dirty or self.services.confirm(
+            self, "Discard changes?", "Your changes to the profile settings haven't been saved.",
+            "Discard changes")
+
     def cancel(self) -> None:
         """Leave without saving; asks first if there are changes."""
-        if self.draft.dirty and not self.services.confirm(
-                self, "Discard changes?", "Your changes to the profile settings haven't been saved.",
-                "Discard changes"):
-            return
-        self.closed.emit()
+        if self.may_leave():
+            self.closed.emit()
 
     # ------------------------------------------------------------ import, export
 

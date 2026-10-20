@@ -32,6 +32,7 @@ from tests.gui_support import (  # noqa: F401 - fixtures
     WAIT_MS,
     FakeServices,
     choose,
+    close_window,
     copy_to,
     fake,
     open_dialog,
@@ -331,7 +332,7 @@ def test_closing_the_window_closes_the_help(qtbot: QtBot, fake: FakeServices) ->
     assert h.isVisible()
     closed: list[bool] = []
     h.destroyed.connect(lambda: closed.append(True))
-    w.close()
+    close_window(w)
     qtbot.waitUntil(lambda: bool(closed), timeout=WAIT_MS)
     assert w.help is None
 

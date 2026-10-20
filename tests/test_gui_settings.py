@@ -22,7 +22,15 @@ from stamper.core.locations import AppState, Locations, SourceKind, backup_path,
 from stamper.gui.app import make_app
 from stamper.gui.main_window import MainWindow
 from stamper.gui.profiles import ProfileSettings
-from tests.gui_support import TODAY, WAIT_MS, FakeServices, copy_to, fake, open_dialog  # noqa: F401
+from tests.gui_support import (  # noqa: F401
+    TODAY,
+    WAIT_MS,
+    FakeServices,
+    close_window,
+    copy_to,
+    fake,
+    open_dialog,
+)
 from tests.stamping import DEFAULT_CONFIG, RECORDS_CONFIG
 
 
@@ -50,7 +58,7 @@ def records_window(qtbot: QtBot, fake: FakeServices, locs: Locations) -> Iterato
     shutil.copyfile(RECORDS_CONFIG, locs.app_config)
     w = _window(qtbot, fake, locs)
     yield w
-    w.close()
+    close_window(w)
 
 
 def _settings(w: MainWindow) -> ProfileSettings:
@@ -79,7 +87,7 @@ def test_window_falls_back_to_the_builtin(qtbot: QtBot, fake: FakeServices, locs
     w = _window(qtbot, fake, locs)
     assert w.source is not None and w.source.kind is SourceKind.BUILTIN
     assert w.profile is not None and w.profile.name == "Standard"
-    w.close()
+    close_window(w)
 
 
 def test_invalid_config_next_to_the_app_is_reported(qtbot: QtBot, fake: FakeServices, locs: Locations) -> None:
@@ -87,7 +95,7 @@ def test_invalid_config_next_to_the_app_is_reported(qtbot: QtBot, fake: FakeServ
     w = _window(qtbot, fake, locs)
     assert "config.json can't be used" in w.drop.message.text()
     assert not w.drop.settings_button.isEnabled()
-    w.close()
+    close_window(w)
 
 
 # ------------------------------------------------------------ last-used values (D-081)
@@ -107,14 +115,14 @@ def test_last_profile_and_folder_are_remembered(qtbot: QtBot, fake: FakeServices
     work.mkdir()
     pdf = copy_to(corpus_dir / "letter_portrait.pdf", work)
     open_dialog(qtbot, w, pdf)
-    w.close()
+    close_window(w)
     assert load_state(locs) == AppState("Second", str(work), str(locs.app_config))  # last_config (D-121)
     assert "99-2026" not in locs.state_file.read_text(encoding="utf-8")  # no field values
 
     w2 = _window(qtbot, fake, locs)
     assert w2.profile is not None and w2.profile.name == "Second"
     assert w2._last_folder == work
-    w2.close()
+    close_window(w2)
 
 
 def test_remembered_profile_that_no_longer_exists_is_ignored(qtbot: QtBot, fake: FakeServices,
@@ -122,7 +130,7 @@ def test_remembered_profile_that_no_longer_exists_is_ignored(qtbot: QtBot, fake:
     save_state(AppState("Gone"), locs)
     w = _window(qtbot, fake, locs)
     assert w.profile is not None and w.profile.name == "Standard"
-    w.close()
+    close_window(w)
 
 
 # ------------------------------------------------------------ opening and leaving
@@ -214,7 +222,7 @@ def test_builtin_saves_next_to_the_app(qtbot: QtBot, fake: FakeServices, locs: L
     assert locs.app_config.is_file()
     assert w.source is not None and w.source.kind is SourceKind.APP
     assert DEFAULT_CONFIG.read_bytes() == (Path(DEFAULT_CONFIG)).read_bytes()  # untouched
-    w.close()
+    close_window(w)
 
 
 @pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0, reason="POSIX permissions, not as root")
@@ -231,7 +239,7 @@ def test_read_only_config_offers_export_only(qtbot: QtBot, fake: FakeServices, l
     fake.export_paths = [out]
     s.export_config()
     assert load_config(out).default_profile.name == "Mine"
-    w.close()
+    close_window(w)
 
 
 # ------------------------------------------------------------ profiles page
@@ -510,7 +518,7 @@ def test_import_replaces_after_confirm_and_save(qtbot: QtBot, fake: FakeServices
     s.save()
     assert load_config(locs.app_config) == load_config(RECORDS_CONFIG)
     assert w.profile is not None and w.profile.name == "Records submission"
-    w.close()
+    close_window(w)
 
 
 def test_import_declined_changes_nothing(records_window: MainWindow, fake: FakeServices) -> None:
@@ -565,14 +573,14 @@ def test_app_folder_copied_elsewhere_keeps_its_profiles(qtbot: QtBot, fake: Fake
     fake.confirms = [True]
     s.import_config()
     s.save()
-    w.close()
+    close_window(w)
     moved = tmp_path / "other-pc" / "E" / "DocumentStamper"
     shutil.copytree(usb, moved)
     second = Locations(app=moved, user=tmp_path / "pc2", builtin=DEFAULT_CONFIG)
     w2 = _window(qtbot, fake, second)
     assert w2.source is not None and w2.source.kind is SourceKind.APP
     assert w2.config == load_config(RECORDS_CONFIG)
-    w2.close()
+    close_window(w2)
 
 
 @pytest.mark.parametrize(
@@ -589,3 +597,25 @@ def test_plain_problem(raw: str, plain: str) -> None:
     from stamper.gui.profiles import plain_problem
 
     assert plain_problem(raw) == plain
+
+
+def test_closing_the_window_with_unsaved_settings_asks(qtbot: QtBot, records_window: MainWindow,
+                                                       fake: FakeServices) -> None:
+    s = _settings(records_window)
+    _type(qtbot, s.profiles_page.name, "Renamed")
+    fake.confirms = [False]
+    records_window.close()
+    assert records_window.isVisible() and records_window.settings is s  # kept editing
+    assert [q[0] for q in fake.questions] == ["Discard changes?"]
+    fake.confirms = [True]
+    records_window.close()
+    assert not records_window.isVisible()
+
+
+def test_a_file_still_opening_doesnt_replace_settings(qtbot: QtBot, records_window: MainWindow,
+                                                      corpus_dir: Path, tmp_path: Path) -> None:
+    w = records_window
+    w.open_file(copy_to(corpus_dir / "letter_portrait.pdf", tmp_path))
+    s = _settings(w)  # before the inspect result arrives
+    qtbot.wait(1500)  # long enough for the inspect to finish
+    assert w.stack.currentWidget() is s and w.dialog is None
