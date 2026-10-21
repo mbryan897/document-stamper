@@ -557,10 +557,19 @@ def _run_combine(
 
 @contextmanager
 def _ctrl_c_stops() -> Iterator[threading.Event]:
-    """While inside, Ctrl+C sets the event instead of raising, so a batch stops cleanly and reports what it saved."""
+    """While inside, Ctrl+C sets the event instead of raising, so a batch stops cleanly and reports what it saved.
+
+    A second Ctrl+C raises as usual, for a file that takes too long to reach its next page.
+    """
     stop = threading.Event()
+
+    def on_ctrl_c(sig: int, frame: object) -> None:
+        if stop.is_set():
+            signal.default_int_handler(sig, frame)
+        stop.set()
+
     try:
-        previous = signal.signal(signal.SIGINT, lambda _sig, _frame: stop.set())
+        previous = signal.signal(signal.SIGINT, on_ctrl_c)
     except ValueError:  # not the main thread: Ctrl+C can't reach us anyway
         yield stop
         return

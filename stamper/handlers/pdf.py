@@ -44,7 +44,7 @@ from ..core.geometry import (
     visible_to_unrotated,
 )
 from ..core.locations import resource_dir
-from ..core.paths import same_file
+from ..core.paths import same_file, size_text
 from ..core.patterns import parse_date_format
 from ..core.template import builtin_values, render
 from .base import (
@@ -310,7 +310,7 @@ def size_notes(info: DocumentInfo) -> list[str]:
     except OSError:
         size = 0
     if size > LARGE_FILE_BYTES:
-        notes.append(f"This file is {size / (1024 * 1024):,.0f} MB; checking and saving take longer.")
+        notes.append(f"This file is {size_text(size)}; checking and saving take longer.")
     return notes
 
 

@@ -136,8 +136,8 @@ class CombinedFile:
     ``protected`` names sources that had a password or restrictions (the
     combined file has neither, D-096). ``signed`` names signed sources.
     ``renamed_fields`` maps a source file name (with its place in the order
-    when two sources share a name) to its ``(old, new)`` field names (D-098). ``notes`` are sentences for the stamp dialog and the
-    saved screen.
+    when two sources share a name) to its ``(old, new)`` field names (D-098).
+    ``notes`` are sentences for the stamp dialog and the saved screen.
     """
 
     path: Path
@@ -202,8 +202,6 @@ def _hide(folder: Path) -> None:
         ctypes.windll.kernel32.SetFileAttributesW(str(folder), 0x2)  # type: ignore[attr-defined]
     except (AttributeError, OSError):
         pass
-
-
 
 
 def _app_version() -> str:

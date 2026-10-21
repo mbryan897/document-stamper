@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -70,7 +71,13 @@ def test_size_text_is_the_same_everywhere() -> None:
 
 
 def test_is_link(tmp_path: Path) -> None:
-    a = _file(tmp_path / "a.pdf")
-    (tmp_path / "link.pdf").symlink_to(a)
-    assert paths.is_link(os.lstat(tmp_path / "link.pdf"))
-    assert not paths.is_link(os.lstat(a))
+    target, link = tmp_path / "target", tmp_path / "link"
+    target.mkdir()
+    if os.name == "nt":  # a junction: no admin rights needed, unlike a symbolic link
+        made = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)], capture_output=True)
+        if made.returncode != 0:
+            pytest.skip("couldn't make a junction")
+    else:
+        link.symlink_to(target, target_is_directory=True)
+    assert paths.is_link(os.lstat(link))
+    assert not paths.is_link(os.lstat(target))

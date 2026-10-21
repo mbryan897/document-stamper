@@ -236,6 +236,25 @@ def test_cli_batch_ctrl_c_reports_the_saved_copies(corpus_dir: Path, tmp_path: P
     assert signal.getsignal(signal.SIGINT) is signal.default_int_handler  # put back afterwards
 
 
+def test_cli_batch_second_ctrl_c_stops_at_once(corpus_dir: Path, tmp_path: Path,
+                                               monkeypatch: pytest.MonkeyPatch) -> None:
+    files = [copy_to(corpus_dir / "letter_portrait.pdf", tmp_path, f"f{i}.pdf") for i in range(2)]
+    outdir = tmp_path / "out"
+    outdir.mkdir()
+    real_apply = PdfHandler.apply
+
+    def apply_then_two_ctrl_c(self: PdfHandler, *a: object, **kw: object) -> object:
+        result = real_apply(self, *a, **kw)  # type: ignore[arg-type]
+        signal.raise_signal(signal.SIGINT)
+        signal.raise_signal(signal.SIGINT)  # pressed again: don't wait for the next page
+        return result
+
+    monkeypatch.setattr(PdfHandler, "apply", apply_then_two_ctrl_c)
+    r = Run(["--batch", *map(str, files), "--out-dir", str(outdir), *BASE])
+    assert r.code == ExitCode.INTERRUPTED, r.stderr
+    assert signal.getsignal(signal.SIGINT) is signal.default_int_handler
+
+
 @pytest.mark.parametrize("which", [0, 1])
 def test_cli_combine_never_saves_over_an_original(corpus_dir: Path, tmp_path: Path, which: int) -> None:
     a = copy_to(corpus_dir / "letter_portrait.pdf", tmp_path)

@@ -59,7 +59,6 @@ __all__ = [
     "app_dir",
     "backup_path",
     "builtin_config_path",
-    "config_digest",
     "describe",
     "find_config",
     "folder_is_writable",
@@ -227,7 +226,7 @@ class ConfigSource:
     digest: str | None = field(default=None, compare=False)  # the file's contents when found; None: no file
 
 
-def config_digest(path: Path) -> str | None:
+def _config_digest(path: Path) -> str | None:
     """SHA-256 of a config file's bytes, or None when there's no file."""
     try:
         return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -258,7 +257,7 @@ def describe(path: Path, kind: SourceKind) -> ConfigSource:
     """A ConfigSource for a path, checking whether it can be written."""
     if kind is SourceKind.BUILTIN:
         return ConfigSource(path, kind, False)
-    return ConfigSource(path, kind, path.is_file() and _file_is_writable(path), config_digest(path))
+    return ConfigSource(path, kind, path.is_file() and _file_is_writable(path), _config_digest(path))
 
 
 def find_config(locs: Locations | None = None) -> ConfigSource:
@@ -284,13 +283,13 @@ def save_target(source: ConfigSource, locs: Locations | None = None) -> ConfigSo
     if source.kind is not SourceKind.BUILTIN:
         return source if source.writable else None
     if locs.app.is_dir() and folder_is_writable(locs.app):
-        return ConfigSource(locs.app_config, SourceKind.APP, True, config_digest(locs.app_config))
+        return ConfigSource(locs.app_config, SourceKind.APP, True, _config_digest(locs.app_config))
     try:
         locs.user.mkdir(parents=True, exist_ok=True)
     except OSError:
         return None
     if folder_is_writable(locs.user):
-        return ConfigSource(locs.user_config, SourceKind.USER, True, config_digest(locs.user_config))
+        return ConfigSource(locs.user_config, SourceKind.USER, True, _config_digest(locs.user_config))
     return None
 
 
@@ -332,14 +331,14 @@ def save_config(config: Config, path: Path, *, backup: bool = True, expect: str 
     The text is re-read through the validator before anything on disk
     changes, so a file that wouldn't load is never written. With ``backup``,
     an existing file is copied to ``config.json.bak`` first (one level kept).
-    ``expect`` is the file's ``config_digest`` when it was loaded (None: there
+    ``expect`` is the file's ``_config_digest`` when it was loaded (None: there
     was no file); if the file is different now, nothing is written and
     ConfigChanged is raised. Raises OSError if the folder can't be written,
     ConfigError if the text doesn't validate (a programming error).
     """
     text = config.to_json()
     parse_config(json.loads(text), path.name)
-    if expect != _UNCHECKED and config_digest(path) != expect:
+    if expect != _UNCHECKED and _config_digest(path) != expect:
         raise ConfigChanged(
             f"{path.name} was changed by someone else after it was loaded, so it wasn't overwritten. "
             "Export your changes, then restart the app to load the new version")
