@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -14,6 +15,7 @@ from stamper.handlers.combine import (
     SOURCES_PROPERTY,
     TEMP_PREFIX,
     CombineInput,
+    _bookmarks,
     combine_pdfs,
     field_suffix,
 )
@@ -100,6 +102,42 @@ def test_nested_bookmarks_kept(tmp_path: Path) -> None:
         assert doc.get_toc() == [[1, "b.pdf", 1], [1, "a.pdf", 2], [2, "Intro", 2], [3, "Detail", 3], [2, "End", 4]]
 
 
+def test_bookmarks_read_as_get_toc_reads_them(tmp_path: Path) -> None:
+    src = tmp_path / "nested.pdf"
+    with pymupdf.open() as d:
+        for _ in range(5):
+            d.new_page()
+        d.set_toc([[1, "One", 1], [2, "One.a", 2], [3, "One.a.i", 3], [2, "One.b", 3], [1, "Two", 4],
+                   [2, "Two.a", 5], [1, "Three", 5]])
+        d.save(src)
+    with pymupdf.open(src) as d:
+        assert _bookmarks(d) == [tuple(e) for e in d.get_toc(simple=True)]
+
+
+def test_combine_leaves_no_pdf_objects_for_the_garbage_collector(tmp_path: Path) -> None:
+    # The window's thread runs the collector too; MuPDF objects must be freed on the engine thread.
+    a, b = tmp_path / "a.pdf", tmp_path / "b.pdf"
+    for path in (a, b):
+        with pymupdf.open() as d:
+            d.new_page()
+            d.new_page()
+            d.set_toc([[1, "Intro", 1], [2, "Detail", 2]])
+            d.save(path)
+    gc.collect()
+    gc.disable()
+    gc.set_debug(gc.DEBUG_SAVEALL)
+    try:
+        with combine_pdfs([CombineInput(a), CombineInput(b)], tmp_path):
+            pass
+        gc.collect()
+        left = [type(o).__name__ for o in gc.garbage if "mupdf" in type(o).__module__]
+    finally:
+        gc.set_debug(0)
+        gc.garbage.clear()
+        gc.enable()
+    assert left == []
+
+
 def test_hidden_layers_stay_hidden(tmp_path: Path) -> None:
     src = tmp_path / "layers.pdf"
     with pymupdf.open() as d:
@@ -119,6 +157,88 @@ def test_hidden_layers_stay_hidden(tmp_path: Path) -> None:
         assert "shown layer text" in text and "hidden layer text" not in text
         states = {v["name"]: v["on"] for v in doc.get_ocgs().values()}
         assert states == {"Hidden": False, "Shown": True}
+
+
+def test_layers_off_by_default_stay_hidden(tmp_path: Path) -> None:
+    # BaseState /OFF: a layer not listed under ON is hidden, though it isn't in the OFF list.
+    src = tmp_path / "base_off.pdf"
+    with pymupdf.open() as d:
+        page = d.new_page()
+        layer = d.add_ocg("Default off", on=True)
+        page.insert_text((72, 300), "base-off layer text", oc=layer)
+        cat = d.pdf_catalog()
+        d.xref_set_key(cat, "OCProperties/D/BaseState", "/OFF")
+        d.xref_set_key(cat, "OCProperties/D/ON", "[]")
+        d.xref_set_key(cat, "OCProperties/D/OFF", "[]")
+        d.save(src)
+    other = tmp_path / "other.pdf"
+    with pymupdf.open() as d:
+        d.new_page()
+        d.save(other)
+    with combine_pdfs([CombineInput(other), CombineInput(src)], tmp_path) as combined, \
+            pymupdf.open(combined.path) as doc:
+        assert "base-off layer text" not in doc[1].get_text()
+        assert {v["name"]: v["on"] for v in doc.get_ocgs().values()} == {"Default off": False}
+
+
+def _blank(path: Path) -> Path:
+    with pymupdf.open() as d:
+        d.new_page()
+        d.save(path)
+    return path
+
+
+def _damaged(path: Path) -> Path:
+    """A PDF whose cross-reference offset is wrong, so it opens only after repair."""
+    _blank(path)
+    data = path.read_bytes()
+    at = data.rindex(b"startxref") + len(b"startxref")
+    path.write_bytes(data[:at] + b"\n999999\n%%EOF\n")
+    return path
+
+
+def _tagged(path: Path) -> Path:
+    with pymupdf.open() as d:
+        d.new_page()
+        d.xref_set_key(d.pdf_catalog(), "StructTreeRoot", "<< /Type /StructTreeRoot >>")
+        d.save(path)
+    return path
+
+
+def _page_labels(path: Path) -> Path:
+    with pymupdf.open() as d:
+        d.new_page()
+        d.set_page_labels([{"startpage": 0, "prefix": "A-", "style": "D", "firstpagenum": 1}])
+        d.save(path)
+    return path
+
+
+@pytest.mark.parametrize(
+    ("make", "note"),
+    [
+        (_damaged, "damaged.pdf was damaged and repaired when opened"),
+        (_tagged, "Accessibility tags in tagged.pdf weren't kept"),
+        (_page_labels, "Page labels from the originals weren't kept"),
+    ],
+    ids=["repaired", "tagged", "page-labels"],
+)
+def test_combine_notes_what_it_couldnt_keep(tmp_path: Path, make: Callable[[Path], Path], note: str) -> None:
+    name = {"_damaged": "damaged.pdf", "_tagged": "tagged.pdf", "_page_labels": "labels.pdf"}[make.__name__]
+    src = make(tmp_path / name)
+    with combine_pdfs([CombineInput(_blank(tmp_path / "plain.pdf")), CombineInput(src)], tmp_path) as combined:
+        assert any(note in n for n in combined.notes), combined.notes
+
+
+def test_renames_named_for_each_source_with_the_same_name(tmp_path: Path) -> None:
+    (tmp_path / "x").mkdir()
+    (tmp_path / "y").mkdir()
+    files = [make_form(tmp_path / "a.pdf", "A"), make_form(tmp_path / "x" / "r.pdf", "X"),
+             make_form(tmp_path / "y" / "r.pdf", "Y")]
+    with combine_pdfs([CombineInput(f) for f in files], tmp_path) as combined:
+        assert set(combined.renamed_fields) == {"r.pdf (file 2)", "r.pdf (file 3)"}
+        assert ("case_no", "case_no" + field_suffix(2)) in combined.renamed_fields["r.pdf (file 2)"]
+        assert ("case_no", "case_no" + field_suffix(3)) in combined.renamed_fields["r.pdf (file 3)"]
+        assert sum("Form fields in r.pdf (file" in n for n in combined.notes) == 2
 
 
 def test_attachments_kept_and_named_by_source(tmp_path: Path) -> None:

@@ -8,7 +8,9 @@ Which interface runs is decided by ``route`` (D-063):
   passes one bare path); several files (Send To passes several) open the
   files screen, to order them and choose Combine or Batch (D-100);
 - anything else: the command line, exactly as in Phase 2. Any option, or
-  ``--``, forces the command line: ``stamper -- file.pdf``.
+  ``--``, forces the command line: ``stamper -- file.pdf``. In the windowed
+  exe, which has no console, bare paths that aren't all files (a folder, a
+  file that's gone) open the window instead, which says what's wrong.
 
 ``stamper-cli`` (``stamper-cli.exe`` in the packaged folder) always runs
 the command line.
@@ -66,6 +68,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Run the window or the command line; returns the exit code."""
     args = list(sys.argv[1:] if argv is None else argv)
     decision = route(args)
+    if decision.kind == "cli" and sys.stdout is None and not any(a.startswith("-") for a in args):
+        # The windowed exe, given a folder or a file that's gone (Send To): nothing could show the
+        # command line's message, so the window opens and says what's wrong instead.
+        decision = Route("window", tuple(Path(a) for a in args))
     if decision.kind == "cli":
         _ensure_streams()
         return cli_main(args)

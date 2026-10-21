@@ -29,6 +29,7 @@ from tests.gui_support import (  # noqa: F401 - fixtures
     WAIT_MS,
     FakeServices,
     choose,
+    close_window,
     copy_to,
     fake,
     type_into,
@@ -276,7 +277,7 @@ def test_closing_the_window_removes_the_temp_file(qtbot: QtBot, fake: FakeServic
     w.files_screen.combine_button.click()
     wait_dialog(qtbot, w, CombineDialog)
     assert _temp_left(tmp_path)
-    w.close()
+    close_window(w)
     assert not _temp_left(tmp_path)
 
 
@@ -306,7 +307,7 @@ def slow_window(qtbot: QtBot, fake: FakeServices) -> Iterator[MainWindow]:
     w.resize(1200, 780)
     w.show()
     yield w
-    w.close()
+    close_window(w)
 
 
 def test_cancel_mid_combine(qtbot: QtBot, window: MainWindow, corpus_dir: Path, tmp_path: Path,
@@ -359,6 +360,24 @@ def test_cancel_mid_batch_keeps_saved_copies(qtbot: QtBot, slow_window: MainWind
 
 
 # ------------------------------------------------------------ batch
+
+
+def test_two_locked_files_checked_at_once(qtbot: QtBot, window: MainWindow, corpus_dir: Path,
+                                         tmp_path: Path) -> None:
+    one = copy_to(corpus_dir / "encrypted_user_password.pdf", tmp_path, "locked_one.pdf")
+    two = copy_to(corpus_dir / "encrypted_user_password.pdf", tmp_path, "locked_two.pdf")
+    open_several(qtbot, window, [one, two, copy_to(corpus_dir / "rotate_90.pdf", tmp_path)])
+    window.files_screen.batch_button.click()
+    screen = prepare(qtbot, window)
+    rows = screen.password_rows()
+    assert len(rows) == 2
+    for _name, edit in rows:  # Check both before either answer arrives
+        edit.setText(PW)
+        edit.returnPressed.emit()
+    rows[1][1].setText("typed-after-check")  # edited while its check runs
+    qtbot.waitUntil(lambda: all(not f.needs_password for f in screen.files()), timeout=WAIT_MS)
+    assert {f.path.name: f.password for f in screen.files() if f.path.name.startswith("locked")} == {
+        "locked_one.pdf": PW, "locked_two.pdf": PW}
 
 
 def test_batch_five_files(qtbot: QtBot, window: MainWindow, fake: FakeServices, corpus_dir: Path,

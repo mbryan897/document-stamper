@@ -172,10 +172,6 @@ def show_in_folder(
     open_folder(path.parent)
 
 
-def _show_in_folder(path: Path) -> None:
-    show_in_folder(path)
-
-
 def native_services() -> Services:
     """The real dialogs and Explorer."""
     return Services(
@@ -184,7 +180,7 @@ def native_services() -> Services:
         ask_save_path=_ask_save_path,
         ask_password=_ask_password,
         open_file=_open_file,
-        show_in_folder=_show_in_folder,
+        show_in_folder=show_in_folder,
         confirm=_confirm,
         ask_import_file=_ask_import_file,
         ask_export_path=_ask_export_path,

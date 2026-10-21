@@ -92,7 +92,7 @@ def window(qtbot: QtBot, fake: FakeServices) -> Iterator[MainWindow]:
     w.resize(1200, 780)
     w.show()
     yield w
-    w.close()
+    close_window(w)
 
 
 @pytest.fixture
@@ -104,6 +104,13 @@ def default_window(qtbot: QtBot, fake: FakeServices) -> Iterator[MainWindow]:
     w.resize(1200, 780)
     w.show()
     yield w
+    close_window(w)
+
+
+def close_window(w: MainWindow) -> None:
+    """Close the window at teardown, discarding unsaved Profile settings without asking."""
+    if w.settings is not None:
+        w.settings.draft.mark_saved()
     w.close()
 
 

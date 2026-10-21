@@ -9,7 +9,6 @@ import pytest
 from PySide6.QtCore import QElapsedTimer, Qt, QTimer
 from pytestqt.qtbot import QtBot
 
-from stamper.core.geometry import unrotated_vector_to_visible
 from stamper.gui.main_window import MainWindow
 from stamper.gui.stamp_dialog import StampDialog
 from stamper.handlers.pdf import BOX_PADDING_PT
@@ -23,7 +22,7 @@ from tests.gui_support import (  # noqa: F401 - fixtures
     wait_ready,
     window,
 )
-from tests.stamping import MARGIN_PT, make_signed_pdf, open_pdf, pixel_bbox, sha256
+from tests.stamping import MARGIN_PT, make_signed_pdf, open_pdf, pixel_bbox, sha256, unrotated_vector_to_visible
 from tools import make_corpus
 
 SO = make_corpus.FAKE_CASE_SO

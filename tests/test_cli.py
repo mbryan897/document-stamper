@@ -204,9 +204,9 @@ def test_name_fields_including_date(corpus_dir: Path, tmp_path: Path) -> None:
 
 
 def test_default_config_is_the_shipped_one() -> None:
-    from stamper.cli import default_config_path
+    from stamper.core.locations import builtin_config_path
 
-    assert default_config_path() == DEFAULT_CONFIG
+    assert builtin_config_path() == DEFAULT_CONFIG
 
 
 def _module(*args: str) -> subprocess.CompletedProcess[str]:

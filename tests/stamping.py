@@ -9,6 +9,7 @@ from pathlib import Path
 import pymupdf
 
 from stamper.core.config import Config, load_config
+from stamper.core.geometry import Direction, _check_rotation
 from stamper.handlers.base import StampJob
 from tools import make_corpus
 
@@ -120,34 +121,41 @@ def count_pixels(pix: pymupdf.Pixmap, rect: tuple[float, float, float, float], t
     return total
 
 
+# ------------------------------------------------------------------ geometry references
+# Plain formulas the tests compare PyMuPDF and the placement code against.
+
+
+def visible_size(crop_width: float, crop_height: float, rotation: int) -> tuple[float, float]:
+    """Visible page size from the unrotated CropBox size and ``/Rotate``."""
+    r = _check_rotation(rotation)
+    return (crop_height, crop_width) if r in (90, 270) else (crop_width, crop_height)
+
+
+def unrotated_vector_to_visible(vec: tuple[float, float], rotation: int) -> tuple[float, float]:
+    """Turn a direction in unrotated coordinates into the visible one.
+
+    A page with ``/Rotate`` r is shown turned r degrees clockwise.
+    """
+    r = _check_rotation(rotation)
+    dx, dy = vec
+    for _ in range(r // 90):
+        dx, dy = -dy, dx  # 90 degrees clockwise with y pointing down
+    return (dx, dy)
+
+
+def visible_direction(direction: Direction) -> tuple[float, float]:
+    """The unit vector a reader's eye follows, in visible coordinates."""
+    return (1.0, 0.0) if direction == "along-top" else (0.0, 1.0)
+
+
 # ------------------------------------------------------------------ synthetic special files (Phase 3)
-# Same construction as the fixtures in test_pdf_handler.py, as plain
-# functions so the plan and GUI tests can build them too.
 
 
 def make_signed_pdf(corpus_dir: Path, path: Path, source: str = "acroform_filled.pdf") -> Path:
-    """A corpus file whose first form field becomes a filled signature field.
-
-    Tests detection and the confirmation flow, not cryptographic validity.
-    """
-    with pymupdf.open(corpus_dir / source) as d:
-        w = next(iter(d[0].widgets()))
-        sig = d.get_new_xref()
-        d.update_object(sig, "<</Type/Sig/Filter/Adobe.PPKLite/SubFilter/adbe.pkcs7.detached"
-                             "/Contents<00>/ByteRange[0 0 0 0]>>")
-        d.xref_set_key(w.xref, "FT", "/Sig")
-        d.xref_set_key(w.xref, "V", f"{sig} 0 R")
-        d.xref_set_key(d.pdf_catalog(), "AcroForm/SigFlags", "3")
-        d.save(path)
-    return path
+    """A corpus file whose first form field becomes a filled signature field."""
+    return make_corpus.signed_copy(corpus_dir / source, path)
 
 
 def make_xfa_pdf(corpus_dir: Path, path: Path) -> Path:
     """The AcroForm corpus file with an /XFA entry added."""
-    with pymupdf.open(corpus_dir / "acroform_filled.pdf") as d:
-        x = d.get_new_xref()
-        d.update_object(x, "<<>>")
-        d.update_stream(x, b"<xdp:xdp xmlns:xdp='http://ns.adobe.com/xdp/'/>")
-        d.xref_set_key(d.pdf_catalog(), "AcroForm/XFA", f"{x} 0 R")
-        d.save(path)
-    return path
+    return make_corpus.xfa_copy(corpus_dir / "acroform_filled.pdf", path)

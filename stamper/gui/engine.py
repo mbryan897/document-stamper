@@ -21,13 +21,14 @@ from __future__ import annotations
 
 import threading
 import time
+import weakref
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QThread, Signal, Slot
 
-from ..handlers.base import Cancelled, Handler, SourceFingerprint, StampError, StampJob
+from ..handlers.base import Cancelled, Handler, SourceFingerprint, StampError, StampJob, without_traceback
 
 __all__ = ["PROGRESS_INTERVAL_S", "ApplyRequest", "EngineClient", "EngineFailure", "TaskContext"]
 
@@ -81,6 +82,7 @@ class TaskContext:
 
 
 def _failure(error: Exception) -> EngineFailure:
+    without_traceback(error)  # it goes to the GUI thread; its frames' PDF objects must be freed here
     if isinstance(error, StampError):
         return EngineFailure(str(error), error)
     return EngineFailure(
@@ -108,7 +110,10 @@ class _Worker(QObject):
     def __init__(self, handler: Handler, client: EngineClient) -> None:
         super().__init__()
         self._handler = handler
-        self._client = client
+        # Weak: a strong reference back would put the client, its QThread and this worker in a
+        # reference cycle, which the garbage collector frees on whichever thread it runs on (a later
+        # window's engine thread, say), deleting Qt objects off their thread.
+        self._client = weakref.proxy(client)
 
     @Slot(int, object, object)
     def inspect(self, req: int, path: Path, password: object) -> None:
@@ -304,8 +309,3 @@ class EngineClient(QObject):
         if self._thread.isRunning():
             self._thread.quit()
             self._thread.wait(timeout_ms)
-
-    @property
-    def thread(self) -> QThread:
-        """The engine thread (tests check that calls run there)."""
-        return self._thread

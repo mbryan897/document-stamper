@@ -23,6 +23,7 @@ import math
 import os
 import re
 import tempfile
+import unicodedata
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
@@ -43,6 +44,7 @@ from ..core.geometry import (
     visible_to_unrotated,
 )
 from ..core.locations import resource_dir
+from ..core.paths import same_file, size_text
 from ..core.patterns import parse_date_format
 from ..core.template import builtin_values, render
 from .base import (
@@ -74,9 +76,9 @@ __all__ = [
     "PdfHandler",
     "SHRINK_STEP_PT",
     "font_path",
-    "same_file",
     "stamp_font",
     "write_sample_page",
+    "xfa_refusal",
 ]
 
 FONT_FILE = "AtkinsonHyperlegibleMono-Regular.ttf"
@@ -140,19 +142,6 @@ def _hex_to_rgb(color: str) -> tuple[float, float, float]:
 
 def _inches(points: float) -> str:
     return f"{points / 72:.1f}"
-
-
-def _strip_long_prefix(path: str) -> str:
-    if path.startswith("\\\\?\\UNC\\"):
-        return "\\\\" + path[8:]
-    if path.startswith("\\\\?\\"):
-        return path[4:]
-    return path
-
-
-def _canonical(path: Path) -> str:
-    raw = _strip_long_prefix(os.fspath(path))
-    return os.path.normcase(os.path.realpath(os.path.abspath(raw)))
 
 
 def preview_zoom(rect: pymupdf.Rect, dpi: float) -> float:
@@ -264,12 +253,23 @@ _STANDARD_PROPERTIES = ("Title", "Author", "Subject", "Keywords", "Creator", "Pr
                         "CreationDate", "ModDate", "Trapped")
 
 
+def xfa_refusal(name: str) -> str:
+    """Why an XFA form isn't stamped, and what to do instead."""
+    return (f"{name} is an XFA form, which this tool can't stamp. "
+            "Print it to PDF first, then stamp the printed copy.")
+
+
+def _info_dict(doc: pymupdf.Document) -> int:
+    """The document Info dictionary's xref, or 0 when there is none."""
+    kind, val = doc.xref_get_key(-1, "Info")
+    return int(val.split()[0]) if kind == "xref" else 0
+
+
 def _info_keys(doc: pymupdf.Document) -> tuple[list[str], str]:
     """The Info dictionary's keys and its StamperSources text, without changing the document."""
-    kind, val = doc.xref_get_key(-1, "Info")
-    if kind != "xref":
+    xref = _info_dict(doc)
+    if not xref:
         return [], ""
-    xref = int(val.split()[0])
     sources = doc.xref_get_key(xref, "StamperSources")
     return list(doc.xref_get_keys(xref)), sources[1] if sources[0] == "string" else ""
 
@@ -310,23 +310,8 @@ def size_notes(info: DocumentInfo) -> list[str]:
     except OSError:
         size = 0
     if size > LARGE_FILE_BYTES:
-        notes.append(f"This file is {size / (1024 * 1024):,.0f} MB; checking and saving take longer.")
+        notes.append(f"This file is {size_text(size)}; checking and saving take longer.")
     return notes
-
-
-def same_file(a: Path, b: Path) -> bool:
-    """True if two paths name the same file.
-
-    Handles relative paths, letter case (on Windows), ``\\\\?\\`` prefixes,
-    8.3 short names and links: canonical paths are compared first, then
-    ``os.path.samefile`` when both exist.
-    """
-    if _canonical(a) == _canonical(b):
-        return True
-    try:
-        return os.path.exists(a) and os.path.exists(b) and os.path.samefile(a, b)
-    except OSError:
-        return False
 
 
 @dataclass(frozen=True, slots=True)
@@ -347,8 +332,6 @@ class _Planned:
 
 class PdfHandler(Handler):
     """Stamps PDF files."""
-
-    extensions = (".pdf",)
 
     # ---------------------------------------------------------- opening
 
@@ -465,7 +448,7 @@ class PdfHandler(Handler):
                 texts.append(render(spec.text, vals))
         for text in texts:
             for ch in text:
-                if ch.isspace() and ch != " ":
+                if unicodedata.category(ch) in ("Cc", "Zl", "Zp"):  # other spaces, such as U+00A0, are drawn
                     raise MissingGlyph(
                         f"The stamp text contains a line break or tab (U+{ord(ch):04X}); "
                         "stamps are a single line.", ch)
@@ -652,10 +635,7 @@ class PdfHandler(Handler):
     @staticmethod
     def _refuse_xfa(info: DocumentInfo) -> None:
         if info.xfa:
-            raise UnsupportedDocument(
-                f"{info.path.name} is an XFA form, which this tool can't stamp. "
-                "Print it to PDF first, then stamp the printed copy."
-            )
+            raise UnsupportedDocument(xfa_refusal(info.path.name))
 
     @staticmethod
     def _document_notes(info: DocumentInfo) -> list[str]:
@@ -723,9 +703,8 @@ class PdfHandler(Handler):
 
     @staticmethod
     def _info_xref(doc: pymupdf.Document) -> int:
-        kind, val = doc.xref_get_key(-1, "Info")
-        if kind == "xref":
-            return int(val.split()[0])
+        if xref := _info_dict(doc):
+            return xref
         xref = doc.get_new_xref()
         doc.update_object(xref, "<<>>")
         doc.xref_set_key(-1, "Info", f"{xref} 0 R")
@@ -745,8 +724,7 @@ class PdfHandler(Handler):
         base = {**job.values, "original_name": original_name, "date": fmt.format(today)}
         written: dict[str, str] = {}
         replaced: dict[str, tuple[str, str]] = {}
-        kind, val = doc.xref_get_key(-1, "Info")
-        info = int(val.split()[0]) if kind == "xref" else 0
+        info = _info_dict(doc)
         for key, template in job.metadata.items():
             value = render(template, base)
             if not value:

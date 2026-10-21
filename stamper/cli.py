@@ -20,8 +20,11 @@ from __future__ import annotations
 import argparse
 import getpass
 import os
+import signal
 import sys
-from collections.abc import Callable, Sequence
+import threading
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from datetime import date
 from enum import IntEnum
 from pathlib import Path
@@ -31,9 +34,9 @@ from .core import pending
 from .core.config import Config, ConfigError, Profile, load_config
 from .core.fields import prefill_fields, validate_field, value_from_filename
 from .core.filenames import suggest_filename, visible
-from .core.locations import builtin_config_path, find_config
+from .core.locations import find_config
 from .core.multi import agree_from_filenames, combined_original_name, disagreement_note
-from .core.patterns import parse_date_format
+from .core.paths import FileIndex, same_file
 from .handlers.base import (
     Cancelled,
     ConfirmationRequired,
@@ -51,11 +54,11 @@ from .handlers.base import (
 )
 from .handlers.batch import BatchItem, BatchOutcome, Status, check_batch, run_batch
 from .handlers.combine import CombineInput, combine_pdfs
-from .handlers.pdf import PdfHandler, same_file
+from .handlers.pdf import PdfHandler, xfa_refusal
 
 __all__ = [
-    "ExitCode", "batch_exit_code", "build_parser", "default_config_path", "get_version",
-    "located_config_path", "main", "several_files_usage", "REMOVED_PASSWORD_FOR",
+    "ExitCode", "batch_exit_code", "build_parser", "get_version",
+    "main", "several_files_usage", "REMOVED_PASSWORD_FOR",
 ]
 
 DIST_NAME = "document-stamper"
@@ -86,16 +89,6 @@ def get_version() -> str:
         return version(DIST_NAME)
     except PackageNotFoundError:
         return "0+unknown (not installed; run: python -m pip install -e .)"
-
-
-def default_config_path() -> Path:
-    """The shipped generic config (``config/default.json``), the last step of the lookup."""
-    return builtin_config_path()
-
-
-def located_config_path() -> Path:
-    """The config used when ``--config`` isn't given: next to the app, then ``%APPDATA%``, then the default (D-080)."""
-    return find_config().path
 
 
 class _Parser(argparse.ArgumentParser):
@@ -222,7 +215,7 @@ def _run(args: argparse.Namespace, out: TextIO, stdin: TextIO, err: TextIO | Non
         say(f"Note: {pending.describe(left)} Open the Document Stamper window to delete or keep {what}.")
 
     # Config and profile
-    config_path = args.config or located_config_path()
+    config_path = args.config or find_config().path  # next to the app, then %APPDATA%, then the default (D-080)
     try:
         config = load_config(config_path)
     except ConfigError as e:
@@ -263,18 +256,7 @@ def _run(args: argparse.Namespace, out: TextIO, stdin: TextIO, err: TextIO | Non
                 say(f"{config.fields[name].label} taken from the filename: {found}")
 
     # Validate every field, report every failure
-    values: dict[str, str] = {}
-    failures: list[str] = []
-    for name in profile.fields:
-        result = validate_field(config, name, raw.get(name))
-        if result.valid:
-            values[name] = result.value
-        else:
-            hint = f" (use --set {name}=...)" if name not in raw else ""
-            failures.append(f"{result.message}{hint}")
-    if failures:
-        raise _Fail(ExitCode.INVALID_FIELDS,
-                    "Can't stamp until these are fixed:\n" + "\n".join(f"  - {f}" for f in failures))
+    values = _validate_all(config, profile, raw)
 
     # Password
     password = _get_password(args, stdin)
@@ -290,17 +272,11 @@ def _run(args: argparse.Namespace, out: TextIO, stdin: TextIO, err: TextIO | Non
 
     # Output path
     today = date.today()
-    ticked = args.name_fields if args.name_fields else None
-    if ticked:
-        allowed = [*profile.fields, "date"]
-        bad = [f for f in ticked if f not in allowed]
-        if bad:
-            raise _Fail(ExitCode.USAGE,
-                        f"--name-field {bad[0]} isn't available. Choose from: {', '.join(allowed)}.")
+    ticked = _ticked(args, profile)
     if args.out:
         out_path: Path = args.out
     else:
-        name_values = {**values, "date": parse_date_format(config.settings.date_format).format(today)}
+        name_values = {**values, "date": config.settings.date_formatter.format(today)}
         folder: Path = args.out_dir or src.parent
         out_path = folder / suggest_filename(
             profile, name_values, src.name, ticked=ticked, dedupe=prefill_fields(config, profile))
@@ -361,6 +337,18 @@ def _validate_all(config: Config, profile: Profile, raw: dict[str, str]) -> dict
     return values
 
 
+def _ticked(args: argparse.Namespace, profile: Profile) -> list[str] | None:
+    """The ``--name-field`` choices, checked against the profile; None means the profile's own."""
+    ticked = args.name_fields or None
+    if ticked:
+        allowed = [*profile.fields, "date"]
+        bad = [f for f in ticked if f not in allowed]
+        if bad:
+            raise _Fail(ExitCode.USAGE,
+                        f"--name-field {bad[0]} isn't available. Choose from: {', '.join(allowed)}.")
+    return ticked
+
+
 def _multi_inputs(paths: Sequence[Path], handler: PdfHandler) -> list[Path]:
     if len(paths) < 2:
         raise _Fail(ExitCode.USAGE, "--combine and --batch need at least two files.")
@@ -369,10 +357,11 @@ def _multi_inputs(paths: Sequence[Path], handler: PdfHandler) -> list[Path]:
             raise _Fail(ExitCode.UNSUPPORTED, f"Can't find the file {p}.")
         if not handler.can_open(p):
             raise _Fail(ExitCode.UNSUPPORTED, f"{p.name} isn't a PDF file.")
-    for i, p in enumerate(paths):
-        for q in paths[:i]:
-            if same_file(p, q):
-                raise _Fail(ExitCode.USAGE, f"{p.name} is given more than once.")
+    seen: FileIndex[Path] = FileIndex()
+    for p in paths:
+        if seen.find(p) is not None:
+            raise _Fail(ExitCode.USAGE, f"{p.name} is given more than once.")
+        seen.add(p, p)
     return list(paths)
 
 
@@ -480,21 +469,13 @@ def _run_multi(
     passwords, infos = _multi_passwords(args, paths, handler, stdin)
     for p in paths:
         if infos[p].xfa:
-            raise _Fail(ExitCode.UNSUPPORTED,
-                        f"{p.name} is an XFA form, which this tool can't stamp. "
-                        "Print it to PDF first, then stamp the printed copy.")
+            raise _Fail(ExitCode.UNSUPPORTED, xfa_refusal(p.name))
     signed = [p.name for p in paths if infos[p].signed]
     restricted = [p.name for p in paths if infos[p].restricted]
 
     today = date.today()
-    ticked = args.name_fields if args.name_fields else None
-    if ticked:
-        allowed = [*profile.fields, "date"]
-        bad = [f for f in ticked if f not in allowed]
-        if bad:
-            raise _Fail(ExitCode.USAGE,
-                        f"--name-field {bad[0]} isn't available. Choose from: {', '.join(allowed)}.")
-    name_values = {**values, "date": parse_date_format(config.settings.date_format).format(today)}
+    ticked = _ticked(args, profile)
+    name_values = {**values, "date": config.settings.date_formatter.format(today)}
     dedupe = prefill_fields(config, profile)
     job = StampJob.from_profile(config, profile, values,
                                 background_box=False if args.no_box else None, today=today)
@@ -574,6 +555,30 @@ def _run_combine(
     return ExitCode.OK
 
 
+@contextmanager
+def _ctrl_c_stops() -> Iterator[threading.Event]:
+    """While inside, Ctrl+C sets the event instead of raising, so a batch stops cleanly and reports what it saved.
+
+    A second Ctrl+C raises as usual, for a file that takes too long to reach its next page.
+    """
+    stop = threading.Event()
+
+    def on_ctrl_c(sig: int, frame: object) -> None:
+        if stop.is_set():
+            signal.default_int_handler(sig, frame)
+        stop.set()
+
+    try:
+        previous = signal.signal(signal.SIGINT, on_ctrl_c)
+    except ValueError:  # not the main thread: Ctrl+C can't reach us anyway
+        yield stop
+        return
+    try:
+        yield stop
+    finally:
+        signal.signal(signal.SIGINT, previous)
+
+
 def _run_batch(
     args: argparse.Namespace, handler: PdfHandler, paths: list[Path], passwords: dict[Path, str | None],
     seen: dict[Path, SourceFingerprint | None], job: StampJob, name_values: dict[str, str], ticked: list[str] | None, dedupe: list[str],
@@ -598,13 +603,15 @@ def _run_batch(
         if restricted and not args.accept_restrictions:
             say("Needs --accept-restrictions: " + ", ".join(restricted))
         return ExitCode.OK
-    outcomes = run_batch(
-        handler, checks, job,
-        accept_signature_loss=args.accept_signature_loss,
-        accept_restrictions=args.accept_restrictions,
-        remove_encryption=args.remove_encryption,
-        overwrite=args.overwrite,
-    )
+    with _ctrl_c_stops() as stop:
+        outcomes = run_batch(
+            handler, checks, job,
+            accept_signature_loss=args.accept_signature_loss,
+            accept_restrictions=args.accept_restrictions,
+            remove_encryption=args.remove_encryption,
+            overwrite=args.overwrite,
+            cancel=stop.is_set,
+        )
     for o in outcomes:
         if o.status == Status.SAVED and o.result is not None:
             for w in o.result.warnings:

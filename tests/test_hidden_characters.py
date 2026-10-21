@@ -13,7 +13,7 @@ from stamper.core.config import load_config
 from stamper.core.fields import validate_field
 from stamper.core.filenames import build_filename, clean_part, hidden_characters, visible
 from stamper.gui.main_window import MainWindow
-from tests.gui_support import WAIT_MS, copy_to, fake, window  # noqa: F401 - fixtures
+from tests.gui_support import WAIT_MS, copy_to, fake, open_dialog, type_into, window  # noqa: F401 - fixtures
 from tests.stamping import DEFAULT_CONFIG, FAKE_ID
 
 HIDDEN = {
@@ -117,3 +117,14 @@ def test_files_list_shows_a_spoofed_name_escaped(qtbot: QtBot, window: MainWindo
     assert any("report⟨U+202E⟩fdp.exe.pdf" in t for t in texts), texts
     assert not any("‮" in t for t in texts)
     assert fs.paths()[0] == spoof  # the real path is kept for opening the file
+
+
+def test_dialog_suggested_name_drops_hidden_characters(qtbot: QtBot, window: MainWindow, corpus_dir: Path,
+                                                       tmp_path: Path) -> None:
+    # The name is built from the real file name, not its escaped display form.
+    spoof = copy_to(corpus_dir / "letter_portrait.pdf", tmp_path).rename(tmp_path / SPOOF)
+    d = open_dialog(qtbot, window, spoof)
+    type_into(qtbot, d, "identifier", FAKE_ID)
+    name = d.suggested_name()
+    assert name.endswith("_reportfdp.exe.pdf"), name
+    assert "⟨" not in name and not hidden_characters(name)

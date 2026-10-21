@@ -39,7 +39,6 @@ REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-import pymupdf  # noqa: E402
 from PySide6.QtCore import QPoint, QRect, QSize  # noqa: E402
 from PySide6.QtGui import QImage, QPixmap  # noqa: E402
 from PySide6.QtWidgets import QApplication, QInputDialog, QLabel, QLineEdit, QScrollArea, QWidget  # noqa: E402
@@ -56,7 +55,7 @@ TODAY = date(2026, 10, 18)
 SIZE = QSize(1200, 780)
 WAIT_S = 20.0
 PAD = 10
-FAKE = "99-2026-999901"  # fabricated; matches the example rule
+FAKE = make_corpus.FAKE_CASE_DASHED  # fabricated; matches the example rule
 
 
 # ------------------------------------------------------------------ plumbing
@@ -204,20 +203,6 @@ def save(pix: QPixmap, name: str) -> Path:
 # ------------------------------------------------------------------ files
 
 
-def signed_copy(src: Path, dst: Path) -> Path:
-    """A synthetic file whose first form field is a filled signature field (detection only)."""
-    with pymupdf.open(src) as d:
-        w = next(iter(d[0].widgets()))
-        sig = d.get_new_xref()
-        d.update_object(sig, "<</Type/Sig/Filter/Adobe.PPKLite/SubFilter/adbe.pkcs7.detached"
-                             "/Contents<00>/ByteRange[0 0 0 0]>>")
-        d.xref_set_key(w.xref, "FT", "/Sig")
-        d.xref_set_key(w.xref, "V", f"{sig} 0 R")
-        d.xref_set_key(d.pdf_catalog(), "AcroForm/SigFlags", "3")
-        d.save(dst)
-    return dst
-
-
 class Files:
     """Synthetic files with names that suit the pictures, in a temp folder."""
 
@@ -241,7 +226,7 @@ class Files:
         self.part3 = copy("letter_landscape.pdf", f"{FAKE}_attachment.pdf")
         self.locked = copy("encrypted_user_password.pdf", "locked_return.pdf")
         self.restricted = copy("owner_restrictions.pdf", "restricted_order.pdf")
-        self.signed = signed_copy(corpus / "acroform_filled.pdf", folder / "signed_report.pdf")
+        self.signed = make_corpus.signed_copy(corpus / "acroform_filled.pdf", folder / "signed_report.pdf")
         self.notes = folder / "notes.txt"
         self.notes.write_text("not a PDF\n", encoding="utf-8")
 

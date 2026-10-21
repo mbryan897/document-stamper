@@ -10,10 +10,9 @@ from pathlib import Path
 import pymupdf
 import pytest
 
-from stamper.core.geometry import unrotated_vector_to_visible
 from stamper.handlers.base import StampPlacement
 from stamper.handlers.pdf import BOX_PADDING_PT
-from tests.stamping import MARGIN_PT, pixel_bbox
+from tests.stamping import MARGIN_PT, pixel_bbox, unrotated_vector_to_visible
 
 TOL_PT = 2.0
 

@@ -60,10 +60,11 @@ from ..core.config import ANCHORS, Config, ConfigError, Profile, load_config
 from ..core.fields import MAX_VALUE_LENGTH, validate_field, value_from_filename
 from ..core.filenames import suggest_filename
 from ..core.locations import ConfigSource, Locations, SourceKind, describe, save_config, save_target
+from ..core.paths import same_file
 from ..core.patterns import PatternError, explain, parse_date_format, regex_risk
 from ..core.template import BUILTIN_TOKENS, TemplateError, builtin_values, render
 from ..handlers.base import StampJob
-from ..handlers.pdf import same_file, write_sample_page
+from ..handlers.pdf import write_sample_page
 from .color_picker import ColorButton, light_color_note
 from .config_draft import ConfigDraft, DraftRefused, diff_summary, sample_values
 from .engine import EngineClient, EngineFailure
@@ -1459,7 +1460,10 @@ class ProfileSettings(QWidget):
         self._local: dict[str, str] = {}
         self._preview_req = 0
         self._sample_dir = Path(tempfile.mkdtemp(prefix="stamper-sample-"))
-        self._sample = write_sample_page(self._sample_dir / "sample.pdf")
+        self._sample = self._sample_dir / "sample.pdf"
+        # Written on the engine thread, which draws the previews after it in order: the window's
+        # thread never uses PyMuPDF, which isn't thread-safe.
+        self.engine.run_task(lambda _ctx, path=self._sample: write_sample_page(path))
 
         self._debounce = QTimer(self)
         self._debounce.setSingleShot(True)
@@ -1690,7 +1694,7 @@ class ProfileSettings(QWidget):
         if not self.can_save() or self.valid_config is None or self.target is None:
             return
         try:
-            save_config(self.valid_config, self.target.path)
+            save_config(self.valid_config, self.target.path, expect=self.target.digest)
         except OSError as e:
             self.say(f"Couldn't save to {self.target.path}: {e.strerror or e}. Nothing was changed.")
             return
@@ -1700,13 +1704,16 @@ class ProfileSettings(QWidget):
         self._update_source()
         self.saved.emit(self.source)
 
+    def may_leave(self) -> bool:
+        """True if there are no unsaved changes, or the user agrees to discard them."""
+        return not self.draft.dirty or self.services.confirm(
+            self, "Discard changes?", "Your changes to the profile settings haven't been saved.",
+            "Discard changes")
+
     def cancel(self) -> None:
         """Leave without saving; asks first if there are changes."""
-        if self.draft.dirty and not self.services.confirm(
-                self, "Discard changes?", "Your changes to the profile settings haven't been saved.",
-                "Discard changes"):
-            return
-        self.closed.emit()
+        if self.may_leave():
+            self.closed.emit()
 
     # ------------------------------------------------------------ import, export
 

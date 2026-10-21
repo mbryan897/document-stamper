@@ -43,11 +43,9 @@ __all__ = [
     "PatternTest",
     "TokenKind",
     "compile_pattern",
-    "example",
     "explain",
     "parse_date_format",
     "regex_risk",
-    "test_value",
 ]
 
 
@@ -217,6 +215,8 @@ def _check_date(groups: dict[str, str | None]) -> DateCheck:
     yyyy, yy = groups.get("yyyy"), groups.get("yy")
     mm, dd = groups.get("mm"), groups.get("dd")
     year: int | None = int(yyyy) if yyyy is not None else (2000 + int(yy) if yy is not None else None)
+    if year == 0 and mm is not None and dd is not None:  # a year alone is just 4 digits
+        return DateCheck(False, "year 0000 isn't a real year")
     if mm is not None:
         month = int(mm)
         if not 1 <= month <= 12:
@@ -282,11 +282,6 @@ class CompiledPattern:
         """True if the whole value fits the pattern and any date is real."""
         m = self.regex.fullmatch(value)
         return m is not None and _check_date(m.groupdict()).ok
-
-    def check_date_parts(self, value: str) -> DateCheck | None:
-        """Date check for a value that fits the shape, or None if it doesn't."""
-        m = self.regex.fullmatch(value)
-        return None if m is None else _check_date(m.groupdict())
 
     def date_of(self, value: str) -> date | None:
         """The calendar date a matching value encodes, or None.
@@ -435,19 +430,6 @@ def compile_pattern(source: str) -> CompiledPattern:
 def explain(source: str) -> str:
     """Describe a pattern in plain English; raises PatternError."""
     return compile_pattern(source).explain()
-
-
-def example(source: str, today: date) -> str:
-    """A value that fits a pattern (see ``CompiledPattern.example``); raises PatternError."""
-    return compile_pattern(source).example(today)
-
-
-def test_value(source: str, value: str) -> PatternTest:
-    """Test one value against a pattern; raises PatternError for a bad pattern."""
-    return compile_pattern(source).test(value)
-
-
-test_value.__test__ = False  # type: ignore[attr-defined]  # not a pytest test
 
 
 class DateFormat:

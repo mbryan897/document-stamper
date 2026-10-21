@@ -42,10 +42,7 @@ __all__ = [
     "TextMetrics",
     "insert_rotation",
     "place",
-    "unrotated_vector_to_visible",
-    "visible_direction",
     "visible_rect_to_unrotated",
-    "visible_size",
     "visible_to_unrotated",
 ]
 
@@ -160,12 +157,6 @@ def _check_rotation(rotation: int) -> int:
     return r
 
 
-def visible_size(crop_width: float, crop_height: float, rotation: int) -> tuple[float, float]:
-    """Visible page size from the unrotated CropBox size and ``/Rotate``."""
-    r = _check_rotation(rotation)
-    return (crop_height, crop_width) if r in (90, 270) else (crop_width, crop_height)
-
-
 def place(
     page_width: float,
     page_height: float,
@@ -258,23 +249,6 @@ def visible_rect_to_unrotated(
     a = visible_to_unrotated((box.x0, box.y0), rotation, crop_width, crop_height)
     b = visible_to_unrotated((box.x1, box.y1), rotation, crop_width, crop_height)
     return Box.from_points(a, b)
-
-
-def unrotated_vector_to_visible(vec: tuple[float, float], rotation: int) -> tuple[float, float]:
-    """Turn a direction in unrotated coordinates into the visible one.
-
-    A page with ``/Rotate`` r is shown turned r degrees clockwise.
-    """
-    r = _check_rotation(rotation)
-    dx, dy = vec
-    for _ in range(r // 90):
-        dx, dy = -dy, dx  # 90 degrees clockwise with y pointing down
-    return (dx, dy)
-
-
-def visible_direction(direction: Direction) -> tuple[float, float]:
-    """The unit vector a reader's eye follows, in visible coordinates."""
-    return (1.0, 0.0) if direction == "along-top" else (0.0, 1.0)
 
 
 def insert_rotation(page_rotation: int, direction: Direction) -> int:

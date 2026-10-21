@@ -30,6 +30,7 @@ from enum import Enum
 from pathlib import Path
 
 from .core.locations import app_dir, is_frozen, resource_dir
+from .core.paths import same_file
 
 __all__ = [
     "SHORTCUT_NAME",
@@ -121,10 +122,6 @@ def target() -> Target:
                   ico if ico.is_file() else None)
 
 
-def _same(a: Path, b: Path) -> bool:
-    return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
-
-
 def status(shortcut: Path | None = None, want: Target | None = None) -> SendToStatus:
     """Is the shortcut there, and does it point at this copy?"""
     lnk = shortcut or shortcut_path()
@@ -135,7 +132,7 @@ def status(shortcut: Path | None = None, want: Target | None = None) -> SendToSt
     except SendToError:
         return SendToStatus(SendToState.UNREADABLE, lnk)
     want = want or target()
-    same = _same(have.path, want.path) and have.arguments.strip() == want.arguments.strip()
+    same = same_file(have.path, want.path) and have.arguments.strip() == want.arguments.strip()
     return SendToStatus(SendToState.CURRENT if same else SendToState.ELSEWHERE, lnk, have.path)
 
 

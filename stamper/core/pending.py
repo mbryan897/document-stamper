@@ -28,6 +28,7 @@ from pathlib import Path
 
 from .filenames import visible
 from .locations import local_dir
+from .paths import is_link, size_text
 
 __all__ = [
     "TEMP_NAME_PREFIX",
@@ -45,7 +46,6 @@ __all__ = [
 
 TEMP_NAME_PREFIX = "~stamper-"
 TEMP_NAME_SUFFIX = ".tmp"
-_FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 
 
 def journal_dir(base: Path | None = None) -> Path:
@@ -131,10 +131,8 @@ def _is_our_file(path: Path) -> os.stat_result | None:
         st = os.lstat(path)
     except OSError:
         return None
-    if not stat.S_ISREG(st.st_mode):
+    if not stat.S_ISREG(st.st_mode) or is_link(st):
         return None  # a link, junction or folder in its place: not ours
-    if getattr(st, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT:
-        return None
     return st
 
 
@@ -195,11 +193,6 @@ def keep(leftover: Leftover) -> None:
     forget(leftover.entry)
 
 
-def _size(n: int) -> str:
-    mb = n / (1024 * 1024)
-    return f"{mb:.1f} MB" if mb >= 0.1 else f"{max(1, round(n / 1024))} KB"
-
-
 def describe(items: Sequence[Leftover], problem: str = "") -> str:
     """The notice for partial copies left behind (D-124); empty when there are none."""
     if not items:
@@ -207,7 +200,7 @@ def describe(items: Sequence[Leftover], problem: str = "") -> str:
 
     def line(lo: Leftover) -> str:
         when = lo.modified.strftime("%b %d %I:%M %p").replace(" 0", " ")
-        return f"{visible(str(lo.path))} ({_size(lo.size)}, {when})"
+        return f"{visible(str(lo.path))} ({size_text(lo.size)}, {when})"
 
     if len(items) == 1:
         text = ("A partial copy was left behind when Document Stamper stopped unexpectedly: "

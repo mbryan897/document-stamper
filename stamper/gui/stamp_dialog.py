@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
 from ..core.config import ANCHORS, Config, Profile, StampSpec
 from ..core.fields import MAX_VALUE_LENGTH, ValidationResult, prefill_fields, validate_field, value_from_filename
 from ..core.filenames import suggest_filename, visible
+from ..core.paths import same_file, size_text
 from ..core.template import TemplateError, template_tokens
 from ..handlers.base import (
     ApplyResult,
@@ -47,7 +48,7 @@ from ..handlers.base import (
     StampDoesNotFit,
     StampJob,
 )
-from ..handlers.pdf import PROPERTIES_NOTE_PREFIX, same_file
+from ..handlers.pdf import PROPERTIES_NOTE_PREFIX
 from .engine import ApplyRequest, EngineClient, EngineFailure
 from .help import help_button
 from .page_numbers import (
@@ -201,7 +202,6 @@ class StampDialog(QWidget):
         self._plan_done_revision = -1
         self._last_png: bytes | None = None
         self._preview_done = 0  # last preview request answered
-        self._save_error = ""
 
         self._rows: dict[str, _FieldRow] = {}
         self._ticks: dict[str, QCheckBox] = {}
@@ -303,7 +303,6 @@ class StampDialog(QWidget):
         self.preview_holder.hide()
         well_lay.addWidget(self.preview, 1)
         well_lay.addWidget(self.preview_holder, 1)
-        self.preview_well = well
         lay.addWidget(self._wrap_well(well), 1)
 
         hint = QLabel("The amber dashed line shows what the stamp covers. It isn't printed.")
@@ -315,9 +314,8 @@ class StampDialog(QWidget):
 
     def _head_texts(self) -> tuple[str, str]:
         """The file name and the "N pages, size" line above the preview."""
-        size_mb = self.path.stat().st_size / (1024 * 1024) if self.path.exists() else 0.0
         pages = "1 page" if self.info.page_count == 1 else f"{self.info.page_count} pages"
-        size = f"{size_mb:.1f} MB" if size_mb >= 0.1 else "under 0.1 MB"
+        size = size_text(self.path.stat().st_size) if self.path.exists() else size_text(0)
         return visible(self.path.name), f"{pages}, {size}"
 
     def _extend_head(self, layout: QVBoxLayout) -> None:
@@ -336,7 +334,7 @@ class StampDialog(QWidget):
 
     def _name_source(self) -> str:
         """The original file name the suggested name is built from."""
-        return visible(self.path.name)
+        return self.path.name
 
     def _accept_flags(self) -> tuple[bool, bool]:
         """``(accept_signature_loss, accept_restrictions)`` for the save."""
@@ -782,10 +780,10 @@ class StampDialog(QWidget):
         """The File name selector's ticked fields, in display order."""
         return [n for n, box in self._ticks.items() if box.isChecked()]
 
-    def suggested_name(self) -> str:
-        """The suggested file name for the stamped copy (D-016, D-067)."""
+    def suggested_name(self, original: str | None = None) -> str:
+        """The suggested file name for the stamped copy of ``original`` (default: this file) (D-016, D-067)."""
         values = {**self.values(), "date": self.config.settings.date_formatter.format(self.today)}
-        return suggest_filename(self.profile, values, self._name_source(), ticked=self.ticked(),
+        return suggest_filename(self.profile, values, original or self._name_source(), ticked=self.ticked(),
                                 dedupe=prefill_fields(self.config, self.profile))
 
     def _update_name(self) -> None:
@@ -821,7 +819,6 @@ class StampDialog(QWidget):
     def _changed(self, *, immediate: bool = False) -> None:
         """Something that changes the stamp changed: redraw and re-check."""
         self.revision += 1
-        self._save_error = ""
         self.save_error.hide()
         self._update_button()
         if immediate:
@@ -1065,7 +1062,6 @@ class StampDialog(QWidget):
     # ------------------------------------------------------------ saving
 
     def _refuse(self, message: str) -> None:
-        self._save_error = message
         self.save_error.setText(message)
         self.save_error.show()
 

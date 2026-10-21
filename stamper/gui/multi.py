@@ -51,9 +51,9 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.config import Config, Profile
-from ..core.fields import prefill_fields
-from ..core.filenames import suggest_filename, visible
+from ..core.filenames import visible
 from ..core.multi import FilenameAgreement, agree_from_filenames, combined_original_name, disagreement_note
+from ..core.paths import FileIndex, same_file
 from ..core.template import TemplateError, template_tokens
 from ..handlers.base import (
     Cancelled,
@@ -67,7 +67,6 @@ from ..handlers.base import (
 )
 from ..handlers.batch import BatchCheck, BatchItem, BatchOutcome, Status, check_batch, run_batch
 from ..handlers.combine import CombinedFile, CombineInput, combine_pdfs
-from ..handlers.pdf import same_file
 from .engine import EngineClient, EngineFailure, TaskContext
 from .help import help_button
 from .services import Services
@@ -136,7 +135,7 @@ def screen_files(handler: Handler, paths: Sequence[Path], *, already: Sequence[P
     """
     usable: list[ScreenedFile] = []
     removed: list[tuple[str, str]] = []
-    seen: list[Path] = list(already)
+    seen: FileIndex[Path] = FileIndex((p, p) for p in already)
     for i, raw in enumerate(paths):
         if ctx is not None:
             if ctx.cancelled():
@@ -144,9 +143,9 @@ def screen_files(handler: Handler, paths: Sequence[Path], *, already: Sequence[P
             ctx.progress(i, len(paths), Path(raw).name)
         path = Path(raw)
         if not path.is_file():
-            removed.append((path.name, "can't be found"))
+            removed.append((path.name, "is a folder" if path.is_dir() else "can't be found"))
             continue
-        if any(same_file(path, p) for p in seen):
+        if seen.find(path) is not None:
             removed.append((path.name, "is listed twice"))
             continue
         if not handler.can_open(path):
@@ -156,7 +155,7 @@ def screen_files(handler: Handler, paths: Sequence[Path], *, already: Sequence[P
             info = handler.inspect(path)
         except (PasswordRequired, WrongPassword):
             usable.append(ScreenedFile(path, None))
-            seen.append(path)
+            seen.add(path, path)
             continue
         except UnsupportedDocument as e:
             removed.append((path.name, _reason(str(e), path.name)))
@@ -168,7 +167,7 @@ def screen_files(handler: Handler, paths: Sequence[Path], *, already: Sequence[P
             removed.append((path.name, "is an XFA form (print it to PDF first)"))
             continue
         usable.append(ScreenedFile(path, info))
-        seen.append(path)
+        seen.add(path, path)
     if ctx is not None:
         ctx.progress(len(paths), len(paths), "")
     return ScreenResult(tuple(usable), tuple(removed))
@@ -537,7 +536,8 @@ class _PasswordRow:
         self.edit = edit
         self.status = status
         self.button = button
-        self.req = 0
+        self.req = 0  # the password check in flight, if any
+        self.sent = ""  # the password that check is trying
 
 
 class PrepareScreen(QWidget):
@@ -610,7 +610,7 @@ class PrepareScreen(QWidget):
                 w.deleteLater()
 
     def _build_body(self) -> None:
-        keep = {str(r.file.path): r.edit.text() for r in self._rows}
+        keep = {str(r.file.path): r for r in self._rows}  # typed text and any check in flight
         self._clear_body()
         self._rows = []
         locked = [f for f in self._files if f.needs_password]
@@ -623,13 +623,17 @@ class PrepareScreen(QWidget):
             for i, f in enumerate(locked):
                 name = QLabel(visible(f.path.name))
                 name.setWordWrap(True)
-                edit = QLineEdit(keep.get(str(f.path), ""))
+                old = keep.get(str(f.path))
+                edit = QLineEdit(old.edit.text() if old else "")
                 edit.setEchoMode(QLineEdit.EchoMode.Password)
                 edit.setAccessibleName(f"Password for {visible(f.path.name)}")
                 button = QPushButton("Check")
                 button.setObjectName("small")
                 status = _wrap_label("", "msgNeutral")
                 row = _PasswordRow(f, edit, status, button)
+                if old is not None and old.req:
+                    row.req, row.sent = old.req, old.sent
+                    status.setText("Checking…")
                 edit.returnPressed.connect(lambda r=row: self.check_password(r))
                 button.clicked.connect(lambda _c=False, r=row: self.check_password(r))
                 grid.addWidget(name, i * 2, 0)
@@ -695,7 +699,8 @@ class PrepareScreen(QWidget):
             row.status.setText("Type the password first.")
             return
         row.status.setText("Checking…")
-        row.req = self.engine.inspect(row.file.path, row.edit.text())
+        row.sent = row.edit.text()
+        row.req = self.engine.inspect(row.file.path, row.sent)
 
     def _row_for(self, req: int) -> _PasswordRow | None:
         return next((r for r in self._rows if r.req == req and req), None)
@@ -704,12 +709,9 @@ class PrepareScreen(QWidget):
         row = self._row_for(req)
         if row is None:
             return
-        updated = replace(row.file, info=info, password=row.edit.text())
+        updated = replace(row.file, info=info, password=row.sent)  # what was tried, not what's typed now
         self._files = [updated if f.path == row.file.path else f for f in self._files]
-        self._build_body()  # the file may turn out to be signed or restricted
-        done = next((r for r in self._rows if r.file.path == updated.path), None)
-        if done is not None:
-            done.status.setText("Opens the file.")
+        self._build_body()  # the file may turn out to be signed or restricted; its row goes
 
     def _on_inspect_failed(self, req: int, failure: EngineFailure) -> None:
         row = self._row_for(req)
@@ -790,10 +792,6 @@ class _MultiMixin:
         if agreement is None:
             return ""
         return disagreement_note(self.config.fields[name].label, agreement)  # type: ignore[attr-defined]
-
-    def disagreement(self, name: str) -> str:
-        """The amber note naming files whose names disagree for a field (empty if none)."""
-        return self._agreement_note(name)
 
 
 # ------------------------------------------------------------------ combine
@@ -1129,9 +1127,7 @@ class BatchDialog(_MultiMixin, StampDialog):
 
     def name_for(self, path: Path) -> str:
         """The suggested name for one file's copy."""
-        values = {**self.values(), "date": self.config.settings.date_formatter.format(self.today)}
-        return suggest_filename(self.profile, values, path.name, ticked=self.ticked(),
-                                dedupe=prefill_fields(self.config, self.profile))
+        return self.suggested_name(path.name)
 
     def items(self) -> list[BatchItem]:
         """Where each file's copy goes, with its password."""
@@ -1248,11 +1244,6 @@ class BatchDialog(_MultiMixin, StampDialog):
 
         self.progress_label.setText("Stamping…")
         self._run.req = self.engine.run_task(save)
-
-    def _cancel_save(self) -> None:
-        if self.saving and self.cancel_button.isEnabled():
-            self.progress_label.setText("Cancelling…")
-            self.engine.cancel()
 
     def disconnect_engine(self) -> None:
         """Stop listening to the engine, including the batch task signals."""

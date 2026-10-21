@@ -23,6 +23,7 @@ last profile and the last folder a file came from are remembered in
 
 from __future__ import annotations
 
+import gc
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -80,7 +81,7 @@ from ..handlers.base import (
     WrongPassword,
 )
 from ..handlers.combine import CombinedFile, remove_stale_temp
-from ..handlers.pdf import PdfHandler
+from ..handlers.pdf import PdfHandler, xfa_refusal
 from .engine import EngineClient, EngineFailure, TaskContext
 from .fonts import MONO_FAMILY
 from .help import HELP_SHORTCUT, HelpWindow, help_button
@@ -435,6 +436,15 @@ def _escape(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def _free_closed_screen() -> None:
+    """Free a closed screen's reference cycles now, on the window's thread.
+
+    Left to the garbage collector, they could be freed while it runs on the
+    engine thread, deleting Qt objects off their own thread.
+    """
+    gc.collect()
+
+
 class MainWindow(QMainWindow):
     """The Document Stamper window."""
 
@@ -713,6 +723,7 @@ class MainWindow(QMainWindow):
             return None
         self._close_dialog()
         self._close_settings()
+        self._opening = None  # a file still opening mustn't replace these settings when it's ready
         settings = ProfileSettings(
             config=self.config, source=self.source, locs=self.locs, engine=self.engine,
             services=self.services, today=self.today, sendto_shortcut=self._sendto_shortcut)
@@ -737,6 +748,7 @@ class MainWindow(QMainWindow):
             self.stack.removeWidget(self.settings)
             self.settings.deleteLater()
             self.settings = None
+            _free_closed_screen()
 
     def _close_dialog(self) -> None:
         if self.dialog is not None:
@@ -744,6 +756,7 @@ class MainWindow(QMainWindow):
             self.stack.removeWidget(self.dialog)
             self.dialog.deleteLater()
             self.dialog = None
+            _free_closed_screen()
 
     # ------------------------------------------------------------ opening a file
 
@@ -771,6 +784,9 @@ class MainWindow(QMainWindow):
         if self.config is None or self.profile is None:
             self.show_drop("Open a config file that works before choosing a PDF.")
             return
+        if path.is_dir():
+            self.show_drop(f"{visible(path.name)} is a folder. Choose the PDF files in it instead.")
+            return
         if not path.is_file():
             self.show_drop(f"Can't find the file {path}.")
             return
@@ -789,9 +805,7 @@ class MainWindow(QMainWindow):
         _, path, password = self._opening
         self._opening = None
         if info.xfa:
-            self.show_drop(
-                f"{visible(path.name)} is an XFA form, which this tool can't stamp. "
-                "Print it to PDF first, then stamp the printed copy.")
+            self.show_drop(xfa_refusal(visible(path.name)))
             return
         self.show_dialog(path, info, password)
 
@@ -996,6 +1010,7 @@ class MainWindow(QMainWindow):
             self.stack.removeWidget(self.prepare)
             self.prepare.deleteLater()
             self.prepare = None
+            _free_closed_screen()
 
     def _drop_combined(self) -> None:
         """Remove the temporary combined file, after whatever the engine is doing with it (D-055)."""
@@ -1076,6 +1091,9 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 - Qt name
         """Cancel any save and wait for the engine, so no temporary file is left (D-055)."""
+        if self.settings is not None and not self.settings.may_leave():
+            event.ignore()  # unsaved profile settings: the user chose to keep editing
+            return
         self._close_dialog()
         self._close_settings()
         self._close_prepare()

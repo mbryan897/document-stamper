@@ -6,7 +6,7 @@ from datetime import date
 
 import pytest
 
-from stamper.core.patterns import PatternError, compile_pattern, explain, parse_date_format, test_value
+from stamper.core.patterns import PatternError, compile_pattern, explain, parse_date_format
 
 
 @pytest.mark.parametrize(
@@ -109,7 +109,7 @@ def test_explain(pattern: str, text: str) -> None:
 def test_test_value_reports_position(
     pattern: str, value: str, ok: bool, position: int, fragment: str
 ) -> None:
-    result = test_value(pattern, value)
+    result = compile_pattern(pattern).test(value)
     assert result.ok is ok
     assert result.position == position
     assert fragment in result.message
@@ -118,7 +118,7 @@ def test_test_value_reports_position(
 def test_matched_prefix_length_ranks_formats() -> None:
     # The format a value gets furthest into is the one to hint about.
     value = "SO261017-99990X"
-    assert test_value("SOYYMMDD-######", value).matched > test_value("##-YYYY-######", value).matched
+    assert compile_pattern("SOYYMMDD-######").test(value).matched > compile_pattern("##-YYYY-######").test(value).matched
 
 
 # ------------------------------------------------------------ date formats
@@ -175,8 +175,6 @@ def test_date_format_errors(fmt: str, fragment: str) -> None:
 def test_example_values_fit(source: str, expected: str) -> None:
     from datetime import date
 
-    from stamper.core.patterns import compile_pattern, example
-
-    value = example(source, date(2026, 10, 18))
+    value = compile_pattern(source).example(date(2026, 10, 18))
     assert value == expected
     assert compile_pattern(source).matches(value)

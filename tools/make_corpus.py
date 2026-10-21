@@ -265,6 +265,37 @@ def _build_named_case(path: Path) -> None:
     _save(doc, path)
 
 
+# --- Special copies (not in the manifest; built from a corpus file on demand) ---
+
+
+def signed_copy(src: Path, dst: Path) -> Path:
+    """A copy whose first form field becomes a filled signature field.
+
+    For detection and the confirmation flow, not cryptographic validity.
+    """
+    with pymupdf.open(src) as d:
+        w = next(iter(d[0].widgets()))
+        sig = d.get_new_xref()
+        d.update_object(sig, "<</Type/Sig/Filter/Adobe.PPKLite/SubFilter/adbe.pkcs7.detached"
+                             "/Contents<00>/ByteRange[0 0 0 0]>>")
+        d.xref_set_key(w.xref, "FT", "/Sig")
+        d.xref_set_key(w.xref, "V", f"{sig} 0 R")
+        d.xref_set_key(d.pdf_catalog(), "AcroForm/SigFlags", "3")
+        d.save(dst)
+    return dst
+
+
+def xfa_copy(src: Path, dst: Path) -> Path:
+    """A copy of an AcroForm file with an /XFA entry added."""
+    with pymupdf.open(src) as d:
+        x = d.get_new_xref()
+        d.update_object(x, "<<>>")
+        d.update_stream(x, b"<xdp:xdp xmlns:xdp='http://ns.adobe.com/xdp/'/>")
+        d.xref_set_key(d.pdf_catalog(), "AcroForm/XFA", f"{x} 0 R")
+        d.save(dst)
+    return dst
+
+
 # --- Manifest ----------------------------------------------------------------
 
 Builder = Callable[[Path], None]

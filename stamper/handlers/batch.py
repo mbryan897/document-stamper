@@ -17,6 +17,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..core.paths import FileIndex
 from .base import (
     ApplyResult,
     CancelCheck,
@@ -26,8 +27,8 @@ from .base import (
     SourceFingerprint,
     StampError,
     StampJob,
+    without_traceback,
 )
-from .pdf import same_file
 
 __all__ = [
     "BatchCheck",
@@ -95,18 +96,22 @@ class BatchOutcome:
     error: Exception | None = None
 
 
-def _output_problem(item: BatchItem, items: Sequence[BatchItem], earlier: Sequence[BatchItem],
+def _output_problem(item: BatchItem, sources: FileIndex[BatchItem], saving: FileIndex[BatchItem],
                     overwrite: bool) -> tuple[str, str]:
-    """``(status, message)`` for an output-name problem, or ``("", "")``."""
+    """``(status, message)`` for an output-name problem, or ``("", "")``.
+
+    ``sources`` holds every file in the batch; ``saving`` the earlier files
+    whose check passed, by output path.
+    """
     out = item.out_path
-    for other in items:
-        if same_file(other.path, out):
-            return Status.FAILED, (f"Its copy would be saved over {other.path.name}, one of the originals. "
-                                   "Choose another folder.")
-    for prior in earlier:
-        if same_file(prior.out_path, out):
-            return Status.SKIPPED, (f"{prior.path.name} in this batch is saved to the same name, "
-                                    f"{out.name}.")
+    original = sources.find(out)
+    if original is not None:
+        return Status.FAILED, (f"Its copy would be saved over {original.path.name}, one of the originals. "
+                               "Choose another folder.")
+    prior = saving.find(out)
+    if prior is not None:
+        return Status.SKIPPED, (f"{prior.path.name} in this batch is saved to the same name, "
+                                f"{out.name}.")
     if not out.parent.is_dir():
         return Status.FAILED, f"The folder {out.parent} doesn't exist."
     if out.exists() and not overwrite:
@@ -131,10 +136,12 @@ def check_batch(
     total)`` counts files.
     """
     checks: list[BatchCheck] = []
+    sources: FileIndex[BatchItem] = FileIndex((it.path, it) for it in items)
+    saving: FileIndex[BatchItem] = FileIndex()
     for i, item in enumerate(items):
         if cancel is not None and cancel():
             raise Cancelled("The check was cancelled. Nothing was saved.")
-        status, message = _output_problem(item, items, items[:i], overwrite)
+        status, message = _output_problem(item, sources, saving, overwrite)
         if status:
             checks.append(BatchCheck(item, status, message))
         else:
@@ -143,12 +150,13 @@ def check_batch(
             except Cancelled:
                 raise
             except StampError as e:
-                checks.append(BatchCheck(item, Status.FAILED, str(e), error=e))
+                checks.append(BatchCheck(item, Status.FAILED, str(e), error=without_traceback(e)))
             except Exception as e:  # reported per file, never stops the batch
                 checks.append(BatchCheck(item, Status.FAILED, f"Something went wrong ({type(e).__name__}: {e}).",
-                                         error=e))
+                                         error=without_traceback(e)))
             else:
                 checks.append(BatchCheck(item, Status.OK, plan=plan))
+                saving.add(item.out_path, item)  # a later file can't take this name; a failed one's name is free
         if progress is not None:
             progress(i + 1, len(items))
     return checks
@@ -209,10 +217,10 @@ def run_batch(
             stopped = True
             outcomes.append(BatchOutcome(item, Status.CANCELLED, "Cancelled while stamping; nothing was saved for this file."))
         except StampError as e:
-            outcomes.append(BatchOutcome(item, Status.FAILED, str(e), error=e))
+            outcomes.append(BatchOutcome(item, Status.FAILED, str(e), error=without_traceback(e)))
         except Exception as e:
             outcomes.append(BatchOutcome(item, Status.FAILED, f"Something went wrong ({type(e).__name__}: {e}).",
-                                         error=e))
+                                         error=without_traceback(e)))
         else:
             outcomes.append(BatchOutcome(item, Status.SAVED, "", result=result))
         done_before += pages

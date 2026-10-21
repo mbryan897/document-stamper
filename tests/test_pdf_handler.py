@@ -29,7 +29,7 @@ from stamper.handlers.base import (
     UnsupportedDocument,
     WrongPassword,
 )
-from stamper.handlers.pdf import FONT_FILE, PdfHandler, font_path, same_file
+from stamper.handlers.pdf import FONT_FILE, PdfHandler, font_path
 from tests.stamping import (
     DEFAULT_VALUES,
     FAKE_ID,
@@ -39,6 +39,8 @@ from tests.stamping import (
     default_job,
     is_dark,
     is_ink,
+    make_signed_pdf,
+    make_xfa_pdf,
     pixel_bbox,
     records_job,
     sha256,
@@ -73,30 +75,13 @@ def _info_dict(doc: pymupdf.Document) -> dict[str, str]:
 @pytest.fixture
 def signed_pdf(corpus_dir: Path, tmp_path: Path) -> Path:
     """AcroForm file whose first field is turned into a filled signature field."""
-    path = tmp_path / "signed_synthetic.pdf"
-    with pymupdf.open(corpus_dir / "acroform_filled.pdf") as d:
-        w = next(iter(d[0].widgets()))
-        sig = d.get_new_xref()
-        d.update_object(sig, "<</Type/Sig/Filter/Adobe.PPKLite/SubFilter/adbe.pkcs7.detached"
-                             "/Contents<00>/ByteRange[0 0 0 0]>>")
-        d.xref_set_key(w.xref, "FT", "/Sig")
-        d.xref_set_key(w.xref, "V", f"{sig} 0 R")
-        d.xref_set_key(d.pdf_catalog(), "AcroForm/SigFlags", "3")
-        d.save(path)
-    return path
+    return make_signed_pdf(corpus_dir, tmp_path / "signed_synthetic.pdf")
 
 
 @pytest.fixture
 def xfa_pdf(corpus_dir: Path, tmp_path: Path) -> Path:
     """AcroForm file with an /XFA entry added."""
-    path = tmp_path / "xfa_synthetic.pdf"
-    with pymupdf.open(corpus_dir / "acroform_filled.pdf") as d:
-        x = d.get_new_xref()
-        d.update_object(x, "<<>>")
-        d.update_stream(x, b"<xdp:xdp xmlns:xdp='http://ns.adobe.com/xdp/'/>")
-        d.xref_set_key(d.pdf_catalog(), "AcroForm/XFA", f"{x} 0 R")
-        d.save(path)
-    return path
+    return make_xfa_pdf(corpus_dir, tmp_path / "xfa_synthetic.pdf")
 
 
 @pytest.fixture
@@ -216,13 +201,6 @@ def test_refuses_windows_path_variants(corpus_dir: Path, tmp_path: Path) -> None
     assert sha256(src) == before
 
 
-def test_same_file_helper(tmp_path: Path) -> None:
-    a = tmp_path / "a.pdf"
-    a.write_bytes(b"%PDF-1.7")
-    assert same_file(a, tmp_path / "." / "a.pdf")
-    assert not same_file(a, tmp_path / "b.pdf")
-
-
 def test_refuses_existing_output_unless_overwrite(corpus_dir: Path, tmp_path: Path) -> None:
     out = tmp_path / "out.pdf"
     out.write_bytes(b"existing")
@@ -327,6 +305,21 @@ def test_line_break_refused(corpus_dir: Path, tmp_path: Path) -> None:
     job = StampJob.from_profile(cfg, cfg.default_profile, {**DEFAULT_VALUES, "identifier": "99-2026\n999901"})
     with pytest.raises(MissingGlyph, match="single line"):
         H.apply(corpus_dir / "letter_portrait.pdf", job, tmp_path / "out.pdf")
+
+
+@pytest.mark.parametrize("ch", ["\t", "\u2028", "\u2029", "\x85"])
+def test_other_line_breaks_refused(corpus_dir: Path, tmp_path: Path, ch: str) -> None:
+    cfg = default_config()
+    job = StampJob.from_profile(cfg, cfg.default_profile, {**DEFAULT_VALUES, "doc_type": f"Court{ch}order"})
+    with pytest.raises(MissingGlyph, match="single line"):
+        H.plan(corpus_dir / "letter_portrait.pdf", job)
+
+
+def test_non_breaking_space_is_drawn(corpus_dir: Path) -> None:
+    # Pasted from Word: U+00A0 is a space the font has, not a line break.
+    cfg = default_config()
+    job = StampJob.from_profile(cfg, cfg.default_profile, {**DEFAULT_VALUES, "doc_type": "Court\u00a0order"})
+    assert H.plan(corpus_dir / "letter_portrait.pdf", job).page_count >= 1
 
 
 # ------------------------------------------------------------------ background box
