@@ -11,7 +11,8 @@
 # so the whole folder must be copied together. Nothing is unpacked at start-up.
 # config.json is looked for next to the exes.
 # Build: .\packaging\build.ps1
-# Test build: icon in place; no signing, version resource or antivirus work yet (Phase 5).
+# Built only with .\packaging\build.ps1 -Fallback, into dist\fallback\.
+# Icon and version resource in place (Phase 5).
 
 import sys
 from pathlib import Path
@@ -32,6 +33,7 @@ window_exe = EXE(  # noqa: F821
     name="DocumentStamper",
     console=False,
     icon=spec_common.ICON,
+    version=spec_common.VERSION_FILE,
     upx=False,
 )
 cli_exe = EXE(  # noqa: F821
@@ -42,6 +44,7 @@ cli_exe = EXE(  # noqa: F821
     name="stamper-cli",
     console=True,
     icon=spec_common.ICON,
+    version=spec_common.VERSION_FILE,
     upx=False,
 )
 COLLECT(  # noqa: F821

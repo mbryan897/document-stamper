@@ -12,4 +12,7 @@
 *.jpg binary
 *.ico binary
 *.ttf binary
+# Font licenses are checked byte for byte against SOURCE.txt (fetch_font.ps1, build.ps1):
+# never convert their line endings.
+assets/fonts/*.txt -text
 *.otf binary

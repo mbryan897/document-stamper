@@ -48,3 +48,8 @@ config/local*.json
 
 # Local screenshots and notes from GUI work (never committed)
 docs-local/
+
+# Local AI agent tool state (never committed)
+.claude-flow/
+.swarm/
+.venv-icon/

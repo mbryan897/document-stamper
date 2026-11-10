@@ -7,6 +7,7 @@ Both bundle the same files and leave out the same unused Qt parts.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from PyInstaller.utils.hooks import copy_metadata
@@ -16,6 +17,11 @@ ROOT = Path(__file__).resolve().parent.parent
 # The exes' own icon: Explorer, the Send to menu, the taskbar when pinned.
 # Made by tools/make_icon.py; the window's icon comes from assets/icon/png.
 ICON = str(ROOT / "assets" / "icon" / "stamper.ico")
+
+# The exe's version resource (Explorer > Properties > Details), written by
+# packaging/version_info.py; build.ps1 passes its path. None when PyInstaller
+# is run by hand, and packaging/check_exe.py then fails the build.
+VERSION_FILE = os.environ.get("STAMPER_VERSION_FILE") or None
 
 DATAS = [
     (str(ROOT / "assets" / "fonts" / "*.ttf"), "assets/fonts"),
