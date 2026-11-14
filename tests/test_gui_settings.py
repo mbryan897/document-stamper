@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QWheelEvent
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget
 from pytestqt.qtbot import QtBot
 
@@ -793,7 +794,8 @@ def test_wheel_over_an_unfocused_type_combo_changes_nothing(records_window: Main
     assert not event.isAccepted()  # passed on, so the page scrolls instead
 
 
-def test_wheel_over_a_focused_combo_still_works(records_window: MainWindow) -> None:
+def test_wheel_over_a_focused_combo_changes_nothing_either(records_window: MainWindow) -> None:
+    """A combo keeps focus after it's used, so a focused one scrolled past must not change either."""
     s = _settings(records_window)
     s.show_section(1)
     page = s.fields_page
@@ -801,7 +803,9 @@ def test_wheel_over_a_focused_combo_still_works(records_window: MainWindow) -> N
     page.type_combo.setFocus()
     QApplication.processEvents()
     assert page.type_combo.hasFocus()
-    _wheel(page.type_combo)
+    event = _wheel(page.type_combo)
+    assert s.draft.fields["doc_title"]["type"] == "text" and not event.isAccepted()
+    QTest.keyClick(page.type_combo, Qt.Key.Key_Down)  # the keyboard still changes it
     assert s.draft.fields["doc_title"]["type"] != "text"
 
 

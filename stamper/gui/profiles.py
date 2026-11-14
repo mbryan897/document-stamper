@@ -297,18 +297,16 @@ class _MasterList(QWidget):
 
 
 class _Combo(QComboBox):
-    """A combo box the mouse wheel doesn't change unless it has focus (UX-003).
+    """A combo box the mouse wheel never changes (UX-003).
 
-    Otherwise the wheel goes to the page, so scrolling past a combo scrolls
-    instead of changing a setting.
+    The wheel always goes to the page, so scrolling past a combo scrolls. Letting
+    it through when focused wasn't enough: a combo keeps focus after it's used,
+    so a later scroll past it still changed it. Click it or use the arrow keys.
     """
 
     def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802 - Qt name
-        """Change the value only when focused; otherwise let the page scroll."""
-        if self.hasFocus():
-            super().wheelEvent(event)
-        else:
-            event.ignore()
+        """Never change the value; let the page scroll."""
+        event.ignore()
 
 
 def _combo() -> QComboBox:
