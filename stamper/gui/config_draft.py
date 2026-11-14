@@ -86,6 +86,7 @@ class ConfigDraft:
         data = config.model_dump(mode="json") if isinstance(config, Config) else config
         self.data: dict[str, Any] = copy.deepcopy(dict(data))
         self._saved = copy.deepcopy(self.data)
+        self._undo: tuple[str, dict[str, Any]] | None = None
 
     # ------------------------------------------------------------ state
 
@@ -101,6 +102,28 @@ class ConfigDraft:
     def replace(self, data: Mapping[str, Any]) -> None:
         """Replace everything (Import). The baseline stays, so the draft is dirty."""
         self.data = copy.deepcopy(dict(data))
+        self._undo = None
+
+    # One level of undo for removals, not a stack. Later edits don't clear the
+    # snapshot: undo() puts back the whole draft as it was, so they go too. The
+    # screen shows Undo only until the next edit, so that can't happen by surprise.
+
+    def snapshot(self, label: str) -> None:
+        """Keep a copy of the draft to go back to, replacing any earlier one."""
+        self._undo = (label, copy.deepcopy(self.data))
+
+    @property
+    def can_undo(self) -> bool:
+        """True while there is a snapshot."""
+        return self._undo is not None
+
+    def undo(self) -> str | None:
+        """Go back to the snapshot and forget it; returns its label, or None if there was none."""
+        if self._undo is None:
+            return None
+        label, self.data = self._undo
+        self._undo = None
+        return label
 
     def validate(self) -> tuple[Config | None, list[str]]:
         """The config this draft would save, or None and the problems."""
