@@ -17,7 +17,6 @@ from pathlib import Path
 import pytest
 from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QWheelEvent
-from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget
 from pytestqt.qtbot import QtBot
 
@@ -25,6 +24,7 @@ from stamper.core.config import load_config
 from stamper.core.locations import AppState, Locations, SourceKind, backup_path, load_state, save_state
 from stamper.gui.app import make_app
 from stamper.gui.main_window import MainWindow
+from stamper.gui import profiles
 from stamper.gui.profiles import ProfileSettings
 from stamper.gui.theme import COLORS, STYLE_SHEET
 from tests.gui_support import (  # noqa: F401
@@ -781,32 +781,59 @@ def test_type_change_that_drops_nothing_says_nothing(records_window: MainWindow)
     assert s.status.text() == "" and not s.undo_button.isVisible() and not s.draft.can_undo
 
 
-def test_wheel_over_an_unfocused_type_combo_changes_nothing(records_window: MainWindow) -> None:
+def _page_scrolls(page: QWidget) -> None:
+    """A wheel notch on the page itself, as when it's scrolling."""
+    area = page.detail.parentWidget().parentWidget()  # type: ignore[attr-defined]
+    _wheel(area.viewport())
+
+
+def _page_still(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The page hasn't scrolled for longer than the latch."""
+    monkeypatch.setattr(profiles, "_page_scrolled_at", 0.0)
+
+
+def test_scroll_already_moving_the_page_passes_over_a_combo(records_window: MainWindow) -> None:
     s = _settings(records_window)
     s.show_section(1)
     page = s.fields_page
     page.select_key("doc_title")
     combo = page.type_combo
-    assert not combo.hasFocus() and combo.focusPolicy() == Qt.FocusPolicy.StrongFocus
-    index = combo.currentIndex()
-    event = _wheel(combo)
-    assert combo.currentIndex() == index and s.draft.fields["doc_title"]["type"] == "text"
-    assert not event.isAccepted()  # passed on, so the page scrolls instead
+    assert combo.focusPolicy() == Qt.FocusPolicy.StrongFocus
+    combo.setFocus()  # focus doesn't matter: it kept focus after use and still changed (Windows touchpad)
+    for _ in range(3):  # the page was scrolling, then the combo slid under the pointer
+        _page_scrolls(page)
+        event = _wheel(combo)
+        assert not event.isAccepted()  # passed on, so the page goes on scrolling
+    assert combo.currentData() == "text" and s.draft.fields["doc_title"]["type"] == "text"
 
 
-def test_wheel_over_a_focused_combo_changes_nothing_either(records_window: MainWindow) -> None:
-    """A combo keeps focus after it's used, so a focused one scrolled past must not change either."""
+def test_scroll_that_starts_on_a_combo_changes_it(records_window: MainWindow,
+                                                  monkeypatch: pytest.MonkeyPatch) -> None:
     s = _settings(records_window)
     s.show_section(1)
     page = s.fields_page
     page.select_key("doc_title")
-    page.type_combo.setFocus()
-    QApplication.processEvents()
-    assert page.type_combo.hasFocus()
+    _page_still(monkeypatch)
     event = _wheel(page.type_combo)
-    assert s.draft.fields["doc_title"]["type"] == "text" and not event.isAccepted()
-    QTest.keyClick(page.type_combo, Qt.Key.Key_Down)  # the keyboard still changes it
-    assert s.draft.fields["doc_title"]["type"] != "text"
+    assert event.isAccepted() and s.draft.fields["doc_title"]["type"] != "text"
+    _wheel(page.type_combo)  # the same scroll goes on changing it: the page didn't get it
+    assert s.draft.fields["doc_title"]["type"] == "date"
+
+
+def test_scroll_passes_over_a_number_box_at_its_limit(records_window: MainWindow,
+                                                      monkeypatch: pytest.MonkeyPatch) -> None:
+    s = _settings(records_window)
+    page = s.profiles_page
+    margin = page.stamp_editors[0].margin
+    assert margin.focusPolicy() == Qt.FocusPolicy.StrongFocus
+    _page_scrolls(page)
+    event = _wheel(margin)  # 0.25 in is the minimum; a plain box took this and the page stopped
+    assert not event.isAccepted()
+    _page_still(monkeypatch)
+    size = page.stamp_editors[0].size
+    before = size.value()
+    _wheel(size)  # one notch down, started on the box
+    assert size.value() < before
 
 
 def test_delete_is_a_danger_button_on_its_own_row(records_window: MainWindow) -> None:

@@ -26,12 +26,13 @@ import os
 import re
 import shutil
 import tempfile
+import time
 from collections.abc import Callable, Sequence
 from datetime import date
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QKeySequence, QPixmap, QResizeEvent, QShortcut, QWheelEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -83,6 +84,7 @@ PROBLEM_LINES = 6  # footer lines before the problem list scrolls (D-093)
 STATUS_LINES = 4
 SAMPLE_ORIGINAL = "provider_return.pdf"
 MAX_NAME_SHOWN = 80  # a name from config in a footer message
+WHEEL_LATCH_S = 0.6  # a scroll this soon after the page last scrolled keeps scrolling the page
 
 _ANCHOR_LABELS = {a: a.replace("-", " ").capitalize() for a in ANCHORS}
 _DIRECTIONS = (("along-top", "Along top edge"), ("along-right", "Along right edge"))
@@ -296,17 +298,57 @@ class _MasterList(QWidget):
             it.setText(text)
 
 
-class _Combo(QComboBox):
-    """A combo box the mouse wheel never changes (UX-003).
+# The mouse wheel and touchpad (UX-003). A scroll already moving the page keeps
+# moving it when a drop-down or number box slides under the pointer; a scroll
+# that starts on one, after the page has been still for WHEEL_LATCH_S, changes it.
+# The page's scroll areas note when they last scrolled; the boxes check that.
 
-    The wheel always goes to the page, so scrolling past a combo scrolls. Letting
-    it through when focused wasn't enough: a combo keeps focus after it's used,
-    so a later scroll past it still changed it. Click it or use the arrow keys.
-    """
+_page_scrolled_at = 0.0
+
+
+class _PageWheelClock(QObject):
+    """Notes when a scroll area's page last got the wheel."""
+
+    def eventFilter(self, _obj: QObject, event: QEvent) -> bool:  # noqa: N802 - Qt name
+        """Note the time; never stops the event."""
+        if event.type() == QEvent.Type.Wheel:
+            global _page_scrolled_at
+            _page_scrolled_at = time.monotonic()
+        return False
+
+
+def _page_is_scrolling() -> bool:
+    return time.monotonic() - _page_scrolled_at < WHEEL_LATCH_S
+
+
+class _Combo(QComboBox):
+    """A combo box that lets a scroll already moving the page go past it."""
 
     def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802 - Qt name
-        """Never change the value; let the page scroll."""
-        event.ignore()
+        """Pass the wheel to the page while it's scrolling; otherwise change the value."""
+        if _page_is_scrolling():
+            event.ignore()
+        else:
+            super().wheelEvent(event)
+
+
+class _Spin(QDoubleSpinBox):
+    """A number box that lets a scroll already moving the page go past it.
+
+    A plain one takes the wheel even at its limit, where nothing changes, so the
+    page just stopped scrolling.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # the wheel doesn't give it focus
+
+    def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802 - Qt name
+        """Pass the wheel to the page while it's scrolling; otherwise change the value."""
+        if _page_is_scrolling():
+            event.ignore()
+        else:
+            super().wheelEvent(event)
 
 
 def _combo() -> QComboBox:
@@ -324,6 +366,8 @@ def _scroll(widget: QWidget) -> QScrollArea:
     area.setWidgetResizable(True)
     area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
     area.setWidget(widget)
+    area.wheel_clock = _PageWheelClock(area)  # type: ignore[attr-defined]  # kept alive with the area
+    area.viewport().installEventFilter(area.wheel_clock)  # type: ignore[attr-defined]
     return area
 
 
@@ -446,14 +490,14 @@ class StampEditor(QFrame):
         self.direction.setCurrentIndex(max(0, self.direction.findData(data.get("direction", "along-top"))))
         self.direction.currentIndexChanged.connect(
             lambda _i: self._set("direction", self.direction.currentData()))
-        self.margin = QDoubleSpinBox()
+        self.margin = _Spin()
         self.margin.setRange(0.25, 3.0)
         self.margin.setSingleStep(0.05)
         self.margin.setDecimals(2)
         self.margin.setSuffix(" in")
         self.margin.setValue(float(data.get("margin_in", 0.25)))
         self.margin.valueChanged.connect(lambda v: self._set("margin_in", round(v, 2)))
-        self.size = QDoubleSpinBox()
+        self.size = _Spin()
         self.size.setRange(6.0, 24.0)
         self.size.setSingleStep(0.5)
         self.size.setDecimals(1)
