@@ -162,6 +162,7 @@ class StampDialog(QWidget):
 
     saved = Signal(object)  # ApplyResult
     cancelled = Signal()
+    edited = Signal()  # something on screen changed; is_dirty() may have changed with it
 
     def __init__(
         self,
@@ -790,6 +791,7 @@ class StampDialog(QWidget):
 
     def _update_name(self) -> None:
         self.name_label.setText(self.suggested_name())
+        self.edited.emit()  # the file-name ticks change nothing else
 
     # ------------------------------------------------------------ preview and plan
 
@@ -823,6 +825,7 @@ class StampDialog(QWidget):
         self.revision += 1
         self.save_error.hide()
         self._update_button()
+        self.edited.emit()
         if immediate:
             self._redraw.stop()
             self._request()
