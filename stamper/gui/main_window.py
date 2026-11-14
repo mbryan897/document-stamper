@@ -1094,6 +1094,9 @@ class MainWindow(QMainWindow):
         if self.settings is not None and not self.settings.may_leave():
             event.ignore()  # unsaved profile settings: the user chose to keep editing
             return
+        if self.dialog is not None and not self.dialog.may_leave():
+            event.ignore()  # values entered on the stamp screen: the user chose to keep them
+            return
         self._close_dialog()
         self._close_settings()
         self._close_prepare()

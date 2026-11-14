@@ -13,7 +13,7 @@ Everything can be done with the keyboard: Tab moves between controls, and Space 
 | Key | Does |
 | --- | --- |
 | Enter | **Stamp and save…**, once it's available. |
-| Esc | **Cancel**: back to the drop screen, nothing saved. While saving, stops the save. |
+| Esc | **Cancel**: back to the drop screen, nothing saved; asks first if there are changes. While saving, stops the save. |
 | Page Up, Page Down | The previous or next page in the preview. |
 
 The same keys work when stamping a combined file or several files separately.

@@ -108,9 +108,10 @@ def default_window(qtbot: QtBot, fake: FakeServices) -> Iterator[MainWindow]:
 
 
 def close_window(w: MainWindow) -> None:
-    """Close the window at teardown, discarding unsaved Profile settings without asking."""
+    """Close the window at teardown, discarding unsaved settings and stamp-screen values without asking."""
     if w.settings is not None:
         w.settings.draft.mark_saved()
+    w.services.confirm = lambda *_a: True  # the window and its dialogs share this Services object
     w.close()
 
 

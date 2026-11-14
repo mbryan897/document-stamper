@@ -213,6 +213,7 @@ class StampDialog(QWidget):
         self._resize_timer.setSingleShot(True)
         self._resize_timer.setInterval(DEBOUNCE_MS)
         self._resize_timer.timeout.connect(self._preview_only)
+        self._clean: tuple[object, ...] | None = None  # what was on screen once built and pre-filled
 
         self._build()
         self._prefill()
@@ -222,6 +223,7 @@ class StampDialog(QWidget):
         self._refresh_page_numbers()
         self._update_name()
         self._changed(immediate=True)
+        self._clean = self._snapshot()
 
     # ------------------------------------------------------------ layout
 
@@ -1001,9 +1003,28 @@ class StampDialog(QWidget):
     def _escape(self) -> None:
         if self.saving:
             self._cancel_save()
-        else:
+        elif self.may_leave():
             self._redraw.stop()
             self.cancelled.emit()
+
+    # ------------------------------------------------------------ unsaved work (UX-006)
+
+    def _snapshot(self) -> tuple[object, ...]:
+        return (tuple(r.raw() for r in self._rows.values()), self.anchor, self.direction,
+                self.page_numbers, self.box_check.isChecked(), tuple(self.ticked()))
+
+    def is_dirty(self) -> bool:
+        """True when anything differs from how the screen opened (fields, placement, box, name ticks)."""
+        return self._clean is not None and self._snapshot() != self._clean
+
+    def may_leave(self) -> bool:
+        """True if nothing was entered, or the user agrees to discard it.
+
+        While a save runs the question isn't asked: closing cancels the save as before (D-070).
+        """
+        return self.saving or not self.is_dirty() or self.services.confirm(
+            self, "Discard what you've entered?",
+            "Nothing has been saved. The values and settings on this screen will be lost.", "Discard")
 
     # ------------------------------------------------------------ owner password
 
