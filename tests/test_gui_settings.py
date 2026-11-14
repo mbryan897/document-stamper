@@ -15,7 +15,9 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtGui import QWheelEvent
+from PySide6.QtWidgets import QApplication, QWidget
 from pytestqt.qtbot import QtBot
 
 from stamper.core.config import load_config
@@ -635,6 +637,16 @@ def test_a_file_still_opening_doesnt_replace_settings(qtbot: QtBot, records_wind
 # ------------------------------------------------------------ undo, wheel, Delete (UX-002, UX-003, UX-013)
 
 
+def _wheel(widget: QWidget) -> QWheelEvent:
+    """Send one notch of the mouse wheel to a widget, as if the pointer were over it."""
+    pos = QPointF(widget.width() / 2, widget.height() / 2)
+    event = QWheelEvent(pos, QPointF(widget.mapToGlobal(pos.toPoint())), QPoint(0, 0), QPoint(0, -120),
+                        Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase,
+                        False)
+    QApplication.sendEvent(widget, event)
+    return event
+
+
 def test_delete_field_then_undo_restores_it(records_window: MainWindow) -> None:
     s = _settings(records_window)
     s.show_section(1)
@@ -765,3 +777,28 @@ def test_type_change_that_drops_nothing_says_nothing(records_window: MainWindow)
     page.select_key("doc_title")
     page.type_combo.setCurrentIndex(page.type_combo.findData("date"))
     assert s.status.text() == "" and not s.undo_button.isVisible() and not s.draft.can_undo
+
+
+def test_wheel_over_an_unfocused_type_combo_changes_nothing(records_window: MainWindow) -> None:
+    s = _settings(records_window)
+    s.show_section(1)
+    page = s.fields_page
+    page.select_key("doc_title")
+    combo = page.type_combo
+    assert not combo.hasFocus() and combo.focusPolicy() == Qt.FocusPolicy.StrongFocus
+    index = combo.currentIndex()
+    event = _wheel(combo)
+    assert combo.currentIndex() == index and s.draft.fields["doc_title"]["type"] == "text"
+    assert not event.isAccepted()  # passed on, so the page scrolls instead
+
+
+def test_wheel_over_a_focused_combo_still_works(records_window: MainWindow) -> None:
+    s = _settings(records_window)
+    s.show_section(1)
+    page = s.fields_page
+    page.select_key("doc_title")
+    page.type_combo.setFocus()
+    QApplication.processEvents()
+    assert page.type_combo.hasFocus()
+    _wheel(page.type_combo)
+    assert s.draft.fields["doc_title"]["type"] != "text"

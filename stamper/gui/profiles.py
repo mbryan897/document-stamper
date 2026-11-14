@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QKeySequence, QPixmap, QResizeEvent, QShortcut
+from PySide6.QtGui import QKeySequence, QPixmap, QResizeEvent, QShortcut, QWheelEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -289,9 +289,25 @@ class _MasterList(QWidget):
             it.setText(text)
 
 
+class _Combo(QComboBox):
+    """A combo box the mouse wheel doesn't change unless it has focus (UX-003).
+
+    Otherwise the wheel goes to the page, so scrolling past a combo scrolls
+    instead of changing a setting.
+    """
+
+    def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802 - Qt name
+        """Change the value only when focused; otherwise let the page scroll."""
+        if self.hasFocus():
+            super().wheelEvent(event)
+        else:
+            event.ignore()
+
+
 def _combo() -> QComboBox:
     """A combo box that can shrink with the form instead of forcing it wider."""
-    box = QComboBox()
+    box = _Combo()
+    box.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # the wheel doesn't give it focus
     box.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
     box.setMinimumContentsLength(8)
     return box
