@@ -4,7 +4,7 @@ When you open one PDF, its stamp dialog opens: the page preview on the left, the
 
 ![The stamp dialog](images/stamp-dialog.png)
 
-Nothing is saved until you click **Stamp and save…** and choose where. **Cancel** (or Esc) goes back to the drop screen without saving anything.
+Nothing is saved until you click **Stamp and save…** and choose where. **Cancel** (or Esc) goes back to the drop screen without saving anything. If you've typed a value or changed a setting, it asks first; the safe answer keeps what you entered. Closing the window asks the same question. While the screen has changes, the title bar ends in "(not saved)".
 
 ## The preview
 

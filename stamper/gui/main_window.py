@@ -118,6 +118,8 @@ __all__ = [
 ]
 
 MAX_CONFIG_PROBLEMS = 6
+APP_TITLE = "Document Stamper"
+MAX_TITLE_NAME = 80  # characters of a file name in the title bar
 THUMB_W, THUMB_H = 200, 260
 
 PREFERRED_SIZE = QSize(1200, 780)  # the mockup's working area
@@ -436,6 +438,18 @@ def _escape(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def _title_name(name: str) -> str:
+    """A file name for the title bar: hidden characters shown, cut to length, "[*]" kept.
+
+    Qt removes "[*]" from every window title (its "modified" placeholder),
+    even when the placeholder isn't used; "[*][*]" is how Qt shows "[*]".
+    """
+    name = visible(name, keep="")
+    if len(name) > MAX_TITLE_NAME:
+        name = name[: MAX_TITLE_NAME - 1] + "…"
+    return name.replace("[*]", "[*][*]")
+
+
 def _free_closed_screen() -> None:
     """Free a closed screen's reference cycles now, on the window's thread.
 
@@ -459,7 +473,7 @@ class MainWindow(QMainWindow):
         sendto_shortcut: Path | None = None,
     ) -> None:
         super().__init__()
-        self.setWindowTitle("Document Stamper")
+        self.setWindowTitle(APP_TITLE)
         screen = QGuiApplication.primaryScreen()
         fit = fit_to_screen(screen.availableGeometry().size() if screen else PREFERRED_SIZE
                             + FRAME_ALLOWANCE)
@@ -503,6 +517,7 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.busy)
         self.stack.addWidget(self.batch_saved)
         self.setCentralWidget(self.stack)
+        self.stack.currentChanged.connect(lambda _i: self.update_title())
 
         self.drop.choose_button.clicked.connect(self.choose_file)
         self.drop.config_button.clicked.connect(self.choose_config)
@@ -715,6 +730,23 @@ class MainWindow(QMainWindow):
         self.drop.show_message(message)
         self.drop.choose_button.setFocus()
 
+    def update_title(self) -> None:
+        """Name what the window shows in its title bar (UX-008)."""
+        screen = self.stack.currentWidget()
+        what = ""
+        if isinstance(screen, CombineDialog):
+            what = f"{len(screen.originals)} files"
+        elif isinstance(screen, BatchDialog):
+            what = f"{len(screen.files)} files"
+        elif isinstance(screen, StampDialog):
+            what = _title_name(screen.path.name)
+        elif screen is self.saved and self.saved.result is not None:
+            what = "Saved: " + _title_name(self.saved.result.output_path.name)
+        title = f"{what} – {APP_TITLE}" if what else APP_TITLE
+        if isinstance(screen, StampDialog) and screen.is_dirty():
+            title += " (not saved)"
+        self.setWindowTitle(title)
+
     # ------------------------------------------------------------ profile settings
 
     def open_settings(self) -> ProfileSettings | None:
@@ -835,6 +867,7 @@ class MainWindow(QMainWindow):
         )
         dialog.cancelled.connect(lambda: self.show_drop())
         dialog.saved.connect(self._on_saved)
+        dialog.edited.connect(self.update_title)
         self._wire_help(dialog)
         self.dialog = dialog
         self.stack.addWidget(dialog)
@@ -976,6 +1009,7 @@ class MainWindow(QMainWindow):
                                engine=self.engine, services=self.services, today=self.today)
         dialog.cancelled.connect(lambda: self._back_to_files())
         dialog.saved.connect(self._on_saved)
+        dialog.edited.connect(self.update_title)
         self._wire_help(dialog)
         self.dialog = dialog
         self.stack.addWidget(dialog)
@@ -992,6 +1026,7 @@ class MainWindow(QMainWindow):
                              engine=self.engine, handler=self.handler, services=self.services, today=self.today)
         dialog.cancelled.connect(lambda: self._back_to_files())
         dialog.batch_saved.connect(self._on_batch_saved)
+        dialog.edited.connect(self.update_title)
         self._wire_help(dialog)
         self.dialog = dialog
         self.stack.addWidget(dialog)
@@ -1093,6 +1128,9 @@ class MainWindow(QMainWindow):
         """Cancel any save and wait for the engine, so no temporary file is left (D-055)."""
         if self.settings is not None and not self.settings.may_leave():
             event.ignore()  # unsaved profile settings: the user chose to keep editing
+            return
+        if self.dialog is not None and not self.dialog.may_leave():
+            event.ignore()  # values entered on the stamp screen: the user chose to keep them
             return
         self._close_dialog()
         self._close_settings()
