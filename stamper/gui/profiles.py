@@ -266,12 +266,19 @@ class _MasterList(QWidget):
         grid = QGridLayout()
         grid.setSpacing(6)
         self.buttons: dict[str, QPushButton] = {}
-        for i, (text, slot) in enumerate(buttons):
+        for text, slot in buttons:
             b = _small(text)
             b.clicked.connect(slot)
             self.buttons[text] = b
+        others = [b for t, b in self.buttons.items() if t != "Delete"]
+        for i, b in enumerate(others):
             grid.addWidget(b, i // 2, i % 2)
         lay.addLayout(grid)
+        delete = self.buttons.get("Delete")
+        if delete is not None:  # apart from the others and in red, so it isn't hit by mistake (UX-013)
+            delete.setObjectName("danger")
+            lay.addSpacing(16)
+            lay.addWidget(delete, 0, Qt.AlignmentFlag.AlignLeft)
 
     def fill(self, labels: Sequence[str], current: int) -> None:
         """Replace the rows, keeping ``current`` selected."""

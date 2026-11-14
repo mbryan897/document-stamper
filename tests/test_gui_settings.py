@@ -25,6 +25,7 @@ from stamper.core.locations import AppState, Locations, SourceKind, backup_path,
 from stamper.gui.app import make_app
 from stamper.gui.main_window import MainWindow
 from stamper.gui.profiles import ProfileSettings
+from stamper.gui.theme import COLORS, STYLE_SHEET
 from tests.gui_support import (  # noqa: F401
     TODAY,
     WAIT_MS,
@@ -802,3 +803,26 @@ def test_wheel_over_a_focused_combo_still_works(records_window: MainWindow) -> N
     assert page.type_combo.hasFocus()
     _wheel(page.type_combo)
     assert s.draft.fields["doc_title"]["type"] != "text"
+
+
+def test_delete_is_a_danger_button_on_its_own_row(records_window: MainWindow) -> None:
+    s = _settings(records_window)
+    for section, page in ((0, s.profiles_page), (1, s.fields_page), (2, s.lists_page)):
+        s.show_section(section)
+        QApplication.processEvents()
+        delete = page.master.buttons["Delete"]
+        others = [b for t, b in page.master.buttons.items() if t != "Delete"]
+        assert delete.objectName() == "danger"
+        assert all(b.objectName() == "small" for b in others)
+        assert delete.y() - max(b.geometry().bottom() + 1 for b in others) >= 16
+        assert delete.height() == others[0].height()
+
+
+def test_danger_color_contrast() -> None:
+    def lum(hex_color: str) -> float:
+        rgb = [int(hex_color[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+        lin = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in rgb]
+        return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+
+    assert (1.05) / (lum(COLORS["danger"]) + 0.05) >= 4.5
+    assert "QPushButton#danger" in STYLE_SHEET
