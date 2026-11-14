@@ -5,10 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QCheckBox, QComboBox, QLineEdit, QWidget
+from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtGui import QWheelEvent
+from PySide6.QtWidgets import QApplication, QCheckBox, QComboBox, QLineEdit, QWidget
 from pytestqt.qtbot import QtBot
 
+from stamper.gui import profiles
 from stamper.gui.main_window import MainWindow
 from stamper.gui.page_numbers import WITH_IDENTIFIER
 from tests.gui_support import (  # noqa: F401 - fixtures
@@ -344,3 +346,37 @@ def test_box_switch_on_by_default(qtbot: QtBot, window: MainWindow, corpus_dir: 
     assert d.job().background_box is True
     d.box_check.setChecked(False)
     assert d.job().background_box is False
+
+
+# ------------------------------------------------------------ the mouse wheel (UX-003)
+
+
+def _wheel(widget: QWidget) -> QWheelEvent:
+    """One notch of the mouse wheel down, as if the pointer were over the widget."""
+    pos = QPointF(widget.width() / 2, widget.height() / 2)
+    event = QWheelEvent(pos, QPointF(widget.mapToGlobal(pos.toPoint())), QPoint(0, 0), QPoint(0, -120),
+                        Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase,
+                        False)
+    QApplication.sendEvent(widget, event)
+    return event
+
+
+def test_scroll_moving_the_panel_passes_over_its_drop_downs(qtbot: QtBot, window: MainWindow,
+                                                            corpus_dir: Path) -> None:
+    d = open_dialog(qtbot, window, corpus_dir / "rotate_mixed.pdf")
+    doc_type, page_numbers = d.editor("doc_type"), d.page_numbers_combo
+    for combo in (doc_type, page_numbers):
+        assert combo.focusPolicy() == Qt.FocusPolicy.StrongFocus  # type: ignore[attr-defined]
+        before = combo.currentIndex()  # type: ignore[attr-defined]
+        _wheel(d.scroll.viewport())  # the panel was scrolling, then the drop-down slid under the pointer
+        event = _wheel(combo)
+        assert not event.isAccepted() and combo.currentIndex() == before  # type: ignore[attr-defined]
+
+
+def test_scroll_that_starts_on_a_drop_down_changes_it(qtbot: QtBot, window: MainWindow, corpus_dir: Path,
+                                                      monkeypatch: pytest.MonkeyPatch) -> None:
+    d = open_dialog(qtbot, window, corpus_dir / "rotate_mixed.pdf")
+    monkeypatch.setattr(profiles, "_page_scrolled_at", 0.0)  # the panel has been still
+    doc_type = d.editor("doc_type")
+    _wheel(doc_type)
+    assert doc_type.currentIndex() == 1  # type: ignore[attr-defined]

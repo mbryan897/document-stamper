@@ -73,7 +73,16 @@ from .help import help_button
 from .services import Services
 from .wrap_label import WrapAnywhereLabel
 
-__all__ = ["PATTERN_HELP", "ProfileSettings", "SECTIONS", "SECTION_HELP", "plain_problem"]
+__all__ = [
+    "PATTERN_HELP",
+    "PageScrollCombo",
+    "PageScrollSpin",
+    "ProfileSettings",
+    "SECTIONS",
+    "SECTION_HELP",
+    "plain_problem",
+    "watch_page_scroll",
+]
 
 SECTIONS = ("Profiles", "Fields", "Lists", "General")
 SECTION_HELP = ("profiles-and-stamps", "fields-and-lists", "fields-and-lists#lists", "where-the-config-lives")
@@ -298,10 +307,10 @@ class _MasterList(QWidget):
             it.setText(text)
 
 
-# The mouse wheel and touchpad (UX-003). A scroll already moving the page keeps
+# The mouse wheel and touchpad (UX-003); the stamp screen uses these too. A scroll already moving the page keeps
 # moving it when a drop-down or number box slides under the pointer; a scroll
 # that starts on one, after the page has been still for WHEEL_LATCH_S, changes it.
-# The page's scroll areas note when they last scrolled; the boxes check that.
+# A scroll area passed to watch_page_scroll() notes when it last scrolled; the boxes check that.
 
 _page_scrolled_at = 0.0
 
@@ -321,8 +330,18 @@ def _page_is_scrolling() -> bool:
     return time.monotonic() - _page_scrolled_at < WHEEL_LATCH_S
 
 
-class _Combo(QComboBox):
+def watch_page_scroll(area: QScrollArea) -> None:
+    """Let the boxes below know when this scroll area's page is scrolling."""
+    area.wheel_clock = _PageWheelClock(area)  # type: ignore[attr-defined]  # kept alive with the area
+    area.viewport().installEventFilter(area.wheel_clock)  # type: ignore[attr-defined]
+
+
+class PageScrollCombo(QComboBox):
     """A combo box that lets a scroll already moving the page go past it."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # the wheel doesn't give it focus
 
     def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802 - Qt name
         """Pass the wheel to the page while it's scrolling; otherwise change the value."""
@@ -332,7 +351,7 @@ class _Combo(QComboBox):
             super().wheelEvent(event)
 
 
-class _Spin(QDoubleSpinBox):
+class PageScrollSpin(QDoubleSpinBox):
     """A number box that lets a scroll already moving the page go past it.
 
     A plain one takes the wheel even at its limit, where nothing changes, so the
@@ -353,8 +372,7 @@ class _Spin(QDoubleSpinBox):
 
 def _combo() -> QComboBox:
     """A combo box that can shrink with the form instead of forcing it wider."""
-    box = _Combo()
-    box.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # the wheel doesn't give it focus
+    box = PageScrollCombo()
     box.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
     box.setMinimumContentsLength(8)
     return box
@@ -366,8 +384,7 @@ def _scroll(widget: QWidget) -> QScrollArea:
     area.setWidgetResizable(True)
     area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
     area.setWidget(widget)
-    area.wheel_clock = _PageWheelClock(area)  # type: ignore[attr-defined]  # kept alive with the area
-    area.viewport().installEventFilter(area.wheel_clock)  # type: ignore[attr-defined]
+    watch_page_scroll(area)
     return area
 
 
@@ -490,14 +507,14 @@ class StampEditor(QFrame):
         self.direction.setCurrentIndex(max(0, self.direction.findData(data.get("direction", "along-top"))))
         self.direction.currentIndexChanged.connect(
             lambda _i: self._set("direction", self.direction.currentData()))
-        self.margin = _Spin()
+        self.margin = PageScrollSpin()
         self.margin.setRange(0.25, 3.0)
         self.margin.setSingleStep(0.05)
         self.margin.setDecimals(2)
         self.margin.setSuffix(" in")
         self.margin.setValue(float(data.get("margin_in", 0.25)))
         self.margin.valueChanged.connect(lambda v: self._set("margin_in", round(v, 2)))
-        self.size = _Spin()
+        self.size = PageScrollSpin()
         self.size.setRange(6.0, 24.0)
         self.size.setSingleStep(0.5)
         self.size.setDecimals(1)
