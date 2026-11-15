@@ -238,8 +238,10 @@ def test_state_round_trip(locs: Locations) -> None:
 
 
 def test_state_never_holds_field_values() -> None:
-    # last_config is a file path (D-121), never a field value.
-    assert set(json.loads(AppState("P", "F").to_json())) == {"last_profile", "last_folder", "last_config"}
+    # last_config is a file path (D-121); the save and batch folders and the
+    # batch choice were added for UX-037 and UX-039. Never a field value.
+    assert set(json.loads(AppState("P", "F").to_json())) == {
+        "last_profile", "last_folder", "last_config", "last_save_folder", "batch_folder", "batch_in_one_folder"}
 
 
 def test_damaged_state_is_ignored(locs: Locations) -> None:

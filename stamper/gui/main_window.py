@@ -69,6 +69,7 @@ from ..core.locations import (
     load_state,
     locations,
     save_state,
+    state_folder,
     work_dir,
 )
 from ..core.pending import Leftover
@@ -529,9 +530,7 @@ class MainWindow(QMainWindow):
         self._mode = ""
         self._opening: tuple[int, Path, str | None] | None = None
         self._thumb_req = 0
-        self._last_folder: Path | None = (
-            Path(self.state.last_folder) if self.state.last_folder and Path(self.state.last_folder).is_dir()
-            else None)
+        self._last_folder: Path | None = state_folder(self.state.last_folder)
 
         self.stack = QStackedWidget()
         self.drop = DropScreen()
