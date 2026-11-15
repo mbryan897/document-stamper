@@ -11,6 +11,8 @@ This part of the help is for whoever sets up Document Stamper for an agency or t
 - Changes are checked as you make them. Anything that would stop the config loading is listed above the buttons ("Fix these before saving:"), and **Save changes** waits until the list is empty.
 - **Save changes** (or Ctrl+S) writes the config file and keeps the previous version next to it as `config.json.bak`. The drop screen then uses the new settings.
 - **Cancel** (or Esc) throws your changes away; it asks first if there are any. A deleted profile, field or list comes back too.
+- After you delete or remove something (a profile, field, list, stamp, rule, choice or document property), or change a field's **Type** in a way that drops its rules, a message says what went and an **Undo** link sits beside it. **Undo** puts back the one last change. It's there until your next edit.
+- While the page is scrolling, the mouse wheel or touchpad keeps scrolling it when a drop-down list or number box passes under the pointer. To change one with the wheel, stop over it for a moment, then scroll.
 - A config file you can't write to opens read-only, with a note saying so. You can still look around and use **Export…** to save a copy with your changes. See [Where the config lives](where-the-config-lives.md).
 
 Users only see a profile's effects: the fields they're asked for, the stamp, the suggested file name. Changing a profile changes it for everyone who uses that config file.

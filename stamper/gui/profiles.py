@@ -26,13 +26,14 @@ import os
 import re
 import shutil
 import tempfile
+import time
 from collections.abc import Callable, Sequence
 from datetime import date
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QKeySequence, QPixmap, QResizeEvent, QShortcut
+from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QKeySequence, QPixmap, QResizeEvent, QShortcut, QWheelEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -58,7 +59,7 @@ from PySide6.QtWidgets import (
 from .. import sendto
 from ..core.config import ANCHORS, Config, ConfigError, Profile, load_config
 from ..core.fields import MAX_VALUE_LENGTH, validate_field, value_from_filename
-from ..core.filenames import suggest_filename
+from ..core.filenames import suggest_filename, visible
 from ..core.locations import ConfigSource, Locations, SourceKind, describe, save_config, save_target
 from ..core.paths import same_file
 from ..core.patterns import PatternError, explain, parse_date_format, regex_risk
@@ -72,7 +73,16 @@ from .help import help_button
 from .services import Services
 from .wrap_label import WrapAnywhereLabel
 
-__all__ = ["PATTERN_HELP", "ProfileSettings", "SECTIONS", "SECTION_HELP", "plain_problem"]
+__all__ = [
+    "PATTERN_HELP",
+    "PageScrollCombo",
+    "PageScrollSpin",
+    "ProfileSettings",
+    "SECTIONS",
+    "SECTION_HELP",
+    "plain_problem",
+    "watch_page_scroll",
+]
 
 SECTIONS = ("Profiles", "Fields", "Lists", "General")
 SECTION_HELP = ("profiles-and-stamps", "fields-and-lists", "fields-and-lists#lists", "where-the-config-lives")
@@ -82,6 +92,8 @@ MAX_PROBLEMS = 8
 PROBLEM_LINES = 6  # footer lines before the problem list scrolls (D-093)
 STATUS_LINES = 4
 SAMPLE_ORIGINAL = "provider_return.pdf"
+MAX_NAME_SHOWN = 80  # a name from config in a footer message
+WHEEL_LATCH_S = 0.6  # a scroll this soon after the page last scrolled keeps scrolling the page
 
 _ANCHOR_LABELS = {a: a.replace("-", " ").capitalize() for a in ANCHORS}
 _DIRECTIONS = (("along-top", "Along top edge"), ("along-right", "Along right edge"))
@@ -147,6 +159,12 @@ def _label(text: str = "", name: str = "", *, wrap: bool = True) -> QLabel:
     if name:
         lab.setObjectName(name)
     return lab
+
+
+def _shown(name: str) -> str:
+    """A name from config for a footer message: hidden characters shown, length capped."""
+    name = visible(name)
+    return name if len(name) <= MAX_NAME_SHOWN else name[:MAX_NAME_SHOWN - 1] + "…"
 
 
 def _section(text: str) -> QLabel:
@@ -259,12 +277,19 @@ class _MasterList(QWidget):
         grid = QGridLayout()
         grid.setSpacing(6)
         self.buttons: dict[str, QPushButton] = {}
-        for i, (text, slot) in enumerate(buttons):
+        for text, slot in buttons:
             b = _small(text)
             b.clicked.connect(slot)
             self.buttons[text] = b
+        others = [b for t, b in self.buttons.items() if t != "Delete"]
+        for i, b in enumerate(others):
             grid.addWidget(b, i // 2, i % 2)
         lay.addLayout(grid)
+        delete = self.buttons.get("Delete")
+        if delete is not None:  # apart from the others and in red, so it isn't hit by mistake (UX-013)
+            delete.setObjectName("danger")
+            lay.addSpacing(16)
+            lay.addWidget(delete, 0, Qt.AlignmentFlag.AlignLeft)
 
     def fill(self, labels: Sequence[str], current: int) -> None:
         """Replace the rows, keeping ``current`` selected."""
@@ -282,9 +307,72 @@ class _MasterList(QWidget):
             it.setText(text)
 
 
+# The mouse wheel and touchpad (UX-003); the stamp screen uses these too. A scroll already moving the page keeps
+# moving it when a drop-down or number box slides under the pointer; a scroll
+# that starts on one, after the page has been still for WHEEL_LATCH_S, changes it.
+# A scroll area passed to watch_page_scroll() notes when it last scrolled; the boxes check that.
+
+_page_scrolled_at = 0.0
+
+
+class _PageWheelClock(QObject):
+    """Notes when a scroll area's page last got the wheel."""
+
+    def eventFilter(self, _obj: QObject, event: QEvent) -> bool:  # noqa: N802 - Qt name
+        """Note the time; never stops the event."""
+        if event.type() == QEvent.Type.Wheel:
+            global _page_scrolled_at
+            _page_scrolled_at = time.monotonic()
+        return False
+
+
+def _page_is_scrolling() -> bool:
+    return time.monotonic() - _page_scrolled_at < WHEEL_LATCH_S
+
+
+def watch_page_scroll(area: QScrollArea) -> None:
+    """Let the boxes below know when this scroll area's page is scrolling."""
+    area.wheel_clock = _PageWheelClock(area)  # type: ignore[attr-defined]  # kept alive with the area
+    area.viewport().installEventFilter(area.wheel_clock)  # type: ignore[attr-defined]
+
+
+class PageScrollCombo(QComboBox):
+    """A combo box that lets a scroll already moving the page go past it."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # the wheel doesn't give it focus
+
+    def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802 - Qt name
+        """Pass the wheel to the page while it's scrolling; otherwise change the value."""
+        if _page_is_scrolling():
+            event.ignore()
+        else:
+            super().wheelEvent(event)
+
+
+class PageScrollSpin(QDoubleSpinBox):
+    """A number box that lets a scroll already moving the page go past it.
+
+    A plain one takes the wheel even at its limit, where nothing changes, so the
+    page just stopped scrolling.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # the wheel doesn't give it focus
+
+    def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802 - Qt name
+        """Pass the wheel to the page while it's scrolling; otherwise change the value."""
+        if _page_is_scrolling():
+            event.ignore()
+        else:
+            super().wheelEvent(event)
+
+
 def _combo() -> QComboBox:
     """A combo box that can shrink with the form instead of forcing it wider."""
-    box = QComboBox()
+    box = PageScrollCombo()
     box.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
     box.setMinimumContentsLength(8)
     return box
@@ -296,6 +384,7 @@ def _scroll(widget: QWidget) -> QScrollArea:
     area.setWidgetResizable(True)
     area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
     area.setWidget(widget)
+    watch_page_scroll(area)
     return area
 
 
@@ -418,14 +507,14 @@ class StampEditor(QFrame):
         self.direction.setCurrentIndex(max(0, self.direction.findData(data.get("direction", "along-top"))))
         self.direction.currentIndexChanged.connect(
             lambda _i: self._set("direction", self.direction.currentData()))
-        self.margin = QDoubleSpinBox()
+        self.margin = PageScrollSpin()
         self.margin.setRange(0.25, 3.0)
         self.margin.setSingleStep(0.05)
         self.margin.setDecimals(2)
         self.margin.setSuffix(" in")
         self.margin.setValue(float(data.get("margin_in", 0.25)))
         self.margin.valueChanged.connect(lambda v: self._set("margin_in", round(v, 2)))
-        self.size = QDoubleSpinBox()
+        self.size = PageScrollSpin()
         self.size.setRange(6.0, 24.0)
         self.size.setSingleStep(0.5)
         self.size.setDecimals(1)
@@ -490,12 +579,14 @@ class StampEditor(QFrame):
 
     def _remove(self) -> None:
         try:
+            self.page.draft.snapshot(f"stamp {self.index + 1}")
             self.page.draft.remove_stamp(self.profile, self.index)
         except DraftRefused as e:
             self.page.owner.say(str(e))
             return
         self.page.rebuild_detail()
         self.page.owner.changed()
+        self.page.owner.say(f"Removed stamp {self.index + 1}.", undo=True)
 
     def refresh_example(self, config: Config | None, profile: Profile | None) -> None:
         """Show the stamp text as it would print on page 1 of 3, with made-up values."""
@@ -581,14 +672,15 @@ class ProfilesPage(_Page):
         self._structure(self.draft.duplicate_profile(self.current))
 
     def _delete(self) -> None:
-        name = self.draft.profiles[self.current]["name"]
+        name = _shown(self.draft.profiles[self.current]["name"])
         try:
+            self.draft.snapshot(f'"{name}"')
             self.draft.delete_profile(self.current)
         except DraftRefused as e:
             self.owner.say(str(e))
             return
-        self.owner.say(f'Deleted the profile "{name}". Cancel to undo.')
         self._structure(max(0, self.current - 1))
+        self.owner.say(f'Deleted the profile "{name}".', undo=True)
 
     def _make_default(self) -> None:
         self.draft.set_default(self.current)
@@ -724,11 +816,16 @@ class ProfilesPage(_Page):
         v.textEdited.connect(lambda _t: self._meta_changed())
 
         def remove() -> None:
+            name = _shown(k.text().strip())
+            if name:  # an unnamed row isn't in the draft, so there's nothing to undo
+                self.draft.snapshot(f'"{name}"')
             self.meta.remove(pair)
             for w in (k, v, rm):
                 w.hide()
                 w.deleteLater()
             self._meta_changed()
+            if name:
+                self.owner.say(f'Removed the property "{name}".', undo=True)
 
         rm.clicked.connect(remove)
         row.addWidget(k, 2)
@@ -875,9 +972,12 @@ class FormatEditor(QFrame):
             _restyle(self.explanation, "msgBad")
 
     def _remove(self) -> None:
+        self.page.draft.snapshot(f"rule {self.index + 1}")
         del self.page.draft.fields[self.key]["formats"][self.index]
         self.page.rebuild_detail()
         self.page.owner.changed()
+        self.page.owner.say(
+            f'Removed rule {self.index + 1} from "{_shown(self.page.draft.label(self.key))}".', undo=True)
 
 
 def _regex_problem(text: str) -> str:
@@ -950,16 +1050,17 @@ class FieldsPage(_Page):
         self.label_edit.selectAll()
 
     def _delete(self) -> None:
-        label = self.draft.label(self.key)
+        label = _shown(self.draft.label(self.key))
         try:
+            self.draft.snapshot(f'"{label}"')
             self.draft.delete_field(self.key)
         except DraftRefused as e:
             self.owner.say(str(e))
             return
-        self.owner.say(f"Deleted the field {label}. Cancel to undo.")
         self.current = max(0, self.current - 1)
         self.rebuild()
         self.owner.changed()
+        self.owner.say(f'Deleted the field "{label}".', undo=True)
 
     def rebuild_detail(self) -> None:
         """Rebuild the form for the selected field."""
@@ -1100,9 +1201,22 @@ class FieldsPage(_Page):
         self.owner.changed()
 
     def _retype(self, kind: str) -> None:
+        spec = self.draft.fields[self.key]
+        rules = len(spec.get("formats", [])) if kind != "text" else 0
+        fill = kind != "text" and bool(spec.get("from_filename"))
+        label = _shown(self.draft.label(self.key))
+        if rules or fill:  # only text fields keep these (UX-003)
+            self.draft.snapshot(f'"{label}"')
         self.draft.set_field_type(self.key, kind)
         self.rebuild_detail()
         self.owner.changed()
+        if rules or fill:
+            lost = []
+            if rules:
+                lost.append(f"{rules} rule was removed." if rules == 1 else f"{rules} rules were removed.")
+            if fill:
+                lost.append('"Fill in from the file name" was turned off.')
+            self.owner.say(f'Changed "{label}" to {dict(_TYPES)[kind]}. ' + " ".join(lost), undo=True)
 
     def _normalize_changed(self) -> None:
         self.draft.fields[self.key]["normalize"] = [s for s, _ in _NORMALIZERS if self.normalizers[s].isChecked()]
@@ -1207,14 +1321,15 @@ class ListsPage(_Page):
             return
         name = self.names[self.current]
         try:
+            self.draft.snapshot(f'"{_shown(name)}"')
             self.draft.delete_taxonomy(name)
         except DraftRefused as e:
             self.owner.say(str(e))
             return
-        self.owner.say(f'Deleted the list "{name}". Cancel to undo.')
         self.current = max(0, self.current - 1)
         self.rebuild()
         self.owner.changed()
+        self.owner.say(f'Deleted the list "{_shown(name)}".', undo=True)
 
     def rebuild_detail(self) -> None:
         """Rebuild the form for the selected list."""
@@ -1289,10 +1404,13 @@ class ListsPage(_Page):
     def _remove_item(self) -> None:
         row = self.items.currentRow()
         if row >= 0:
+            choice = _shown(self.items.item(row).text())
+            self.draft.snapshot(f'"{choice}"')
             self.items.blockSignals(True)
             self.items.takeItem(row)
             self.items.blockSignals(False)
             self._write()
+            self.owner.say(f'Removed the choice "{choice}".', undo=True)
 
     def _move(self, step: int) -> None:
         row = self.items.currentRow()
@@ -1541,10 +1659,20 @@ class ProfileSettings(QWidget):
         self.problem_box.hide()
         fl.addWidget(self.problem_box)
         self.status = _label("", "help")
+        self.status.setTextFormat(Qt.TextFormat.PlainText)  # it can hold names from config
         self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.status_box = _BoundedText(self.status, STATUS_LINES)
         self.status_box.hide()
-        fl.addWidget(self.status_box)
+        status_row = QHBoxLayout()
+        status_row.addWidget(self.status_box, 1)
+        self.undo_button = QPushButton("Undo")
+        self.undo_button.setObjectName("link")
+        self.undo_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.undo_button.setAccessibleName("Undo the last removal")
+        self.undo_button.clicked.connect(self.undo)
+        self.undo_button.hide()
+        status_row.addWidget(self.undo_button, 0, Qt.AlignmentFlag.AlignTop)
+        fl.addLayout(status_row)
         buttons = QHBoxLayout()
         buttons.addStretch(1)
         self.cancel_button = QPushButton("Cancel")
@@ -1647,11 +1775,26 @@ class ProfileSettings(QWidget):
         """True when "Save changes" is enabled."""
         return self.save_button.isEnabled()
 
-    def say(self, text: str) -> None:
-        """A short message above the buttons (scrolls past a few lines)."""
+    def say(self, text: str, *, undo: bool = False) -> None:
+        """A short message above the buttons (scrolls past a few lines).
+
+        ``undo`` shows the Undo link beside it while the draft has a snapshot.
+        Any later message, including the blank one every edit makes, hides it.
+        """
         self.status.setText(text)
         self.status_box.setVisible(bool(text))
         self.status_box.refresh()
+        self.undo_button.setVisible(bool(text) and undo and self.draft.can_undo)
+
+    def undo(self) -> None:
+        """Put back what the last removal or type change took away."""
+        label = self.draft.undo()
+        if label is None:
+            return
+        self._local.clear()  # the form is rebuilt from the draft, which can't hold a duplicate property
+        self.show_section(self.nav.currentRow())
+        self.changed()
+        self.say(f"Restored {label}.")
 
     # ------------------------------------------------------------ preview
 

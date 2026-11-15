@@ -1,7 +1,8 @@
 """Colors and the application style sheet.
 
 Cool blue-grey ground, white surfaces. Stamp-ink blue is kept for what ends
-up on the document and for the main action; amber is for warnings.
+up on the document and for the main action; amber is for warnings; red
+is only for Delete.
 Sizes are in device-independent pixels, so they scale with Windows display
 scaling (125%, 150%).
 """
@@ -29,6 +30,7 @@ COLORS = {
     "amber_icon": "#8A4B08",
     "amber_field": "#C27A1A",
     "disabled_bg": "#DDE2E9",
+    "danger": "#B42318",  # Delete buttons; 6.6:1 on white
 }
 
 _C = COLORS
@@ -113,6 +115,7 @@ QPushButton#link {{
 }}
 QPushButton#link:focus {{ border: 2px solid {_C["ink"]}; border-radius: 4px; }}
 QPushButton#small {{ min-height: 30px; padding: 0 12px; font-size: 14px; }}
+QPushButton#danger {{ min-height: 30px; padding: 0 12px; font-size: 14px; color: {_C["danger"]}; }}
 QPushButton#choice {{
     min-height: 44px; padding: 4px 10px; font-size: 14px; font-weight: 500; border-radius: 10px;
 }}

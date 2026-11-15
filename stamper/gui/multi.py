@@ -69,6 +69,7 @@ from ..handlers.batch import BatchCheck, BatchItem, BatchOutcome, Status, check_
 from ..handlers.combine import CombinedFile, CombineInput, combine_pdfs
 from .engine import EngineClient, EngineFailure, TaskContext
 from .help import help_button
+from .profiles import PageScrollCombo
 from .services import Services
 from .stamp_dialog import StampDialog, _notice, _wrap_label
 
@@ -834,7 +835,7 @@ class CombineDialog(_MultiMixin, StampDialog):
         row = QHBoxLayout()
         jump = QLabel("Go to file")
         jump.setObjectName("muted")
-        self.jump_combo = QComboBox()
+        self.jump_combo = PageScrollCombo()
         self.jump_combo.setAccessibleName("Go to file")
         self.jump_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         self.jump_combo.setMinimumContentsLength(14)

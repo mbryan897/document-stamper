@@ -6,6 +6,7 @@ temp folders too (conftest). Synthetic configs only.
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import shutil
@@ -14,14 +15,18 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtGui import QWheelEvent
+from PySide6.QtWidgets import QApplication, QWidget
 from pytestqt.qtbot import QtBot
 
 from stamper.core.config import load_config
 from stamper.core.locations import AppState, Locations, SourceKind, backup_path, load_state, save_state
 from stamper.gui.app import make_app
 from stamper.gui.main_window import MainWindow
+from stamper.gui import profiles
 from stamper.gui.profiles import ProfileSettings
+from stamper.gui.theme import COLORS, STYLE_SHEET
 from tests.gui_support import (  # noqa: F401
     TODAY,
     WAIT_MS,
@@ -629,3 +634,226 @@ def test_a_file_still_opening_doesnt_replace_settings(qtbot: QtBot, records_wind
     s = _settings(w)  # before the inspect result arrives
     qtbot.wait(1500)  # long enough for the inspect to finish
     assert w.stack.currentWidget() is s and w.dialog is None
+
+
+# ------------------------------------------------------------ undo, wheel, Delete (UX-002, UX-003, UX-013)
+
+
+def _wheel(widget: QWidget) -> QWheelEvent:
+    """Send one notch of the mouse wheel to a widget, as if the pointer were over it."""
+    pos = QPointF(widget.width() / 2, widget.height() / 2)
+    event = QWheelEvent(pos, QPointF(widget.mapToGlobal(pos.toPoint())), QPoint(0, 0), QPoint(0, -120),
+                        Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase,
+                        False)
+    QApplication.sendEvent(widget, event)
+    return event
+
+
+def test_delete_field_then_undo_restores_it(records_window: MainWindow) -> None:
+    s = _settings(records_window)
+    s.show_section(1)
+    page = s.fields_page
+    page.master.buttons["Add field"].click()
+    before = copy.deepcopy(s.draft.data)
+    page.master.buttons["Delete"].click()
+    assert "new_field" not in s.draft.fields
+    # The message outlives the changed() the delete makes, with Undo beside it.
+    assert s.status.text() == 'Deleted the field "New field".'
+    assert s.status_box.isVisible() and s.undo_button.isVisible()
+    s.undo_button.click()
+    assert s.draft.data == before
+    assert "New field" in [page.master.list.item(i).text() for i in range(page.master.list.count())]
+    assert s.status.text() == 'Restored "New field".'
+    assert not s.undo_button.isVisible() and not s.draft.can_undo
+
+
+def test_undo_is_offered_only_until_the_next_edit(records_window: MainWindow) -> None:
+    """After a delete and another edit, Undo is gone from the screen. The draft's snapshot
+    would put back the whole draft as it was before the delete, the later edit included,
+    which is why the screen doesn't offer it any more."""
+    s = _settings(records_window)
+    s.show_section(1)
+    page = s.fields_page
+    page.master.buttons["Add field"].click()
+    before = copy.deepcopy(s.draft.data)
+    page.master.buttons["Delete"].click()
+    page.select_key("doc_title")
+    page.required.toggle()  # another edit
+    assert s.status.text() == "" and not s.undo_button.isVisible()
+    assert s.draft.fields["doc_title"]["required"] != before["fields"]["doc_title"]["required"]
+    s.undo()  # still possible in code: back to the snapshot, the later edit with it
+    assert s.draft.data == before
+
+
+def test_delete_profile_message_and_undo(records_window: MainWindow) -> None:
+    s = _settings(records_window)
+    page = s.profiles_page
+    page.master.buttons["Add"].click()
+    s.draft.profiles[1]["name"] = "\u202e<b>x</b>" + "n" * 200  # as a hand-edited config.json could hold
+    page.rebuild()
+    before = copy.deepcopy(s.draft.data)
+    page.master.buttons["Delete"].click()
+    msg = s.status.text()
+    assert s.status.textFormat() == Qt.TextFormat.PlainText
+    assert msg.startswith('Deleted the profile "⟨U+202E⟩<b>x</b>nnn') and msg.endswith('…".') and len(msg) < 120
+    assert s.undo_button.isVisible()
+    s.undo_button.click()
+    assert s.draft.data == before
+    assert len(s.draft.profiles) == 2
+
+
+def test_refused_delete_offers_no_undo(records_window: MainWindow) -> None:
+    s = _settings(records_window)
+    s.profiles_page.master.buttons["Delete"].click()
+    assert "at least one profile" in s.status.text()
+    assert not s.undo_button.isVisible()
+
+
+def test_each_remove_button_can_be_undone(qtbot: QtBot, records_window: MainWindow) -> None:
+    s = _settings(records_window)
+    page = s.profiles_page
+    # A stamp
+    page._add_stamp()
+    before = copy.deepcopy(s.draft.data)
+    page.stamp_editors[1].remove.click()
+    assert s.status.text() == "Removed stamp 2." and s.undo_button.isVisible()
+    s.undo_button.click()
+    assert s.draft.data == before and s.status.text() == "Restored stamp 2."
+    # A document property
+    page._add_meta_row("case", "{identifier}")
+    page._meta_changed()
+    before = copy.deepcopy(s.draft.data)
+    rm = page.meta_rows.itemAt(page.meta_rows.count() - 1).layout().itemAt(2).widget()
+    rm.click()
+    assert s.status.text() == 'Removed the property "case".' and s.undo_button.isVisible()
+    s.undo_button.click()
+    assert s.draft.data == before and [k.text() for k, _ in page.meta] == list(before["profiles"][0]["metadata"])
+    # A rule
+    s.show_section(1)
+    fields = s.fields_page
+    fields.select_key("identifier")
+    before = copy.deepcopy(s.draft.data)
+    fields.format_editors[0]._remove()
+    assert s.status.text().startswith("Removed rule 1 from ") and s.undo_button.isVisible()
+    s.undo_button.click()
+    assert s.draft.data == before and len(fields.format_editors) == len(before["fields"]["identifier"]["formats"])
+    # A choice
+    s.show_section(2)
+    lists = s.lists_page
+    lists.items.setCurrentRow(0)
+    first = lists.items.item(0).text()
+    before = copy.deepcopy(s.draft.data)
+    lists._remove_item()
+    assert s.status.text() == f'Removed the choice "{first}".' and s.undo_button.isVisible()
+    s.undo_button.click()
+    assert s.draft.data == before and lists.items.item(0).text() == first
+
+
+def test_type_change_that_drops_rules_says_so_and_can_be_undone(records_window: MainWindow) -> None:
+    s = _settings(records_window)
+    s.show_section(1)
+    page = s.fields_page
+    page.master.buttons["Add field"].click()
+    spec = s.draft.fields["new_field"]
+    spec["formats"] = [{"name": None, "pattern": "##", "regex": None},
+                       {"name": None, "pattern": "###", "regex": None}]
+    spec["from_filename"] = True
+    page.rebuild_detail()
+    before = copy.deepcopy(s.draft.data)
+    page.type_combo.setCurrentIndex(page.type_combo.findData("date"))
+    assert s.draft.fields["new_field"]["formats"] == [] and not s.draft.fields["new_field"]["from_filename"]
+    assert s.status.text() == ('Changed "New field" to Date. 2 rules were removed. '
+                               '"Fill in from the file name" was turned off.')
+    assert s.undo_button.isVisible()
+    s.undo_button.click()
+    assert s.draft.data == before
+    assert page.type_combo.currentData() == "text" and len(page.format_editors) == 2
+    assert page.from_filename.isChecked()
+    assert s.status.text() == 'Restored "New field".'
+
+
+def test_type_change_that_drops_nothing_says_nothing(records_window: MainWindow) -> None:
+    s = _settings(records_window)
+    s.show_section(1)
+    page = s.fields_page
+    page.select_key("doc_title")
+    page.type_combo.setCurrentIndex(page.type_combo.findData("date"))
+    assert s.status.text() == "" and not s.undo_button.isVisible() and not s.draft.can_undo
+
+
+def _page_scrolls(page: QWidget) -> None:
+    """A wheel notch on the page itself, as when it's scrolling."""
+    area = page.detail.parentWidget().parentWidget()  # type: ignore[attr-defined]
+    _wheel(area.viewport())
+
+
+def _page_still(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The page hasn't scrolled for longer than the latch."""
+    monkeypatch.setattr(profiles, "_page_scrolled_at", 0.0)
+
+
+def test_scroll_already_moving_the_page_passes_over_a_combo(records_window: MainWindow) -> None:
+    s = _settings(records_window)
+    s.show_section(1)
+    page = s.fields_page
+    page.select_key("doc_title")
+    combo = page.type_combo
+    assert combo.focusPolicy() == Qt.FocusPolicy.StrongFocus
+    combo.setFocus()  # focus doesn't matter: it kept focus after use and still changed (Windows touchpad)
+    for _ in range(3):  # the page was scrolling, then the combo slid under the pointer
+        _page_scrolls(page)
+        event = _wheel(combo)
+        assert not event.isAccepted()  # passed on, so the page goes on scrolling
+    assert combo.currentData() == "text" and s.draft.fields["doc_title"]["type"] == "text"
+
+
+def test_scroll_that_starts_on_a_combo_changes_it(records_window: MainWindow,
+                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+    s = _settings(records_window)
+    s.show_section(1)
+    page = s.fields_page
+    page.select_key("doc_title")
+    _page_still(monkeypatch)
+    event = _wheel(page.type_combo)
+    assert event.isAccepted() and s.draft.fields["doc_title"]["type"] != "text"
+    _wheel(page.type_combo)  # the same scroll goes on changing it: the page didn't get it
+    assert s.draft.fields["doc_title"]["type"] == "date"
+
+
+def test_scroll_passes_over_a_number_box_at_its_limit(records_window: MainWindow,
+                                                      monkeypatch: pytest.MonkeyPatch) -> None:
+    s = _settings(records_window)
+    page = s.profiles_page
+    margin = page.stamp_editors[0].margin
+    assert margin.focusPolicy() == Qt.FocusPolicy.StrongFocus
+    _page_scrolls(page)
+    event = _wheel(margin)  # 0.25 in is the minimum; a plain box took this and the page stopped
+    assert not event.isAccepted()
+    _page_still(monkeypatch)
+    size = page.stamp_editors[0].size
+    before = size.value()
+    _wheel(size)  # one notch down, started on the box
+    assert size.value() < before
+
+
+def test_delete_is_a_danger_button_on_its_own_row(records_window: MainWindow) -> None:
+    s = _settings(records_window)
+    for section, page in ((0, s.profiles_page), (1, s.fields_page), (2, s.lists_page)):
+        s.show_section(section)
+        QApplication.processEvents()
+        delete = page.master.buttons["Delete"]
+        others = [b for t, b in page.master.buttons.items() if t != "Delete"]
+        assert delete.objectName() == "danger"
+        assert all(b.objectName() == "small" for b in others)
+        assert delete.y() - max(b.geometry().bottom() + 1 for b in others) >= 16
+        assert delete.height() == others[0].height()
+
+
+def test_danger_color_contrast() -> None:
+    def lum(hex_color: str) -> float:
+        rgb = [int(hex_color[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+        lin = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in rgb]
+        return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+
+    assert (1.05) / (lum(COLORS["danger"]) + 0.05) >= 4.5
+    assert "QPushButton#danger" in STYLE_SHEET

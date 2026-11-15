@@ -58,6 +58,7 @@ from .page_numbers import (
     main_stamp_index,
     page_number_option,
 )
+from .profiles import PageScrollCombo, watch_page_scroll
 from .services import Services
 from .wrap_label import WrapAnywhereLabel
 
@@ -363,6 +364,7 @@ class StampDialog(QWidget):
         scroll.setObjectName("surface")
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        watch_page_scroll(scroll)  # a scroll moving the panel passes over its drop-downs (UX-003)
         body = QWidget()
         body.setObjectName("surface")
         form = QVBoxLayout(body)
@@ -416,7 +418,7 @@ class StampDialog(QWidget):
 
         editor: QWidget
         if spec.type == "choice":
-            combo = QComboBox()
+            combo = PageScrollCombo()
             combo.addItem("Choose…" if spec.required else "(none)", "")
             assert spec.taxonomy is not None
             for item in self.config.taxonomies[spec.taxonomy]:
@@ -545,7 +547,7 @@ class StampDialog(QWidget):
 
         pn_label = QLabel("Page numbers")
         pn_label.setObjectName("muted")
-        self.page_numbers_combo = QComboBox()
+        self.page_numbers_combo = PageScrollCombo()
         self.page_numbers_combo.setAccessibleName("Page numbers")
         pn_label.setBuddy(self.page_numbers_combo)
         self.page_numbers_combo.activated.connect(self._page_numbers_picked)

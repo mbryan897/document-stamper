@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from datetime import date
 
 import pytest
@@ -217,3 +218,44 @@ def test_diff_summary() -> None:
 def test_diff_summary_same() -> None:
     cfg = load_config(RECORDS_CONFIG)
     assert diff_summary(cfg, cfg) == ["Same profiles, fields and lists; settings inside them may differ."]
+
+
+# ------------------------------------------------------------ undo (UX-002, UX-003)
+
+
+def test_undo_puts_back_the_snapshot(draft: ConfigDraft) -> None:
+    before = copy.deepcopy(draft.data)
+    assert not draft.can_undo and draft.undo() is None
+    draft.snapshot('"Title"')
+    draft.data["fields"]["doc_title"]["label"] = "Changed"  # the snapshot is a copy, not a view
+    del draft.profiles[0]["stamps"][0]
+    assert draft.can_undo
+    assert draft.undo() == '"Title"'
+    assert draft.data == before
+    assert not draft.can_undo and draft.undo() is None  # one level only
+
+
+def test_snapshot_replaces_the_earlier_one(draft: ConfigDraft) -> None:
+    draft.snapshot("first")
+    draft.add_field()
+    middle = copy.deepcopy(draft.data)
+    draft.snapshot("second")
+    draft.add_field()
+    assert draft.undo() == "second" and draft.data == middle
+
+
+def test_undo_also_drops_edits_made_after_the_snapshot(draft: ConfigDraft) -> None:
+    before = copy.deepcopy(draft.data)
+    key = draft.add_field()
+    draft.snapshot("x")
+    draft.delete_field(key)
+    draft.fields["doc_title"]["required"] = not draft.fields["doc_title"]["required"]
+    draft.undo()
+    assert key in draft.fields  # the removal is undone…
+    assert draft.fields["doc_title"]["required"] == before["fields"]["doc_title"]["required"]  # …and the edit after it
+
+
+def test_import_forgets_the_snapshot(draft: ConfigDraft) -> None:
+    draft.snapshot("x")
+    draft.replace(load_config(DEFAULT_CONFIG).model_dump(mode="json"))
+    assert not draft.can_undo
