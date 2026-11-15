@@ -19,7 +19,7 @@ from stamper import sendto
 from stamper.core.filenames import visible
 from stamper.core.locations import AppState, Locations, SourceKind, save_state
 from stamper.gui.app import make_app
-from stamper.gui.main_window import MINIMUM_SIZE, MainWindow
+from stamper.gui.main_window import MINIMUM_SIZE, SESSION_SHOWN, MainWindow
 from stamper.gui.profiles import ProfileSettings
 from tests.gui_support import TODAY, FakeServices, close_window, fake  # noqa: F401
 from tests.stamping import DEFAULT_CONFIG, RECORDS_CONFIG
@@ -231,6 +231,32 @@ def test_drop_screen_with_the_link_fits_at_minimum(qtbot: QtBot, fake: FakeServi
         for b in (w.drop.choose_button, w.drop.setup_button, w.drop.sendto_link):
             top = b.mapTo(w, QPoint(0, 0)).y()
             assert b.isVisible() and top >= 0 and top + b.height() <= w.height()
+        widget: QWidget = w.drop
+        assert widget.height() >= widget.minimumSizeHint().height()
+    finally:
+        close_window(w)
+
+
+@pytest.mark.usefixtures("on_windows")
+def test_drop_screen_with_everything_showing_fits_at_minimum(qtbot: QtBot, fake: FakeServices, locs: Locations,
+                                                             monkeypatch: pytest.MonkeyPatch,
+                                                             tmp_path: Path) -> None:
+    """The Send to link, the partial-copy notice and a full session list at once (UX-035, D-093)."""
+    _status(monkeypatch, sendto.SendToState.MISSING)
+    w = _window(qtbot, fake, locs)
+    try:
+        for i in range(SESSION_SHOWN):
+            w._add_to_session(f"99-2026-99990{i}_return_with_a_long_synthetic_name.pdf", tmp_path / f"{i}.pdf")
+        w.show_drop()
+        w.drop.show_leftovers("A partial copy was left behind when a save stopped: synthetic.pdf", 1)
+        w.resize(MINIMUM_SIZE)
+        qtbot.waitUntil(lambda: w.size() == MINIMUM_SIZE)
+        assert len(w.drop.session_buttons) == SESSION_SHOWN
+        d = w.drop
+        for b in (d.choose_button, d.setup_button, d.sendto_link, d.leftover_delete, d.leftover_keep,
+                  d.session_buttons[0]):
+            top = b.mapTo(w, QPoint(0, 0)).y()
+            assert b.isVisible() and top >= 0 and top + b.height() <= w.height(), b.text()
         widget: QWidget = w.drop
         assert widget.height() >= widget.minimumSizeHint().height()
     finally:
