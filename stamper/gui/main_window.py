@@ -1053,6 +1053,7 @@ class MainWindow(QMainWindow):
         dialog = BatchDialog(config=self.config, profile=self.profile, files=files,
                              accept_signature_loss=accept_signature, accept_restrictions=accept_restrictions,
                              engine=self.engine, handler=self.handler, services=self.services, today=self.today)
+        dialog.preselect(self.state.batch_folder, self.state.batch_in_one_folder)
         dialog.cancelled.connect(lambda: self._back_to_files())
         dialog.batch_saved.connect(self._on_batch_saved)
         dialog.edited.connect(self.update_title)
@@ -1064,6 +1065,12 @@ class MainWindow(QMainWindow):
         return dialog
 
     def _on_batch_saved(self, outcomes: list[object]) -> None:
+        dialog = self.dialog
+        if isinstance(dialog, BatchDialog):  # remember where the copies went (UX-039); never field values
+            self.state.batch_in_one_folder = dialog.out_folder is not None
+            if dialog.out_folder is not None:
+                self.state.batch_folder = str(dialog.out_folder)
+            save_state(self.state, self.locs)
         self._close_dialog()
         self.batch_saved.show_outcomes(outcomes)  # type: ignore[arg-type]
         self.stack.setCurrentWidget(self.batch_saved)
