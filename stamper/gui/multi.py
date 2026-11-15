@@ -30,6 +30,7 @@ from datetime import date
 from pathlib import Path
 
 from PySide6.QtCore import QModelIndex, Qt, Signal
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
@@ -290,13 +291,8 @@ class FilesScreen(QWidget):
         head = QHBoxLayout()
         self.title = _title("Several files")
         head.addWidget(self.title, 1)
-        self.back_button = QPushButton("Back")
-        self.back_button.setObjectName("link")
-        self.back_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.back_button.clicked.connect(self.back.emit)
         self.help_button = help_button()
         head.addWidget(self.help_button, 0, Qt.AlignmentFlag.AlignTop)
-        head.addWidget(self.back_button, 0, Qt.AlignmentFlag.AlignTop)
         lay.addLayout(head)
         self.lead = _wrap_label("Put the files in order, then choose what to do with them.", "lead")
         lay.addWidget(self.lead)
@@ -328,6 +324,10 @@ class FilesScreen(QWidget):
         self.list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.list.model().rowsMoved.connect(lambda *_a: self._renumber())
         self.list.currentRowChanged.connect(lambda _r: self._update_buttons())
+        for keys, action in ((Qt.Modifier.ALT | Qt.Key.Key_Up, lambda: self.move(-1)),  # UX-042
+                             (Qt.Modifier.ALT | Qt.Key.Key_Down, lambda: self.move(1)),
+                             (Qt.Key.Key_Delete, self.remove_current)):
+            QShortcut(QKeySequence(keys), self.list, action, context=Qt.ShortcutContext.WidgetShortcut)
         mid.addWidget(self.list, 1)
         side = QVBoxLayout()
         side.setSpacing(8)
@@ -351,7 +351,7 @@ class FilesScreen(QWidget):
 
         self.choices = QWidget()
         cl = QGridLayout(self.choices)
-        cl.setContentsMargins(0, 4, 0, 0)
+        cl.setContentsMargins(0, 0, 0, 0)
         cl.setHorizontalSpacing(16)
         cl.setVerticalSpacing(4)
         self.combine_button = QPushButton("Combine into one file")
@@ -366,13 +366,23 @@ class FilesScreen(QWidget):
         cl.addWidget(_wrap_label("One stamped copy of each file, same stamp on each.", "help"), 1, 1)
         cl.setColumnStretch(0, 1)
         cl.setColumnStretch(1, 1)
-        lay.addWidget(self.choices)
 
         self.single_button = QPushButton("")
         self.single_button.setObjectName("primary")
         self.single_button.clicked.connect(self._single)
         self.single_button.hide()
-        lay.addWidget(self.single_button, 0, Qt.AlignmentFlag.AlignLeft)
+
+        # One bottom row; the exit sits where Cancel does on the stamp screen (UX-029).
+        buttons = QHBoxLayout()
+        buttons.setContentsMargins(0, 4, 0, 0)
+        buttons.setSpacing(16)
+        buttons.addStretch(0)  # takes the room only while the choices are hidden
+        buttons.addWidget(self.choices, 1)
+        self.cancel_button = QPushButton("&Cancel")
+        self.cancel_button.clicked.connect(self.back.emit)
+        buttons.addWidget(self.cancel_button, 0, Qt.AlignmentFlag.AlignTop)
+        buttons.addWidget(self.single_button, 0, Qt.AlignmentFlag.AlignTop)
+        lay.addLayout(buttons)
 
         _centre(outer, card)
 
