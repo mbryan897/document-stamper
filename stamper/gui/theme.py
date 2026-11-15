@@ -115,6 +115,12 @@ QPushButton#link {{
     padding: 0 4px; min-height: 28px; font-size: 15px;
 }}
 QPushButton#link:focus {{ border: 2px solid {_C["ink"]}; border-radius: 4px; }}
+QPushButton#mutedLink {{
+    border: 0; background: transparent; color: {_C["muted"]}; text-decoration: underline;
+    padding: 0 4px; min-height: 28px; font-size: 14px;
+}}
+QPushButton#mutedLink:hover {{ color: {_C["ink"]}; }}
+QPushButton#mutedLink:focus {{ border: 2px solid {_C["ink"]}; border-radius: 4px; }}
 QPushButton#small {{ min-height: 30px; padding: 0 12px; font-size: 14px; }}
 QPushButton#danger {{ min-height: 30px; padding: 0 12px; font-size: 14px; color: {_C["danger"]}; }}
 QPushButton#choice {{
