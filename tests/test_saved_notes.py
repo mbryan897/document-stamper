@@ -64,6 +64,8 @@ def _shown(widget: QLabel | object) -> list[str]:
     UNPROTECTED_NOTE,
     f"{COMBINED_UNPROTECTED_NOTE} Protected files in it: a.pdf.",
     'Document property Title was "Old" in the original; the copy has "New".',
+    "On pages 3, 7 the white box covers text that was already on the page. "
+    "Choose another position under Placement, or turn off the white box.",
 ])
 def test_check_the_copy_notes(note: str) -> None:
     assert pdf.needs_check(note)
@@ -72,6 +74,8 @@ def test_check_the_copy_notes(note: str) -> None:
 @pytest.mark.parametrize("note", [
     SHRINK[0], PROPS, "This file has 2,500 pages; checking and saving take longer.",
     "The original has XMP metadata, which wasn't updated; only the document properties were.",
+    "On page 1 a form field covers part of the stamp and is drawn on top of it. "
+    "Choose another position under Placement to avoid it.",  # grouped in the GUI; starts "On page" too
 ])
 def test_other_notes(note: str) -> None:  # passes only once needs_check exists
     assert not pdf.needs_check(note)
@@ -223,4 +227,4 @@ def test_batch_check_lists_a_passing_files_note(qtbot: QtBot, window: MainWindow
     assert "• mixed_sizes.pdf: Page 4, stamp 1: font reduced" in text
     assert PROPERTIES_NOTE_PREFIX not in text
     texts = _shown(window.batch_saved.rows_widget)
-    assert "Saved, with notes (1)" in texts and "Saved" in texts
+    assert "Saved, with notes (2)" in texts and "Saved" in texts  # shrunk, and the box covers the receipt's title

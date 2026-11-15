@@ -13,6 +13,7 @@ from pytestqt.qtbot import QtBot
 from stamper.gui import profiles
 from stamper.gui.main_window import MainWindow
 from stamper.gui.page_numbers import WITH_IDENTIFIER
+from stamper.handlers.pdf import COVERS_TEXT_NOTE_END
 from tests.gui_support import (  # noqa: F401 - fixtures
     FakeServices,
     choose,
@@ -309,7 +310,8 @@ def test_shrink_warning_shown_before_saving(qtbot: QtBot, window: MainWindow, co
     type_into(qtbot, d, "identifier", DASHED)
     choose(d, "doc_type", "Court order")
     wait_ready(qtbot, d)
-    assert d.plan_warnings() == ["Page 4, stamp 1: font reduced from 9 pt to 6 pt to fit."]
+    assert d.plan_warnings() == ["Page 4, stamp 1: font reduced from 9 pt to 6 pt to fit.",
+                                 "On page 4" + COVERS_TEXT_NOTE_END]  # the receipt's title (UX-004)
     assert d.save_button.isEnabled()
 
 
