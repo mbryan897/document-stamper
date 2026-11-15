@@ -20,7 +20,7 @@ The fields come from the profile shown under the title ("Profile: …"). Each fi
 
 - *Text*: type the value. The identifier field is shown in a font where 0 and O, 1 and l look different.
 - *Choice*: pick from the list. A required choice starts at "Choose…"; an optional one at "(none)".
-- *Date*: type the date in the format shown in the empty box, for example MM-DD-YYYY.
+- *Date*: type the date in the order shown in the empty box, for example MM-DD-YYYY. `/`, `.` and `-` all work between the parts, and a one-digit month or day is fine (1/7/2026); the date is saved and stamped in the box's format. The year needs as many digits as the format shows.
 
 Next to a field's name, "(optional)" means you can leave it empty, and "(not stamped)" means the value isn't printed on the pages. It's still used in the file name or the document properties, if the profile puts it there.
 

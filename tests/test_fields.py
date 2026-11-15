@@ -159,7 +159,8 @@ def test_choice_rejects_value_not_in_taxonomy(records: Config) -> None:
         (" 02-29-2024 ", True, "02-29-2024"),
         ("02-29-2025", False, None),
         ("2026-10-17", False, None),
-        ("10/17/2026", False, None),
+        ("10/17/2026", True, "10-17-2026"),  # UX-016
+        ("1.7.2026", True, "01-07-2026"),
         ("13-01-2026", False, None),
     ],
 )

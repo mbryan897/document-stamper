@@ -138,9 +138,70 @@ def test_date_format_round_trip(fmt: str, d: date, text: str) -> None:
     assert df.parse(text) == d
 
 
-@pytest.mark.parametrize("text", ["02-29-2025", "13-01-2026", "1-5-2026", "10-17-26", "", "10-17-2026 "])
+@pytest.mark.parametrize("text", ["02-29-2025", "13-01-2026", "10-17-26", "", "10-17-2026 "])
 def test_date_format_rejects(text: str) -> None:
     assert parse_date_format("MM-DD-YYYY").parse(text) is None
+
+
+# UX-016: separators and one-digit parts as people type them; the order and year come from the format.
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("10/17/2026", date(2026, 10, 17)),
+        ("10.17.2026", date(2026, 10, 17)),
+        ("1-7-2026", date(2026, 1, 7)),
+        ("1/7/2026", date(2026, 1, 7)),
+        ("01.07.2026", date(2026, 1, 7)),
+        ("10-7/2026", date(2026, 10, 7)),
+    ],
+)
+def test_date_format_accepts_typed_dates(text: str, expected: date) -> None:
+    df = parse_date_format("MM-DD-YYYY")
+    assert df.parse(text) == expected
+    assert df.format(expected) == expected.strftime("%m-%d-%Y")  # what is stored and stamped
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "13/01/2026",  # no day-first retry for a US format
+        "02/30/2026",  # not a real date
+        "10-17-26",  # two-digit year where the format says YYYY
+        "2026-10-17",  # ISO isn't accepted for a US format
+        "\uff11\uff10-\uff11\uff17-\uff12\uff10\uff12\uff16",  # fullwidth digits (D-033)
+        "\u0661\u0660-17-2026",  # Arabic-Indic digits
+        "10 17 2026",  # a space isn't one of the interchangeable separators
+        "010-17-2026",
+    ],
+)
+def test_date_format_still_refuses(text: str) -> None:
+    assert parse_date_format("MM-DD-YYYY").parse(text) is None
+
+
+def test_typed_dates_follow_the_configured_order() -> None:
+    day_first = parse_date_format("DD.MM.YYYY")
+    assert day_first.parse("7/1/2026") == date(2026, 1, 7)
+    assert day_first.parse("10/17/2026") is None  # month 17: never retried month-first
+    assert parse_date_format("MM/DD/YY").parse("1-7-26") == date(2026, 1, 7)
+    assert parse_date_format("MM/DD/YY").parse("1-7-2026") is None
+
+
+def test_one_digit_parts_need_a_separator() -> None:
+    # Without separators a short part would make the split a guess.
+    packed = parse_date_format("MMDDYYYY")
+    assert packed.parse("10172026") == date(2026, 10, 17)
+    assert packed.parse("1172026") is None
+
+
+def test_identifier_patterns_stay_strict() -> None:
+    # Date parts inside an identifier pattern don't get looser (UX-016 covers date fields only).
+    so = compile_pattern("SOYYMMDD-######")
+    assert not so.matches("SO261317-999902")
+    assert not so.matches("SO26117-999902")
+    assert not so.matches("SO26/10/17-999902")
+    assert so.matches("SO261017-999902")
+    dashed = compile_pattern("MM-DD-YYYY")
+    assert not dashed.matches("1-7-2026") and not dashed.matches("10/17/2026")
 
 
 @pytest.mark.parametrize(

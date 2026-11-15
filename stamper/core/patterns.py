@@ -432,6 +432,30 @@ def explain(source: str) -> str:
     return compile_pattern(source).explain()
 
 
+_DATE_SEPARATORS = "/.-"
+
+
+def _typed_date_regex(tokens: list[_Token]) -> str:
+    """The regex for a date as people type it in this format (UX-016).
+
+    ``/``, ``.`` and ``-`` stand for each other, and a month or day may be one
+    digit when no other date part touches it (in ``MMDDYYYY`` a short part
+    would make the split a guess). The order of the parts and the year's
+    length come from the format only; digits are ASCII.
+    """
+    out: list[str] = []
+    for i, t in enumerate(tokens):
+        if t.kind is TokenKind.LITERAL and t.text in _DATE_SEPARATORS:
+            out.append("[/.\\-]")
+        elif t.kind in (TokenKind.MONTH, TokenKind.DAY):
+            touching = [tokens[j] for j in (i - 1, i + 1) if 0 <= j < len(tokens)]
+            width = "{2}" if any(n.kind in _DATE_KINDS for n in touching) else "{1,2}"
+            out.append(f"(?P<{t.kind.value[0] * 2}>[0-9]{width})")
+        else:
+            out.append(re.escape(t.text) if t.kind is TokenKind.LITERAL else _REGEX[t.kind])
+    return "".join(out)
+
+
 class DateFormat:
     """A date format written with the pattern tokens, e.g. ``MM-DD-YYYY``."""
 
@@ -457,7 +481,7 @@ class DateFormat:
             raise PatternError("a date format needs " + ", ".join(missing))
         self.source = source
         self._tokens = tokens
-        self._regex = re.compile(_regex_for(tokens), re.ASCII)
+        self._regex = re.compile(_typed_date_regex(tokens), re.ASCII)
 
     def __repr__(self) -> str:
         return f"DateFormat({self.source!r})"
@@ -480,7 +504,11 @@ class DateFormat:
         return "".join(out)
 
     def parse(self, text: str) -> date | None:
-        """Read a date written in this format, or None if it isn't one."""
+        """Read a date written in this format, or None if it isn't one.
+
+        Lenient only in the ways ``_typed_date_regex`` allows; ``format``
+        always writes the canonical form.
+        """
         m = self._regex.fullmatch(text)
         if m is None:
             return None
