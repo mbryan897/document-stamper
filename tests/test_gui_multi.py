@@ -231,7 +231,7 @@ def test_combine_signed_locked_rotated(qtbot: QtBot, window: MainWindow, fake: F
     assert fake.save_suggestions[0].parent == order[0].parent
     assert fake.save_suggestions[0].name.endswith("rotate_90_combined.pdf")
     qtbot.waitUntil(lambda: window.stack.currentWidget() is window.saved, timeout=WAIT_MS)
-    notes = window.saved.notes.text()
+    notes = "\n".join(window.saved.notes.texts())
     assert "Protected files in it: encrypted_user_password.pdf" in notes
     assert "Bookmarks: one for each of the 3 files" in notes
     assert window.saved.original_label.text().startswith("All 3 files unchanged")

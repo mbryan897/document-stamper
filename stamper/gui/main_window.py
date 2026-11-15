@@ -37,6 +37,7 @@ from PySide6.QtGui import (
     QGuiApplication,
     QKeySequence,
     QPixmap,
+    QResizeEvent,
     QScreen,
     QShortcut,
     QShowEvent,
@@ -104,7 +105,7 @@ from .multi import (
 )
 from .profiles import ProfileSettings
 from .services import Services, native_services
-from .stamp_dialog import StampDialog, group_warnings
+from .stamp_dialog import NotesView, StampDialog
 
 __all__ = [
     "FRAME_ALLOWANCE",
@@ -314,6 +315,21 @@ class DropScreen(QWidget):
         self.target.style().polish(self.target)
 
 
+class _NotesScroll(QScrollArea):
+    """A scroll area that asks for its notes' full height; the layout squeezes it when the window is small."""
+
+    def sizeHint(self) -> QSize:  # QScrollArea keeps the hint from before the notes were set
+        inner = self.widget()
+        h = inner.heightForWidth(self.viewport().width()) if inner.hasHeightForWidth() else -1
+        return QSize(inner.sizeHint().width(), max(h, inner.sizeHint().height() if h < 0 else 0)
+                     + 2 * self.frameWidth())
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        if event.size().width() != event.oldSize().width():
+            self.updateGeometry()  # the wanted height depends on the width
+
+
 class SavedScreen(QWidget):
     """Where the file went, notes from the result, and what to do next."""
 
@@ -355,11 +371,14 @@ class SavedScreen(QWidget):
         saved_to.setObjectName("muted")
         self.path_label = QLabel()
         self.path_label.setWordWrap(True)
+        self.path_label.setTextFormat(Qt.TextFormat.PlainText)
         self.path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         original = QLabel("Original")
         original.setObjectName("muted")
         self.original_label = QLabel()
         self.original_label.setWordWrap(True)
+        self.original_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.original_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         grid.addWidget(saved_to, 0, 0, Qt.AlignmentFlag.AlignTop)
         grid.addWidget(self.path_label, 0, 1)
         grid.addWidget(original, 1, 0, Qt.AlignmentFlag.AlignTop)
@@ -367,11 +386,15 @@ class SavedScreen(QWidget):
         grid.setColumnStretch(1, 1)
         right.addLayout(grid)
 
-        self.notes = QLabel()
-        self.notes.setWordWrap(True)
-        self.notes.setObjectName("help")
-        self.notes.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        right.addWidget(self.notes)
+        self.notes = NotesView()
+        self.notes.setObjectName("surface")
+        self.notes_scroll = _NotesScroll()  # many notes scroll, so the buttons stay on the window (D-093)
+        self.notes_scroll.setObjectName("surface")
+        self.notes_scroll.setWidgetResizable(True)
+        self.notes_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.notes_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.notes_scroll.setWidget(self.notes)
+        right.addWidget(self.notes_scroll, 1)
 
         buttons = QHBoxLayout()
         buttons.setSpacing(10)
@@ -397,11 +420,13 @@ class SavedScreen(QWidget):
         return "saving#the-saved-screen"
 
     def show_result(self, result: ApplyResult, *, label: str, identifier: str, signed: bool,
-                    extra_notes: Sequence[str] = (), original_text: str | None = None) -> None:
+                    extra_notes: Sequence[str] = (), original_text: str | None = None,
+                    source: Path | None = None) -> None:
         """Fill the screen from an ApplyResult.
 
         ``extra_notes`` come first (a combined file's protection warning and
-        bookmarks note, D-111); ``original_text`` replaces the "Original" line.
+        bookmarks note, D-111); ``original_text`` replaces the "Original" line,
+        which otherwise names ``source`` (UX-045).
         """
         self.result = result
         pages = "The page carries" if result.pages_stamped == 1 else f"All {result.pages_stamped} pages carry"
@@ -412,14 +437,16 @@ class SavedScreen(QWidget):
                 f"{_escape(identifier)}</span>.")
         else:
             self.lead.setText(f"{pages} the stamp.")
-        self.path_label.setText(str(result.output_path))
+        self.path_label.setText(visible(str(result.output_path)))
+        state = "unchanged, still digitally signed" if signed else "unchanged"
         self.original_label.setText(original_text or (
-            "Unchanged, still digitally signed" if signed else "Unchanged"))
-        # Grouped like the dialog's notes (D-066), and capped: one line per shrunk page
-        # on a long receipt bundle would push the buttons off the window (D-093).
-        notes = group_warnings([*extra_notes, *result.warnings])
-        self.notes.setText("\n".join(f"Note: {w}" for w in notes))
-        self.notes.setVisible(bool(notes))
+            f"{visible(str(source))} – {state}" if source is not None else state.capitalize()))
+        # Grouped like the dialog's notes (D-066); past the limit they wait behind
+        # "Show all notes", so a long receipt bundle keeps the buttons on the window (D-093).
+        notes = [*extra_notes, *result.warnings]
+        self.notes.set_notes(notes)
+        self.notes_scroll.setVisible(bool(notes))
+        self.notes_scroll.updateGeometry()
         self.thumbnail.clear()
         self.open_button.setFocus()
 
@@ -1067,14 +1094,16 @@ class MainWindow(QMainWindow):
         thumb_dpi = int(min(THUMB_W / (first.width / 72), THUMB_H / (first.height / 72)) * ratio * 1.5)
         extra: list[str] = []
         original: str | None = None
+        source: Path | None = dialog.info.path
         if isinstance(dialog, CombineDialog):
+            source = None  # the combined working copy, not an original
             extra = dialog.saved_notes()
             n = len(dialog.originals)
             original = (f"All {n} files unchanged" + (", signed files still signed" if dialog.combined.signed else ""))
         self._close_dialog()
         self._drop_combined()
         self.saved.show_result(result, label=label, identifier=ident, signed=signed,
-                               extra_notes=extra, original_text=original)
+                               extra_notes=extra, original_text=original, source=source)
         self.stack.setCurrentWidget(self.saved)
         self._thumb_req = self.engine.preview(
             result.output_path, 1, StampJob(stamps=(), values={}), password, max(24, thumb_dpi))

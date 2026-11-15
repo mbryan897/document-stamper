@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QPoint, QSize
-from PySide6.QtWidgets import QPushButton, QWidget
+from PySide6.QtWidgets import QLabel, QPushButton, QWidget
 from pytestqt.qtbot import QtBot
 
 from stamper.gui.main_window import (
@@ -122,5 +122,7 @@ def test_saved_screen_groups_many_notes(small: MainWindow) -> None:
                          metadata_written={}, metadata_replaced={}, encryption_kept=False)
     small.saved.show_result(result, label="Case number", identifier="X", signed=False)
     small.stack.setCurrentWidget(small.saved)
-    assert len(small.saved.notes.text().splitlines()) <= 6
+    notes = small.saved.notes
+    assert sum(1 for label in notes.findChildren(QLabel) if label.isVisible() and label.text()) <= 6 + 1  # + "34 more"
+    assert notes.more_button.isVisible() and not notes.more_box.isVisible()
     assert _inside(small, small.saved.open_button)
