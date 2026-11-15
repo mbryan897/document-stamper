@@ -24,7 +24,7 @@ import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from .filenames import visible
 from .locations import local_dir
@@ -46,6 +46,8 @@ __all__ = [
 
 TEMP_NAME_PREFIX = "~stamper-"
 TEMP_NAME_SUFFIX = ".tmp"
+COMBINE_FOLDER_PREFIX = "~stamper-combine-"  # combine.TEMP_PREFIX; core can't import handlers
+MAX_SOURCE_NAME = 80  # characters of the source's name shown in the notice
 
 
 def journal_dir(base: Path | None = None) -> Path:
@@ -61,14 +63,21 @@ class Leftover:
     path: Path  # the partial copy
     size: int
     modified: datetime
+    source: str | None = None  # the file being stamped, as recorded; untrusted, only ever shown
 
 
-def record(tmp: Path, *, base: Path | None = None) -> Path | None:
-    """Note ``tmp`` before it's written; returns the entry to ``forget``, or None if it can't."""
+def record(tmp: Path, *, source: Path | None = None, base: Path | None = None) -> Path | None:
+    """Note ``tmp`` before it's written; returns the entry to ``forget``, or None if it can't.
+
+    ``source`` is the file being stamped, so the notice can name it (UX-024).
+    The output name is never recorded: it is built from field values (D-081).
+    """
     folder = journal_dir(base)
     entry = folder / f"{uuid.uuid4().hex}.json"
-    data = {"path": str(Path(tmp).resolve()), "pid": os.getpid(),
-            "created": datetime.now().isoformat(timespec="seconds")}
+    data: dict[str, object] = {"path": str(Path(tmp).resolve()), "pid": os.getpid(),
+                               "created": datetime.now().isoformat(timespec="seconds")}
+    if source is not None:
+        data["source"] = str(source)
     try:
         folder.mkdir(parents=True, exist_ok=True)
         entry.write_text(json.dumps(data), encoding="utf-8")
@@ -155,6 +164,7 @@ def leftovers(*, base: Path | None = None, alive: Callable[[int], bool] | None =
             data = json.loads(entry.read_text(encoding="utf-8"))
             path = Path(data["path"])
             pid = int(data["pid"])
+            source = data.get("source")
         except (OSError, ValueError, KeyError, TypeError):
             forget(entry)  # damaged entry: nothing to act on
             continue
@@ -164,7 +174,8 @@ def leftovers(*, base: Path | None = None, alive: Callable[[int], bool] | None =
         if st is None:
             forget(entry)
             continue
-        found.append(Leftover(entry, path, st.st_size, datetime.fromtimestamp(st.st_mtime)))
+        found.append(Leftover(entry, path, st.st_size, datetime.fromtimestamp(st.st_mtime),
+                              source if isinstance(source, str) and source else None))
     found.sort(key=lambda lo: lo.modified)
     return found
 
@@ -193,6 +204,25 @@ def keep(leftover: Leftover) -> None:
     forget(leftover.entry)
 
 
+def _source_text(lo: Leftover) -> str:
+    """"the stamped copy of <name>" (or of a combined file), or "" when unknown (UX-024).
+
+    The recorded path is only shown, as a name: never opened or acted on.
+    """
+    if not lo.source:
+        return ""
+    path = PureWindowsPath(lo.source)  # splits on both \\ and /
+    name = visible(path.name, keep="")
+    if not name:
+        return ""
+    if len(name) > MAX_SOURCE_NAME:
+        name = name[: MAX_SOURCE_NAME - 1] + "…"
+    if path.parent.name.startswith(COMBINE_FOLDER_PREFIX):
+        # combine stamps a temporary file named after the first source (D-104)
+        return f"the stamped copy of a combined file starting with {name}"
+    return f"the stamped copy of {name}"
+
+
 def describe(items: Sequence[Leftover], problem: str = "") -> str:
     """The notice for partial copies left behind (D-124); empty when there are none."""
     if not items:
@@ -205,9 +235,18 @@ def describe(items: Sequence[Leftover], problem: str = "") -> str:
     if len(items) == 1:
         text = ("A partial copy was left behind when Document Stamper stopped unexpectedly: "
                 f"{line(items[0])}. It's an unfinished stamped copy, not the original.")
+        source = _source_text(items[0])
+        if source:
+            text += f" {source[0].upper()}{source[1:]} wasn't finished. Stamp it again."
     else:
-        shown = "\n".join(f"• {line(lo)}" for lo in items[:8])
+        def entry(lo: Leftover) -> str:
+            source = _source_text(lo)
+            return f"• {line(lo)}: {source}" if source else f"• {line(lo)}"
+
+        shown = "\n".join(entry(lo) for lo in items[:8])
         more = f"\n…and {len(items) - 8} more." if len(items) > 8 else ""
         text = ("Partial copies were left behind when Document Stamper stopped unexpectedly. "
                 f"They're unfinished stamped copies, not originals:\n{shown}{more}")
+        if any(_source_text(lo) for lo in items[:8]):
+            text += "\nStamp those files again."
     return f"{problem}\n\n{text}" if problem else text

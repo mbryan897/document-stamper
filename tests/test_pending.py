@@ -211,3 +211,134 @@ def test_window_keep_all(qtbot: QtBot, fake: FakeServices, tmp_path: Path) -> No
 def test_window_without_leftovers_shows_nothing(qtbot: QtBot, fake: FakeServices) -> None:
     w = _window(qtbot, fake)
     assert w.drop.leftover_frame.isHidden()
+
+
+# ---------------------------------------------------------------- the source's name (UX-024)
+
+
+def _entry(tmp: Path, **extra: object) -> None:
+    """A journal entry for ``tmp`` as a stopped run would leave it, with ``extra`` keys."""
+    tmp.write_bytes(b"%PDF-1.7 partial")
+    pending.journal_dir().mkdir(parents=True, exist_ok=True)
+    data = {"path": str(tmp.resolve()), "pid": 999999, "created": "2026-01-01T00:00:00", **extra}
+    (pending.journal_dir() / f"{tmp.stem}.json").write_text(json.dumps(data), encoding="utf-8")
+
+
+def _found() -> list[pending.Leftover]:
+    return pending.leftovers(alive=lambda _pid: False)
+
+
+def test_record_stores_the_source_only_when_given(tmp_path: Path) -> None:
+    with_source = pending.record(tmp_path / "~stamper-a.tmp", source=tmp_path / "Report 99-2026-999901.pdf")
+    without = pending.record(tmp_path / "~stamper-b.tmp")
+    assert with_source is not None and without is not None
+    assert json.loads(with_source.read_text("utf-8"))["source"] == str(tmp_path / "Report 99-2026-999901.pdf")
+    assert "source" not in json.loads(without.read_text("utf-8"))
+
+
+def test_apply_records_its_source_and_not_the_output(corpus_dir: Path, tmp_path: Path,
+                                                     monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[dict[str, object]] = []
+    real = pending.record
+
+    def spy(tmp: Path, **kw: object) -> Path | None:
+        seen.append(kw)
+        return real(tmp, **kw)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(pending, "record", spy)
+    src = copy_to(corpus_dir / "letter_portrait.pdf", tmp_path)
+    PdfHandler().apply(src, default_job(), tmp_path / f"{FAKE_ID} copy.pdf")
+    assert seen == [{"source": src}]
+
+
+def test_batch_records_each_source(corpus_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from stamper.handlers.batch import BatchItem, check_batch, run_batch
+
+    seen: list[object] = []
+    real = pending.record
+    monkeypatch.setattr(pending, "record", lambda tmp, **kw: (seen.append(kw.get("source")), real(tmp, **kw))[1])
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    a = copy_to(corpus_dir / "letter_portrait.pdf", tmp_path / "a")
+    b = copy_to(corpus_dir / "letter_portrait.pdf", tmp_path / "b")
+    items = [BatchItem(a, tmp_path / "a" / "out.pdf"), BatchItem(b, tmp_path / "b" / "out.pdf")]
+    handler, job = PdfHandler(), default_job()
+    run_batch(handler, check_batch(handler, items, job), job)
+    assert seen == [a, b]
+
+
+def test_an_old_entry_without_source_reads_as_before(tmp_path: Path) -> None:
+    tmp = tmp_path / "~stamper-old.tmp"
+    _entry(tmp)
+    found = _found()
+    assert found[0].source is None
+    text = pending.describe(found)
+    assert text.endswith("It's an unfinished stamped copy, not the original.")
+    assert "Stamp it again" not in text
+
+
+def test_describe_names_the_source(tmp_path: Path) -> None:
+    tmp = tmp_path / "~stamper-src.tmp"
+    _entry(tmp, source=r"C:\Cases\Report 99-2026-999901.pdf")
+    text = pending.describe(_found())
+    assert text.endswith("The stamped copy of Report 99-2026-999901.pdf wasn't finished. Stamp it again.")
+    assert "C:\\Cases" not in text  # the name only, not the folder
+
+
+def test_describe_several_names_each_source(tmp_path: Path) -> None:
+    _entry(tmp_path / "~stamper-1.tmp", source="/x/one.pdf")
+    _entry(tmp_path / "~stamper-2.tmp")
+    text = pending.describe(_found())
+    assert ": the stamped copy of one.pdf" in text
+    assert text.count("the stamped copy of") == 1
+    assert text.endswith("Stamp those files again.")
+
+
+def test_a_combine_leftover_doesnt_claim_to_be_the_first_file(tmp_path: Path) -> None:
+    from stamper.handlers.combine import TEMP_PREFIX
+
+    assert pending.COMBINE_FOLDER_PREFIX == TEMP_PREFIX
+    _entry(tmp_path / "~stamper-c.tmp", source=rf"C:\Users\x\AppData\{TEMP_PREFIX}1a2b3c4d\first.pdf")
+    text = pending.describe(_found())
+    assert "The stamped copy of a combined file starting with first.pdf wasn't finished." in text
+    assert "The stamped copy of first.pdf" not in text
+
+
+@pytest.mark.parametrize("source", [12345, None, ["a.pdf"], {"x": 1}, ""])
+def test_a_source_that_isnt_a_string_is_ignored(tmp_path: Path, source: object) -> None:
+    tmp = tmp_path / "~stamper-n.tmp"
+    _entry(tmp, source=source)
+    found = _found()
+    assert [lo.path for lo in found] == [tmp.resolve()] and found[0].source is None
+    assert "Stamp it again" not in pending.describe(found)
+
+
+def test_a_huge_or_hostile_source_is_cut_and_shown_plainly(tmp_path: Path) -> None:
+    _entry(tmp_path / "~stamper-h.tmp", source="C:\\x\\" + "A" * 10_000 + ".pdf")
+    text = pending.describe(_found())
+    assert len(text) < 1000 and "A" * (pending.MAX_SOURCE_NAME - 1) + "…" in text
+    pending.journal_dir().joinpath("~stamper-h.json").unlink()
+    _entry(tmp_path / "~stamper-r.tmp", source="/x/<b>bold<b>\n\u202eevil.pdf")
+    text = pending.describe(_found())
+    assert "<b>bold<b>⟨U+000A⟩⟨U+202E⟩evil.pdf" in text
+
+
+def test_the_source_is_never_touched(tmp_path: Path) -> None:
+    original = tmp_path / "original.pdf"
+    original.write_bytes(b"original")
+    tmp = tmp_path / "~stamper-t.tmp"
+    _entry(tmp, source=str(original))
+    pending.delete(_found()[0])
+    assert original.read_bytes() == b"original" and not tmp.exists()
+
+
+def test_window_shows_the_source_as_plain_text(qtbot: QtBot, fake: FakeServices, tmp_path: Path) -> None:
+    tmp = tmp_path / "~stamper-w.tmp"
+    crash_leaving(tmp)
+    entry = next(pending.journal_dir().glob("*.json"))
+    data = json.loads(entry.read_text("utf-8"))
+    entry.write_text(json.dumps({**data, "source": "/x/<b>R<b>.pdf"}), encoding="utf-8")
+    w = _window(qtbot, fake)
+    from PySide6.QtCore import Qt
+    assert w.drop.leftover_label.textFormat() == Qt.TextFormat.PlainText
+    assert "The stamped copy of <b>R<b>.pdf wasn't finished. Stamp it again." in w.drop.leftover_label.text()

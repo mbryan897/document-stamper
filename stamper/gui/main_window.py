@@ -231,6 +231,7 @@ class DropScreen(QWidget):
         lf.setContentsMargins(14, 12, 14, 12)
         lf.setSpacing(8)
         self.leftover_label = QLabel()
+        self.leftover_label.setTextFormat(Qt.TextFormat.PlainText)  # names come from the journal on disk
         self.leftover_label.setWordWrap(True)
         self.leftover_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         # Several leftovers scroll inside the notice, so the drop target keeps its room.
