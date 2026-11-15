@@ -266,14 +266,24 @@ UNPROTECTED_NOTE = "The copy isn't password-protected, unlike the original."
 COMBINED_UNPROTECTED_NOTE = "The combined file is saved without a password or restrictions."
 _REPAIRED_NOTE_END = " was damaged and was repaired when opened. Check the stamped copy carefully."
 _REPLACED_NOTE_START = "Document property "
+# The page list comes first ("On pages 3, 7"), so the fixed part is matched at the end:
+# "On page" alone would also match the dialog's grouped form-field note (D-066).
+COVERS_TEXT_NOTE_END = (" the white box covers text that was already on the page. "
+                        "Choose another position under Placement, or turn off the white box.")
+
+
+def covers_text_note(pages: list[int]) -> str:
+    """The note for pages where a white box covers existing text (UX-004); page numbers only."""
+    return f"On {_page_list(pages)}{COVERS_TEXT_NOTE_END}"
 
 
 def needs_check(note: str) -> bool:
     """True for a note about something to check in the copy: repaired, signature lost,
-    a document property replaced, or protection removed. Every other note is information."""
+    a document property replaced, protection removed, or a white box over existing text.
+    Every other note is information."""
     return (note in (SIGNATURE_LOST_NOTE, UNPROTECTED_NOTE)
             or note.startswith((COMBINED_UNPROTECTED_NOTE, _REPLACED_NOTE_START))
-            or note.endswith(_REPAIRED_NOTE_END))
+            or note.endswith((_REPAIRED_NOTE_END, COVERS_TEXT_NOTE_END)))
 
 
 def xfa_refusal(name: str) -> str:
@@ -553,11 +563,14 @@ class PdfHandler(Handler):
         job: StampJob,
         values: Mapping[str, str],
         warnings: list[str],
+        covered: list[int] | None = None,
     ) -> list[_Planned]:
         """Fit every stamp on one page and check overlaps, without drawing.
 
-        Appends the shrink and form-field warnings for the page. Raises
-        StampDoesNotFit when a stamp can't fit or two stamps overlap.
+        Appends the shrink and form-field warnings for the page. When
+        ``covered`` is given, appends the page number if a white box would
+        cover a word in the page's text layer (UX-004); the words are not kept.
+        Raises StampDoesNotFit when a stamp can't fit or two stamps overlap.
         """
         page_no = page.number + 1
         vis_w, vis_h = page.rect.width, page.rect.height
@@ -598,6 +611,11 @@ class PdfHandler(Handler):
                         f"Page {page_no}, stamp {item.index + 1}: overlaps a form field or "
                         "annotation, which is drawn on top of the stamp."
                     )
+            # Same rectangle _draw_page fills, in the same (unrotated, CropBox-relative) space.
+            if covered is not None and any(
+                w[4].strip() for p in planned if p.box_on for w in page.get_text("words", clip=p.rect)
+            ):
+                covered.append(page_no)
         return planned
 
     @staticmethod
@@ -642,8 +660,9 @@ class PdfHandler(Handler):
         warnings: list[str],
         *,
         outline: bool = False,
+        covered: list[int] | None = None,
     ) -> list[StampPlacement]:
-        planned = self._plan_page(page, job, values, warnings)
+        planned = self._plan_page(page, job, values, warnings, covered)
         self._draw_page(page, planned, outline=outline)
         return self._placements(page.number + 1, planned)
 
@@ -719,12 +738,15 @@ class PdfHandler(Handler):
             total = doc.page_count
             self._check_glyphs(job, total, src.stem, today)
             placements: list[StampPlacement] = []
+            covered: list[int] = []
             for page in doc:
                 if cancel is not None and cancel():
                     raise Cancelled("The check was cancelled.")
                 values = self._page_values(job, page.number + 1, total, src.stem, today)
-                planned = self._plan_page(page, job, values, warnings)
+                planned = self._plan_page(page, job, values, warnings, covered)
                 placements.extend(self._placements(page.number + 1, planned))
+            if covered:
+                warnings.append(covers_text_note(covered))
             written, replaced = self._metadata_plan(doc, job, src.stem, today, warnings)
             values, sources = _info_values(doc)
             planned_values: dict[str, str | None] = {**values, **written, "ModDate": None}
@@ -871,13 +893,16 @@ class PdfHandler(Handler):
             total = doc.page_count
             self._check_glyphs(job, total, original_name, today)
             placements: list[StampPlacement] = []
+            covered: list[int] = []
             for page in doc:
                 if cancel is not None and cancel():
                     raise Cancelled("Stamping was cancelled. Nothing was saved.")
                 values = self._page_values(job, page.number + 1, total, original_name, today)
-                placements.extend(self._stamp_page(page, job, values, warnings))
+                placements.extend(self._stamp_page(page, job, values, warnings, covered=covered))
                 if progress is not None:
                     progress(page.number + 1, total)
+            if covered:
+                warnings.append(covers_text_note(covered))
 
             written, replaced = self._write_metadata(doc, job, original_name, today, warnings)
             if cancel is not None and cancel():
