@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (
 
 from ..core.config import ANCHORS, Config, Profile, StampSpec
 from ..core.fields import MAX_VALUE_LENGTH, ValidationResult, prefill_fields, validate_field, value_from_filename
-from ..core.filenames import suggest_filename, visible
+from ..core.filenames import first_free_name, suggest_filename, visible
 from ..core.paths import same_file, size_text
 from ..core.template import TemplateError, template_tokens
 from ..handlers.base import (
@@ -1205,15 +1205,19 @@ class StampDialog(QWidget):
     def _save(self) -> None:
         if not self.save_button.isEnabled():
             return
-        suggested = self._save_folder() / self.suggested_name()
-        out = self.services.ask_save_path(self, suggested)
-        if out is None:
-            return
-        problem = self.check_output(out)
-        if problem:
+        folder = self._save_folder()
+        suggested = folder / first_free_name(folder, self.suggested_name())
+        while True:
+            out = self.services.ask_save_path(self, suggested)
+            if out is None:
+                return
+            problem = self.check_output(out)
+            if not problem:
+                break
+            # Say why, then ask again in the same folder until a free name or cancel (UX-020).
             self._refuse(problem)
-            return
-        self.start_save(out)
+            suggested = out.parent / first_free_name(out.parent, out.name)
+        self.start_save(out)  # the engine checks again just before the rename (D-055)
 
     def start_save(self, out: Path) -> None:
         """Start stamping to ``out`` on the engine thread (no checks; ``_save`` does them)."""

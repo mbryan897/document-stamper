@@ -39,7 +39,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from collections.abc import Mapping, Sequence
-from pathlib import PureWindowsPath
+from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -50,6 +50,7 @@ __all__ = [
     "MAX_FILENAME_LENGTH",
     "build_filename",
     "clean_part",
+    "first_free_name",
     "hidden_characters",
     "is_reserved_name",
     "remove_value",
@@ -271,3 +272,28 @@ def suggest_filename(
         max_length=max_length,
         fallback_name=src.stem,
     )
+
+
+def first_free_name(folder: Path, name: str, *, max_length: int = MAX_FILENAME_LENGTH) -> str:
+    """``name``, or ``<stem>_2<ext>`` … ``<stem>_99<ext>``: the first not in ``folder`` (UX-020).
+
+    Only a suggestion for Save As; the check just before the save stays the
+    authority (D-055). The stem is shortened to keep the name within
+    ``max_length`` UTF-16 units (D-043). If every name is taken, ``name`` is
+    returned and the window refuses it as usual.
+    """
+    def taken(candidate: str) -> bool:
+        try:
+            return (folder / candidate).exists()
+        except (OSError, ValueError):
+            return True
+
+    if not taken(name):
+        return name
+    src = PureWindowsPath(name)
+    for n in range(2, 100):
+        tail = f"_{n}{src.suffix}"
+        candidate = _cut16(src.stem, max_length - _len16(tail)) + tail
+        if not taken(candidate):
+            return candidate
+    return name
