@@ -1479,12 +1479,12 @@ class GeneralPage(_Page):
         self.form.addWidget(_section("Send to menu"))
         self.form.addWidget(_label(
             "Adds Document Stamper to the menu you get by right-clicking a file in Explorer "
-            "and choosing Send to.", "help"))
+            "and choosing Send to. This takes effect right away; it isn't part of Save changes.", "help"))
         self.sendto_status = _label("", "muted")
         self.form.addWidget(self.sendto_status)
         row = QHBoxLayout()
         self.sendto_add = _small("Add to the Send to menu")
-        self.sendto_remove = _small("Remove")
+        self.sendto_remove = _small("Remove from the Send to menu")
         self.sendto_add.clicked.connect(self._sendto_add)
         self.sendto_remove.clicked.connect(self._sendto_remove)
         row.addWidget(self.sendto_add)
