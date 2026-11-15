@@ -570,6 +570,7 @@ class MainWindow(QMainWindow):
         for screen in (self.drop, self.saved, self.files_screen, self.busy, self.batch_saved):
             self._wire_help(screen)
         QShortcut(QKeySequence(HELP_SHORTCUT), self, self.help_for_screen)
+        QShortcut(QKeySequence(QKeySequence.StandardKey.Open), self, self._open_shortcut)  # Ctrl+O
 
         self.leftovers: list[Leftover] = []
         self.drop.leftover_delete.clicked.connect(self.delete_leftovers)
@@ -829,6 +830,11 @@ class MainWindow(QMainWindow):
         path = self.services.ask_open_file(self, self._last_folder)
         if path is not None:
             self.open_file(path)
+
+    def _open_shortcut(self) -> None:
+        """Ctrl+O: "Choose files…", only where a file can be dropped (UX-014)."""
+        if self.stack.currentWidget() in (self.drop, self.saved, self.batch_saved):
+            self.choose_file()
 
     def open_files(self, paths: Sequence[Path]) -> None:
         """Open what was dropped or passed on the command line: one file, or several (D-100)."""

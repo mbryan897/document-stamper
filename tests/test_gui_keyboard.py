@@ -150,3 +150,28 @@ def test_ampersand_in_a_configured_label_is_shown(qtbot: QtBot, fake: FakeServic
         assert tick.text() == "R&&D number"
     finally:
         close_window(w)
+
+
+# ------------------------------------------------------------ Ctrl+O (UX-014)
+
+
+def test_ctrl_o_opens_the_chooser_only_where_files_can_be_dropped(
+        qtbot: QtBot, window: MainWindow, fake: FakeServices, corpus_dir: Path, tmp_path: Path) -> None:
+    from tests.gui_support import choose, type_into, wait_ready
+    from tools import make_corpus
+
+    src = copy_to(corpus_dir / "letter_portrait.pdf", tmp_path)
+    d = open_dialog(qtbot, window, src)
+    fake.open_files.append(src)
+    qtbot.keyClick(d, Qt.Key.Key_O, Qt.KeyboardModifier.ControlModifier)
+    assert fake.open_files == [src] and window.dialog is d  # the stamp screen ignores it
+
+    type_into(qtbot, d, "identifier", make_corpus.FAKE_CASE_SO)
+    choose(d, "doc_type", "Court order")
+    wait_ready(qtbot, d)
+    fake.save_paths.append(tmp_path / "stamped.pdf")
+    d.save_button.click()
+    qtbot.waitUntil(lambda: window.stack.currentWidget() is window.saved, timeout=15000)
+    qtbot.keyClick(window.saved, Qt.Key.Key_O, Qt.KeyboardModifier.ControlModifier)
+    assert fake.open_files == []  # asked, and the file opened
+    qtbot.waitUntil(lambda: window.dialog is not None and window.dialog is not d, timeout=15000)
