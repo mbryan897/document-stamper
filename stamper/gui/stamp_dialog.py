@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
 from ..core.config import ANCHORS, Config, Profile, StampSpec
 from ..core.fields import MAX_VALUE_LENGTH, ValidationResult, prefill_fields, validate_field, value_from_filename
 from ..core.filenames import first_free_name, suggest_filename, visible
+from ..core.locations import state_folder
 from ..core.paths import same_file, size_text
 from ..core.template import TemplateError, template_tokens
 from ..handlers.base import (
@@ -443,9 +444,15 @@ class StampDialog(QWidget):
         return (bool(self.signature_tick and self.signature_tick.isChecked()),
                 bool(self.restriction_tick and self.restriction_tick.isChecked()))
 
-    def _save_folder(self) -> Path:
-        """The folder Save As starts in."""
+    last_save_folder: object = None  # state.json's last_save_folder, set by the window; untrusted (UX-037)
+
+    def _original_folder(self) -> Path:
+        """The original's folder, where Save As starts when there's no usable last folder."""
         return self.path.parent
+
+    def _save_folder(self) -> Path:
+        """The folder Save As starts in: the last save's folder if it's still usable (UX-037)."""
+        return state_folder(self.last_save_folder) or self._original_folder()
 
     def _progress_text(self, done: int, total: int) -> str:
         return f"Stamping page {done + 1} of {total}…"

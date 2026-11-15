@@ -892,6 +892,7 @@ class MainWindow(QMainWindow):
             config=self.config, profile=self.profile, path=path, info=info,
             password=password, engine=self.engine, services=self.services, today=self.today,
         )
+        dialog.last_save_folder = self.state.last_save_folder
         dialog.cancelled.connect(lambda: self.show_drop())
         dialog.saved.connect(self._on_saved)
         dialog.edited.connect(self.update_title)
@@ -1034,6 +1035,7 @@ class MainWindow(QMainWindow):
         self._close_prepare()
         dialog = CombineDialog(config=self.config, profile=self.profile, combined=combined, info=info,
                                engine=self.engine, services=self.services, today=self.today)
+        dialog.last_save_folder = self.state.last_save_folder
         dialog.cancelled.connect(lambda: self._back_to_files())
         dialog.saved.connect(self._on_saved)
         dialog.edited.connect(self.update_title)
@@ -1100,6 +1102,8 @@ class MainWindow(QMainWindow):
             extra = dialog.saved_notes()
             n = len(dialog.originals)
             original = (f"All {n} files unchanged" + (", signed files still signed" if dialog.combined.signed else ""))
+        self.state.last_save_folder = str(result.output_path.parent)  # Save As starts here next time (UX-037)
+        save_state(self.state, self.locs)
         self._close_dialog()
         self._drop_combined()
         self.saved.show_result(result, label=label, identifier=ident, signed=signed,

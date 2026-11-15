@@ -920,7 +920,7 @@ class CombineDialog(_MultiMixin, StampDialog):
     def _name_source(self) -> str:
         return combined_original_name(self.originals[0])
 
-    def _save_folder(self) -> Path:
+    def _original_folder(self) -> Path:
         return self.originals[0].parent
 
     def _accept_flags(self) -> tuple[bool, bool]:
