@@ -56,6 +56,6 @@ Lists hold the choices for choice fields, such as document types.
 
 - **Add list** adds a list; **Delete** removes one that no field uses.
 - **Name**: rename a list here; the fields that use it follow the new name.
-- **Choices**: double-click a choice to change it. **Add choice** adds one, **Paste choices** adds one choice per line of copied text (blank lines, lines with tabs or other control characters, lines over 128 characters and choices already in the list are skipped; at most 500 lines are read, and **Undo** takes the whole paste back), **Remove** removes the selected one, and **Up** and **Down** set the order users see.
+- **Choices**: double-click a choice to change it. **Add choice** adds one, **Paste choices** adds one choice per line of copied plain text, such as a list copied from Notepad (blank lines and choices already in the list are skipped; at most 500 lines are read, and **Undo** takes the whole paste back). Nothing is pasted if the clipboard holds anything besides plain text (cells from a spreadsheet, text from a web page or document), or if any line has a tab or another hidden character or is longer than 116 characters, the most that fits in a file name, **Remove** removes the selected one, and **Up** and **Down** set the order users see.
 
 A list can't be empty, and the same choice can't be listed twice (ignoring capitals).

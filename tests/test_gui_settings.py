@@ -15,9 +15,9 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtCore import QMimeData, QPoint, QPointF, Qt
 from PySide6.QtGui import QWheelEvent
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QApplication, QPushButton, QWidget
 from pytestqt.qtbot import QtBot
 
 from stamper.core.config import load_config
@@ -1000,21 +1000,63 @@ def test_fill_in_warning_follows_the_rules(qtbot: QtBot, records_window: MainWin
     assert page.no_usable_rule.isHidden()
 
 
-def test_paste_choices_skips_bad_lines_and_can_be_undone(records_window: MainWindow) -> None:
-    from PySide6.QtWidgets import QPushButton
-    s = _settings(records_window)
+def _paste(s: ProfileSettings, mime: QMimeData) -> None:
+    """Put ``mime`` on the clipboard and click "Paste choices" in the Lists section."""
     s.show_section(2)
-    page = s.lists_page
+    QApplication.clipboard().setMimeData(mime)
+    next(b for b in s.lists_page.findChildren(QPushButton) if b.text() == "Paste choices").click()
+
+
+def _text(text: str) -> QMimeData:
+    mime = QMimeData()
+    mime.setText(text)
+    return mime
+
+
+def test_paste_choices_adds_new_lines_and_can_be_undone(records_window: MainWindow) -> None:
+    s = _settings(records_window)
     before = list(s.draft.taxonomies["doc_types"])
-    head = ["court ORDER", "", "   ", "Has\ttab", "x" * 129, "  Alpha  ", "alpha"]
+    head = ["court ORDER", "", "   ", "  Alpha  ", "alpha", "y" * profiles.MAX_PASTED_CHOICE]
     lines = head + [f"Item {i}" for i in range(600 - len(head))]
-    QApplication.clipboard().setText("\r\n".join(lines))
-    paste = next(b for b in page.findChildren(QPushButton) if b.text() == "Paste choices")
-    paste.click()
+    _paste(s, _text("\r\n".join(lines)))
     added = s.draft.taxonomies["doc_types"][len(before):]
-    assert added == ["Alpha"] + [f"Item {i}" for i in range(500 - len(head))]
-    assert s.status.text() == "Added 494 choices; 4 skipped. Only the first 500 lines were read."
+    assert added == ["Alpha", "y" * profiles.MAX_PASTED_CHOICE] + [f"Item {i}" for i in range(500 - len(head))]
+    assert s.status.text() == "Added 496 choices; 2 already in the list. Only the first 500 lines were read."
     assert s.undo_button.isVisible() and s.valid_config is not None
     s.undo_button.click()
     assert s.draft.taxonomies["doc_types"] == before
-    assert page.items.count() == len(before)
+    assert s.lists_page.items.count() == len(before)
+
+
+@pytest.mark.parametrize(("line", "why"), [
+    ("Has\ttab", "line 2 has a tab or another hidden character"),
+    ("zero\u200bwidth", "line 2 has a tab or another hidden character"),
+    ("x" * (profiles.MAX_PASTED_CHOICE + 1), f"line 2 is longer than {profiles.MAX_PASTED_CHOICE} characters"),
+    ("\U0001F4C4" * (profiles.MAX_PASTED_CHOICE // 2 + 1), "line 2 is longer than"),  # UTF-16, as file names count
+])
+def test_paste_with_a_line_over_the_limits_adds_nothing(records_window: MainWindow, line: str, why: str) -> None:
+    s = _settings(records_window)
+    before = copy.deepcopy(s.draft.data)
+    _paste(s, _text(f"Fine\n{line}\nAlso fine"))
+    assert s.status.text().startswith(f"Nothing was pasted: {why}")
+    assert s.draft.data == before and not s.draft.can_undo and not s.undo_button.isVisible()
+
+
+@pytest.mark.parametrize("extra", ["text/html", "text/csv", 'application/x-qt-windows-mime;value="Biff12"',
+                                   'application/x-qt-windows-mime;value="XML Spreadsheet"', "text/uri-list"])
+def test_paste_that_isnt_plain_text_adds_nothing(records_window: MainWindow, extra: str) -> None:
+    s = _settings(records_window)
+    before = copy.deepcopy(s.draft.data)
+    mime = _text("One\nTwo")
+    mime.setData(extra, b"<table><tr><td>One</td></tr></table>")
+    _paste(s, mime)
+    assert s.status.text().startswith("Nothing was pasted: the clipboard holds more than plain text")
+    assert s.draft.data == before and not s.draft.can_undo
+
+
+def test_paste_of_no_text_adds_nothing(records_window: MainWindow) -> None:
+    s = _settings(records_window)
+    mime = QMimeData()
+    mime.setData("image/png", b"\x89PNG")
+    _paste(s, mime)
+    assert s.status.text().startswith("Nothing was pasted")

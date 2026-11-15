@@ -27,7 +27,6 @@ import re
 import shutil
 import tempfile
 import time
-import unicodedata
 from collections.abc import Callable, Sequence
 from datetime import date
 from pathlib import Path
@@ -60,7 +59,7 @@ from PySide6.QtWidgets import (
 from .. import sendto
 from ..core.config import ANCHORS, Config, ConfigError, Profile, load_config
 from ..core.fields import MAX_VALUE_LENGTH, usable_for_filename, validate_field, value_from_filename
-from ..core.filenames import suggest_filename, visible
+from ..core.filenames import MAX_FILENAME_LENGTH, hidden_characters, suggest_filename, visible
 from ..core.locations import ConfigSource, Locations, SourceKind, describe, save_config, save_target
 from ..core.paths import same_file
 from ..core.patterns import PatternError, explain, parse_date_format, regex_risk
@@ -98,6 +97,17 @@ MAX_SUMMARY_LINES = 20  # lines of a change summary in a confirm box
 MAX_SUMMARY_LINE = 300  # characters of one summary line
 MAX_PASTE_LINES = 500  # clipboard lines read by "Paste choices" (UX-033)
 MAX_PASTE_CHARS = 1_000_000  # clipboard text looked at; a config is never larger
+# A pasted choice must be a valid field value (D-118) and fit in a file name with ".pdf".
+MAX_PASTED_CHOICE = min(MAX_VALUE_LENGTH, MAX_FILENAME_LENGTH - len(".pdf"))
+# Clipboard formats plain text arrives in. Anything else (a spreadsheet, a web
+# page, a document, an image, files) means it wasn't plain text: refused whole.
+PLAIN_TEXT_FORMATS = frozenset({
+    "text/plain",
+    "text/plain;charset=utf-8",
+    'application/x-qt-windows-mime;value="Locale"',
+    'application/x-qt-windows-mime;value="OEMText"',
+    'application/x-qt-windows-mime;value="Text"',
+})
 SHARED_COPY_NOTE = ("This file is next to the app, so everyone who starts Document Stamper "
                     "from this folder gets these settings.")
 WHEEL_LATCH_S = 0.6  # a scroll this soon after the page last scrolled keeps scrolling the page
@@ -1429,27 +1439,44 @@ class ListsPage(_Page):
         self.items.editItem(it)
 
     def paste_items(self) -> None:
-        """Add the clipboard's lines as choices, skipping blanks, repeats and odd lines (UX-033)."""
-        text = (QGuiApplication.clipboard().text() or "")[:MAX_PASTE_CHARS]
-        lines = text.splitlines()
+        """Add the clipboard's lines as choices (UX-033).
+
+        Only plain text is taken, and only if every line is a value a choice
+        may hold; otherwise nothing is added and the message says why. Blank
+        lines and choices already in the list are skipped (D-039).
+        """
+        mime = QGuiApplication.clipboard().mimeData()
+        if mime is None or not mime.hasText() or not set(mime.formats()) <= PLAIN_TEXT_FORMATS:
+            self.owner.say("Nothing was pasted: the clipboard holds more than plain text, for example "
+                           "cells from a spreadsheet or text from a web page or document. "
+                           "Paste a plain list, one choice per line.")
+            return
+        lines = mime.text()[:MAX_PASTE_CHARS].splitlines()
         more = len(lines) > MAX_PASTE_LINES
         seen = {self.items.item(i).text().strip().casefold() for i in range(self.items.count())}
         new: list[str] = []
         skipped = 0
-        for line in lines[:MAX_PASTE_LINES]:
+        for n, line in enumerate(lines[:MAX_PASTE_LINES], 1):
             line = line.strip()
             if not line:
                 continue
+            problem = ""
+            if hidden_characters(line):
+                problem = "has a tab or another hidden character"
+            elif len(line.encode("utf-16-le")) // 2 > MAX_PASTED_CHOICE:
+                problem = f"is longer than {MAX_PASTED_CHOICE} characters, the most a choice can be"
+            if problem:
+                self.owner.say(f"Nothing was pasted: line {n} {problem}.")
+                return
             key = line.casefold()
-            if (key in seen or len(line) > MAX_VALUE_LENGTH
-                    or any(unicodedata.category(c) == "Cc" for c in line)):
+            if key in seen:
                 skipped += 1
                 continue
             seen.add(key)
             new.append(line)
         tail = f" Only the first {MAX_PASTE_LINES} lines were read." if more else ""
         if not new:
-            self.owner.say(f"No choices added; {skipped} skipped.{tail}")
+            self.owner.say(f"No choices added; {skipped} already in the list.{tail}")
             return
         self.draft.snapshot("the list as it was before the paste")
         self.items.blockSignals(True)
@@ -1459,8 +1486,8 @@ class ListsPage(_Page):
             self.items.addItem(it)
         self.items.blockSignals(False)
         self._write()
-        self.owner.say(f"Added {len(new)} choice{'s' if len(new) != 1 else ''}; {skipped} skipped.{tail}",
-                       undo=True)
+        self.owner.say(f"Added {len(new)} choice{'s' if len(new) != 1 else ''}; "
+                       f"{skipped} already in the list.{tail}", undo=True)
 
     def _remove_item(self) -> None:
         row = self.items.currentRow()
