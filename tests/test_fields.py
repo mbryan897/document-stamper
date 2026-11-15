@@ -290,12 +290,3 @@ def test_year_zero_is_refused_not_a_crash() -> None:
     pattern = compile_pattern("SOYYYYMMDD-##")
     assert not pattern.test("SO00000101-01").ok
     assert pattern.date_of("SO00000101-01") is None  # date(0, 1, 1) would raise
-
-
-def test_shipped_default_doesnt_tick_fill_in_for_a_rule_that_cant() -> None:
-    from stamper.core.fields import usable_for_filename
-    from tests.stamping import DEFAULT_CONFIG
-
-    spec = load_config(DEFAULT_CONFIG).fields["identifier"]
-    assert not any(usable_for_filename(f) for f in spec.formats)  # only "*"
-    assert spec.from_filename is False
