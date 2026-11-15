@@ -77,6 +77,7 @@ from .services import Services
 from .stamp_dialog import (
     NotesView,
     StampDialog,
+    StartFrom,
     _before_saving,
     _notice,
     _plain_label,
@@ -831,12 +832,13 @@ class CombineDialog(_MultiMixin, StampDialog):
         engine: EngineClient,
         services: Services,
         today: date | None = None,
+        start: StartFrom | None = None,
         parent: QWidget | None = None,
     ) -> None:
         self.combined = combined
         self.originals = tuple(s.path for s in combined.sources)
         super().__init__(config=config, profile=profile, path=combined.path, info=info, password=None,
-                         engine=engine, services=services, today=today, parent=parent)
+                         engine=engine, services=services, today=today, start=start, parent=parent)
         self.save_button.setText("&Stamp and save…")
 
     # hooks
@@ -924,8 +926,8 @@ class CombineDialog(_MultiMixin, StampDialog):
     def _validate(self, row) -> None:  # noqa: ANN001 - _FieldRow is private to stamp_dialog
         super()._validate(row)
         note = self._agreement_note(row.name)
-        if note and not row.note.text():
-            self._set_note(row, note)
+        if note:  # beside any other note, such as a carried value's (UX-032)
+            self._set_note(row, " ".join(t for t in (row.note.text(), note) if t))
 
     def _name_source(self) -> str:
         return combined_original_name(self.originals[0])
@@ -1023,6 +1025,7 @@ class BatchDialog(_MultiMixin, StampDialog):
         handler: Handler,
         services: Services,
         today: date | None = None,
+        start: StartFrom | None = None,
         parent: QWidget | None = None,
     ) -> None:
         self.handler = handler  # used only inside tasks, which run on the engine thread
@@ -1033,7 +1036,8 @@ class BatchDialog(_MultiMixin, StampDialog):
         first = self.files[0]
         assert first.info is not None
         super().__init__(config=config, profile=profile, path=first.path, info=first.info,
-                         password=first.password, engine=engine, services=services, today=today, parent=parent)
+                         password=first.password, engine=engine, services=services, today=today, start=start,
+                         parent=parent)
         self.save_button.setText(f"&Stamp all {len(self.files)} files…")
         engine.task_done.connect(self._on_task_done)
         engine.task_failed.connect(self._on_task_failed)
@@ -1175,8 +1179,8 @@ class BatchDialog(_MultiMixin, StampDialog):
     def _validate(self, row) -> None:  # noqa: ANN001 - _FieldRow is private to stamp_dialog
         super()._validate(row)
         note = self._agreement_note(row.name)
-        if note and not row.note.text():
-            self._set_note(row, note)
+        if note:  # beside any other note, such as a carried value's (UX-032)
+            self._set_note(row, " ".join(t for t in (row.note.text(), note) if t))
 
     def _accept_flags(self) -> tuple[bool, bool]:
         return self._accepted

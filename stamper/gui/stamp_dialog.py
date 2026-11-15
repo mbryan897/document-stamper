@@ -10,7 +10,8 @@ exactly what is on screen.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
@@ -72,7 +73,8 @@ from .profiles import PageScrollCombo, watch_page_scroll
 from .services import Services
 from .wrap_label import WrapAnywhereLabel
 
-__all__ = ["DEBOUNCE_MS", "NotesView", "StampDialog", "describe_date", "group_warnings", "sort_notes"]
+__all__ = ["CARRIED_NOTE", "DEBOUNCE_MS", "NotesView", "StampDialog", "StartFrom", "describe_date",
+           "group_warnings", "sort_notes"]
 
 DEBOUNCE_MS = 150  # typing; clicks redraw at once
 MAX_PREVIEW_DPI = 150
@@ -80,6 +82,34 @@ MIN_PREVIEW_DPI = 30
 MAX_LISTED_WARNINGS = 6
 _ANCHOR_NAMES = {a: a.replace("-", " ").capitalize() for a in ANCHORS}
 _FORM_FIELD = "overlaps a form field or annotation"
+_DIRECTIONS = ("along-top", "along-right")
+CARRIED_NOTE = "Filled in from the last file. Check it before saving."
+
+
+@dataclass(frozen=True)
+class StartFrom:
+    """What a stamp screen starts from instead of the profile's blanks (UX-032, UX-036, UX-038).
+
+    Held in memory only and never written to disk (D-081). ``values`` are
+    raw field values by field key; keys the profile doesn't have are dropped
+    and every value goes through the normal validation. ``from_last_file``:
+    carried from the last saved file, so each carried field says so until
+    edited, and a value the new file's name supplies wins. Otherwise (a
+    profile switch on the same file) the values on screen win, the
+    confirmations already given stay given, and ``dirty`` keeps the screen's
+    unsaved state.
+    """
+
+    values: Mapping[str, str] = field(default_factory=dict)
+    anchor: str = ""
+    direction: str = ""
+    page_numbers: str = ""
+    box: bool | None = None
+    ticks: Mapping[str, bool] = field(default_factory=dict)
+    from_last_file: bool = False
+    accepted: tuple[bool, bool] = (False, False)  # signature, restriction ticks (same file only)
+    dirty: bool = False
+    notice: str = ""
 
 
 def describe_date(d: date) -> str:
@@ -282,6 +312,8 @@ class _FieldRow:
         self.accepts = accepts  # what several rules accept, shown while the field is empty (UX-018)
         self.result: ValidationResult | None = None
         self.prefilled: str | None = None
+        self.carried = False  # filled in from the last file, not edited since (UX-032)
+        self.conflict = ""  # the file name's value won over a different carried one
 
     def raw(self) -> str:
         if isinstance(self.editor, QComboBox):
@@ -296,6 +328,7 @@ class StampDialog(QWidget):
     saved = Signal(object)  # ApplyResult
     cancelled = Signal()
     edited = Signal()  # something on screen changed; is_dirty() may have changed with it
+    profile_chosen = Signal(str)  # another profile picked on this screen (UX-036)
 
     def __init__(
         self,
@@ -308,6 +341,7 @@ class StampDialog(QWidget):
         engine: EngineClient,
         services: Services,
         today: date | None = None,
+        start: StartFrom | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -326,6 +360,13 @@ class StampDialog(QWidget):
         self.direction: str = main.direction
         self.page = 1
         self.page_numbers = WITH_IDENTIFIER
+        if start is not None:  # anything unknown falls back to the profile's choice
+            self.anchor = start.anchor if start.anchor in ANCHORS else self.anchor
+            self.direction = start.direction if start.direction in _DIRECTIONS else self.direction
+            option = page_number_option(self._placed_stamps())
+            if start.page_numbers in option.choices and option.enabled[option.choices.index(start.page_numbers)]:
+                self.page_numbers = start.page_numbers
+        self.owner_password_given = False  # kept through a profile switch (UX-036)
         self.revision = 0
         self.saving = False
         self._preview_req = 0
@@ -351,13 +392,17 @@ class StampDialog(QWidget):
 
         self._build()
         self._prefill()
+        if start is not None:
+            self._apply_start(start)
         self._connect_engine()
         for row in self._rows.values():
             self._validate(row)
         self._refresh_page_numbers()
         self._update_name()
         self._changed(immediate=True)
-        self._clean = self._snapshot()
+        # Carried values are the starting point, not typing; after a profile switch the
+        # screen stays as unsaved as it was (UX-006).
+        self._clean = () if start is not None and start.dirty else self._snapshot()
 
     # ------------------------------------------------------------ layout
 
@@ -512,13 +557,16 @@ class StampDialog(QWidget):
 
         title = QLabel(self._title_text())
         title.setObjectName("h1")
-        sub = QLabel(f"Profile: {self.profile.name}")
-        sub.setObjectName("muted")
         head = QVBoxLayout()
         head.setSpacing(2)
         head.addWidget(title)
-        head.addWidget(sub)
+        head.addLayout(self._build_profile_line())
         form.addLayout(head)
+        self.start_frame, start_lay = _notice("warning")  # what a profile switch couldn't keep
+        self.start_label = _plain_label("")
+        start_lay.addWidget(self.start_label)
+        self.start_frame.hide()
+        form.addWidget(self.start_frame)
 
         stamped = self._stamped_fields()
         for name in self.profile.fields:
@@ -536,6 +584,34 @@ class StampDialog(QWidget):
         lay.addWidget(scroll, 1)
         lay.addWidget(self._build_footer())
         return panel
+
+    def _build_profile_line(self) -> QHBoxLayout:
+        """"Profile: <name>", or a list to switch profiles when the config has more than one (UX-036)."""
+        line = QHBoxLayout()
+        line.setSpacing(8)
+        self.profile_combo: PageScrollCombo | None = None
+        if len(self.config.profiles) < 2:
+            line.addWidget(_plain_label(f"Profile: {visible(self.profile.name)}", "muted"))
+            return line
+        label = QLabel("Pro&file:")
+        label.setObjectName("muted")
+        combo = PageScrollCombo()
+        combo.setAccessibleName("Profile")
+        for p in self.config.profiles:
+            combo.addItem(visible(p.name), p.name)
+        combo.setCurrentIndex(combo.findData(self.profile.name))
+        combo.activated.connect(self._profile_picked)
+        label.setBuddy(combo)
+        line.addWidget(label)
+        line.addWidget(combo, 1)
+        self.profile_combo = combo
+        return line
+
+    def _profile_picked(self, index: int) -> None:
+        assert self.profile_combo is not None
+        name = self.profile_combo.itemData(index)
+        if name != self.profile.name:
+            self.profile_chosen.emit(name)
 
     def _stamped_fields(self) -> set[str]:
         out: set[str] = set()
@@ -803,7 +879,89 @@ class StampDialog(QWidget):
                 row.editor.setText(found)
                 row.prefilled = found
 
+    def _apply_start(self, start: StartFrom) -> None:
+        """Fill the screen from ``start`` before its clean state is recorded (UX-032, UX-036, UX-038)."""
+        if start.box is not None:
+            self.box_check.blockSignals(True)
+            self.box_check.setChecked(start.box)
+            self.box_check.blockSignals(False)
+        for name, on in start.ticks.items():
+            if name in self._ticks:
+                self._ticks[name].blockSignals(True)
+                self._ticks[name].setChecked(on)
+                self._ticks[name].blockSignals(False)
+        for name, raw in start.values.items():
+            row = self._rows.get(name)  # keys this profile doesn't have are dropped
+            if row is None:
+                continue
+            raw = raw[:MAX_VALUE_LENGTH]
+            if start.from_last_file:
+                if not raw.strip():
+                    continue
+                if row.prefilled is not None:  # the new file's name wins over a carried value
+                    if self._normal(name, raw) != self._normal(name, row.prefilled):
+                        row.conflict = (
+                            f"The file name gives {visible(self.config.fields[name].label).lower()} "
+                            f"{visible(row.prefilled)}; the last file had {visible(raw)}. The file "
+                            "name's value is used. Check it before saving.")
+                    continue
+            if not self._set_raw(row, raw):
+                continue
+            if start.from_last_file:
+                row.carried = True
+            elif row.prefilled is not None and raw != row.prefilled:
+                row.prefilled = None  # the value on screen was changed from the file name's
+        signature, restriction = start.accepted
+        if signature and self.signature_tick is not None:
+            self.signature_tick.setChecked(True)
+        if restriction and self.restriction_tick is not None:
+            self.restriction_tick.setChecked(True)
+        self.start_label.setText(start.notice)
+        self.start_frame.setVisible(bool(start.notice))
+
+    def _normal(self, name: str, raw: str) -> str:
+        return validate_field(self.config, name, raw, self.today).value
+
+    @staticmethod
+    def _set_raw(row: _FieldRow, raw: str) -> bool:
+        """Put a raw value in a field's editor; False when a list doesn't have it."""
+        if isinstance(row.editor, QComboBox):
+            index = row.editor.findData(raw)
+            if index < 0:
+                return False
+            row.editor.blockSignals(True)
+            row.editor.setCurrentIndex(index)
+            row.editor.blockSignals(False)
+            return True
+        assert isinstance(row.editor, QLineEdit)
+        row.editor.setText(raw)
+        return True
+
+    def start_from(self, *, from_last_file: bool = False, notice: str = "") -> StartFrom:
+        """What is on screen now, for the next screen to start from (memory only, D-081).
+
+        Carried to another file (``from_last_file``), the signature and
+        restriction ticks are not: they belong to this file.
+        """
+        sig, res = (bool(t and t.isChecked()) for t in (self.signature_tick, self.restriction_tick))
+        return StartFrom(
+            values={n: r.raw() for n, r in self._rows.items()},
+            anchor=self.anchor, direction=self.direction, page_numbers=self.page_numbers,
+            box=self.box_check.isChecked(),
+            ticks={n: b.isChecked() for n, b in self._ticks.items()},
+            from_last_file=from_last_file,
+            accepted=(False, False) if from_last_file else (sig, res),
+            dirty=not from_last_file and self.is_dirty(),
+            notice=notice,
+        )
+
+    def raw(self, name: str) -> str:
+        """A field's value as typed or picked (before cleaning up)."""
+        return self._rows[name].raw()
+
     def _field_edited(self, name: str, *, immediate: bool = False) -> None:
+        row = self._rows[name]
+        row.carried, row.conflict = False, ""  # edited: the carried-value note has done its job
         self._validate(self._rows[name])
         self._update_name()
         self._changed(immediate=immediate)
@@ -837,11 +995,15 @@ class StampDialog(QWidget):
             row.editor.style().unpolish(row.editor)
             row.editor.style().polish(row.editor)
 
-        note = ""
+        notes: list[str] = []
         if result.valid and result.date and result.date > self.today and spec.type == "text":
-            note = (f"The date in this {spec.label.lower()}, {describe_date(result.date)}, "
-                    "is in the future. Check it before saving.")
-        self._set_note(row, note)
+            notes.append(f"The date in this {spec.label.lower()}, {describe_date(result.date)}, "
+                         "is in the future. Check it before saving.")
+        if row.conflict:
+            notes.append(row.conflict)
+        elif row.carried:
+            notes.append(CARRIED_NOTE)
+        self._set_note(row, " ".join(notes))
 
     def _set_note(self, row: _FieldRow, text: str) -> None:
         row.note.setText(text)
@@ -1220,6 +1382,7 @@ class StampDialog(QWidget):
                 continue
             self.password = pw
             self.info = info
+            self.owner_password_given = True
             if self.restriction_tick is not None:
                 self.restriction_tick.setChecked(True)
                 self.restriction_tick.setText("Permissions password given; changes allowed")
