@@ -223,7 +223,9 @@ def test_failed_write_leaves_the_old_file(tmp_path: Path, monkeypatch: pytest.Mo
     with pytest.raises(OSError, match="disk full"):
         loc.save_config(load_config(RECORDS_CONFIG), out)
     assert out.read_bytes() == before
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["config.json", "config.json.bak"]
+    dated = loc.dated_backups(out)
+    assert len(dated) == 1 and dated[0].read_bytes() == before
+    assert sorted(p.name for p in tmp_path.iterdir() if p not in dated) == ["config.json", "config.json.bak"]
 
 
 # ------------------------------------------------------------ state
@@ -299,3 +301,46 @@ def test_cli_config_option_still_overrides(corpus_dir: Path, tmp_path: Path) -> 
     r = _cli(str(corpus_dir / "letter_portrait.pdf"), "--config", str(DEFAULT_CONFIG),
              "--set", "identifier=X1", "--set", "doc_type=Report", "--dry-run", env=env)
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_six_saves_keep_five_dated_backups(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from datetime import datetime, timedelta
+
+    out = tmp_path / "config.json"
+    shutil.copyfile(DEFAULT_CONFIG, out)
+    unrelated = ["other.bak", "config.json.old.bak", "config.json.2026-01-01.bak", "Notes.json.20260101-000000.bak"]
+    for name in unrelated:
+        (tmp_path / name).write_text("keep me", encoding="utf-8")
+    clock = iter(datetime(2026, 11, 14, 9, 0, 0) + timedelta(seconds=i) for i in range(6))
+
+    class Clock:
+        @staticmethod
+        def now() -> datetime:
+            return next(clock)
+
+    monkeypatch.setattr(loc, "datetime", Clock)
+    cfg = load_config(DEFAULT_CONFIG)
+    for i in range(6):
+        loc.save_config(cfg, out)
+    dated = loc.dated_backups(out)
+    assert [p.name for p in dated] == [f"config.json.20261114-09000{i}.bak" for i in range(1, 6)]
+    assert loc.backup_path(out).is_file()
+    for name in unrelated:
+        assert (tmp_path / name).read_text(encoding="utf-8") == "keep me"
+
+
+def test_failed_dated_backup_stops_the_save(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    out = tmp_path / "config.json"
+    shutil.copyfile(DEFAULT_CONFIG, out)
+    before = out.read_bytes()
+    real = loc.shutil.copy2
+
+    def copy2(src: Path, dst: Path) -> object:
+        if ".bak" in str(dst) and str(dst) != str(loc.backup_path(out)):
+            raise OSError("no room")
+        return real(src, dst)
+
+    monkeypatch.setattr(loc.shutil, "copy2", copy2)
+    with pytest.raises(OSError, match="no room"):
+        loc.save_config(load_config(RECORDS_CONFIG), out)
+    assert out.read_bytes() == before

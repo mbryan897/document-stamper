@@ -26,6 +26,7 @@ __all__ = [
     "hidden_character_message",
     "normalize",
     "prefill_fields",
+    "usable_for_filename",
     "validate_field",
     "value_from_filename",
 ]
@@ -191,6 +192,11 @@ _BOUNDARY_BEFORE = r"(?<![A-Za-z0-9])"
 _BOUNDARY_AFTER = r"(?![A-Za-z0-9])"
 
 
+def usable_for_filename(fmt: FormatSpec) -> bool:
+    """True if ``value_from_filename`` can use this rule: a simple pattern without ``*``."""
+    return fmt.compiled is not None and not fmt.compiled.has_wildcard
+
+
 def value_from_filename(config: Config, field_name: str, filename: str) -> str | None:
     """Find exactly one valid value for a field inside a filename.
 
@@ -210,9 +216,10 @@ def value_from_filename(config: Config, field_name: str, filename: str) -> str |
     stem = normalize(PureWindowsPath(filename).stem, spec.normalize)
     found: set[str] = set()
     for fmt in spec.formats:
-        compiled = fmt.compiled
-        if compiled is None or compiled.has_wildcard:
+        if not usable_for_filename(fmt):
             continue
+        compiled = fmt.compiled
+        assert compiled is not None
         rx = re.compile(f"{_BOUNDARY_BEFORE}(?:{compiled.body}){_BOUNDARY_AFTER}", re.ASCII)
         for m in rx.finditer(stem):
             candidate = m.group(0)

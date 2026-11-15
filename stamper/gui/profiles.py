@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QKeySequence, QPixmap, QResizeEvent, QShortcut, QWheelEvent
+from PySide6.QtGui import QGuiApplication, QKeySequence, QPixmap, QResizeEvent, QShortcut, QWheelEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -58,8 +58,8 @@ from PySide6.QtWidgets import (
 
 from .. import sendto
 from ..core.config import ANCHORS, Config, ConfigError, Profile, load_config
-from ..core.fields import MAX_VALUE_LENGTH, validate_field, value_from_filename
-from ..core.filenames import suggest_filename, visible
+from ..core.fields import MAX_VALUE_LENGTH, usable_for_filename, validate_field, value_from_filename
+from ..core.filenames import MAX_FILENAME_LENGTH, hidden_characters, suggest_filename, visible
 from ..core.locations import ConfigSource, Locations, SourceKind, describe, save_config, save_target
 from ..core.paths import same_file
 from ..core.patterns import PatternError, explain, parse_date_format, regex_risk
@@ -93,6 +93,23 @@ PROBLEM_LINES = 6  # footer lines before the problem list scrolls (D-093)
 STATUS_LINES = 4
 SAMPLE_ORIGINAL = "provider_return.pdf"
 MAX_NAME_SHOWN = 80  # a name from config in a footer message
+MAX_SUMMARY_LINES = 20  # lines of a change summary in a confirm box
+MAX_SUMMARY_LINE = 300  # characters of one summary line
+MAX_PASTE_LINES = 500  # clipboard lines read by "Paste choices" (UX-033)
+MAX_PASTE_CHARS = 1_000_000  # clipboard text looked at; a config is never larger
+# A pasted choice must be a valid field value (D-118) and fit in a file name with ".pdf".
+MAX_PASTED_CHOICE = min(MAX_VALUE_LENGTH, MAX_FILENAME_LENGTH - len(".pdf"))
+# Clipboard formats plain text arrives in. Anything else (a spreadsheet, a web
+# page, a document, an image, files) means it wasn't plain text: refused whole.
+PLAIN_TEXT_FORMATS = frozenset({
+    "text/plain",
+    "text/plain;charset=utf-8",
+    'application/x-qt-windows-mime;value="Locale"',
+    'application/x-qt-windows-mime;value="OEMText"',
+    'application/x-qt-windows-mime;value="Text"',
+})
+SHARED_COPY_NOTE = ("This file is next to the app, so everyone who starts Document Stamper "
+                    "from this folder gets these settings.")
 WHEEL_LATCH_S = 0.6  # a scroll this soon after the page last scrolled keeps scrolling the page
 
 _ANCHOR_LABELS = {a: a.replace("-", " ").capitalize() for a in ANCHORS}
@@ -165,6 +182,15 @@ def _shown(name: str) -> str:
     """A name from config for a footer message: hidden characters shown, length capped."""
     name = visible(name)
     return name if len(name) <= MAX_NAME_SHOWN else name[:MAX_NAME_SHOWN - 1] + "…"
+
+
+def _summary(lines: Sequence[str]) -> str:
+    """A change summary for a confirm box: hidden characters shown, lines and count capped."""
+    shown = [visible(line, keep="") for line in lines[:MAX_SUMMARY_LINES]]
+    out = [f"• {t if len(t) <= MAX_SUMMARY_LINE else t[:MAX_SUMMARY_LINE - 1] + '…'}" for t in shown]
+    if len(lines) > MAX_SUMMARY_LINES:
+        out.append(f"…and {len(lines) - MAX_SUMMARY_LINES} more.")
+    return "\n".join(out)
 
 
 def _section(text: str) -> QLabel:
@@ -1014,6 +1040,7 @@ class FieldsPage(_Page):
         outer.addWidget(_scroll(self.detail), 1)
         self.try_value: QLineEdit | None = None
         self.try_file: QLineEdit | None = None
+        self.no_usable_rule: QLabel | None = None
 
     @property
     def keys(self) -> list[str]:
@@ -1065,7 +1092,7 @@ class FieldsPage(_Page):
     def rebuild_detail(self) -> None:
         """Rebuild the form for the selected field."""
         _clear(self.form)
-        self.try_value = self.try_file = None
+        self.try_value = self.try_file = self.no_usable_rule = None
         key = self.key
         spec = self.draft.fields[key]
         kind = spec.get("type", "text")
@@ -1167,6 +1194,11 @@ class FieldsPage(_Page):
             self.from_filename.setChecked(bool(spec.get("from_filename")))
             self.from_filename.toggled.connect(self._toggle_from_filename)
             self.form.addWidget(self.from_filename)
+            self.no_usable_rule = _label(
+                "No rule here can be used to fill in from the file name. "
+                "Add a rule without * (for example ##-YYYY-######).", "msgBad")
+            self.no_usable_rule.setVisible(False)
+            self.form.addWidget(self.no_usable_rule)
 
         self.form.addWidget(_section("Try it"))
         self.form.addWidget(_label("A value, as someone would type it:", "muted"))
@@ -1238,6 +1270,10 @@ class FieldsPage(_Page):
             return
         config = self.owner.valid_config
         key = self.key
+        if self.no_usable_rule is not None:
+            spec = config.fields.get(key) if config is not None else None
+            self.no_usable_rule.setVisible(spec is not None and spec.from_filename
+                                           and not any(usable_for_filename(f) for f in spec.formats))
         if config is None or key not in config.fields:
             self.try_value_result.setText("Fix the problems listed below to try values.")
             _restyle(self.try_value_result, "msgNeutral")
@@ -1362,7 +1398,8 @@ class ListsPage(_Page):
         self.items.itemChanged.connect(lambda _i: self._write())
         row.addWidget(self.items, 1)
         col = QVBoxLayout()
-        for text, slot in (("Add choice", self._add_item), ("Remove", self._remove_item),
+        for text, slot in (("Add choice", self._add_item), ("Paste choices", self.paste_items),
+                           ("Remove", self._remove_item),
                            ("Up", lambda: self._move(-1)), ("Down", lambda: self._move(1))):
             b = _small(text)
             b.clicked.connect(slot)
@@ -1400,6 +1437,57 @@ class ListsPage(_Page):
         self.items.setCurrentItem(it)
         self._write()
         self.items.editItem(it)
+
+    def paste_items(self) -> None:
+        """Add the clipboard's lines as choices (UX-033).
+
+        Only plain text is taken, and only if every line is a value a choice
+        may hold; otherwise nothing is added and the message says why. Blank
+        lines and choices already in the list are skipped (D-039).
+        """
+        mime = QGuiApplication.clipboard().mimeData()
+        if mime is None or not mime.hasText() or not set(mime.formats()) <= PLAIN_TEXT_FORMATS:
+            self.owner.say("Nothing was pasted: the clipboard holds more than plain text, for example "
+                           "cells from a spreadsheet or text from a web page or document. "
+                           "Paste a plain list, one choice per line.")
+            return
+        lines = mime.text()[:MAX_PASTE_CHARS].splitlines()
+        more = len(lines) > MAX_PASTE_LINES
+        seen = {self.items.item(i).text().strip().casefold() for i in range(self.items.count())}
+        new: list[str] = []
+        skipped = 0
+        for n, line in enumerate(lines[:MAX_PASTE_LINES], 1):
+            line = line.strip()
+            if not line:
+                continue
+            problem = ""
+            if hidden_characters(line):
+                problem = "has a tab or another hidden character"
+            elif len(line.encode("utf-16-le")) // 2 > MAX_PASTED_CHOICE:
+                problem = f"is longer than {MAX_PASTED_CHOICE} characters, the most a choice can be"
+            if problem:
+                self.owner.say(f"Nothing was pasted: line {n} {problem}.")
+                return
+            key = line.casefold()
+            if key in seen:
+                skipped += 1
+                continue
+            seen.add(key)
+            new.append(line)
+        tail = f" Only the first {MAX_PASTE_LINES} lines were read." if more else ""
+        if not new:
+            self.owner.say(f"No choices added; {skipped} already in the list.{tail}")
+            return
+        self.draft.snapshot("the list as it was before the paste")
+        self.items.blockSignals(True)
+        for line in new:
+            it = QListWidgetItem(line)
+            it.setFlags(it.flags() | Qt.ItemFlag.ItemIsEditable)
+            self.items.addItem(it)
+        self.items.blockSignals(False)
+        self._write()
+        self.owner.say(f"Added {len(new)} choice{'s' if len(new) != 1 else ''}; "
+                       f"{skipped} already in the list.{tail}", undo=True)
 
     def _remove_item(self) -> None:
         row = self.items.currentRow()
@@ -1464,27 +1552,30 @@ class GeneralPage(_Page):
             lines.append(f"Saving creates {target.path} ({target.kind.description}).")
         else:
             lines.append("Saving updates this file and keeps the previous version as "
-                         f"{target.path.name}.bak.")
+                         f"{target.path.name}.bak, and the last five as dated backups you can restore.")
         self.form.addWidget(_label(" ".join(lines), "help"))
         row = QHBoxLayout()
         self.import_button = _small("Import…")
         self.export_button = _small("Export…")
-        self.import_button.clicked.connect(self.owner.import_config)
+        self.restore_button = _small("Restore a previous version…")
+        self.import_button.clicked.connect(lambda: self.owner.import_config())
         self.export_button.clicked.connect(self.owner.export_config)
+        self.restore_button.clicked.connect(self.owner.restore_backup)
         row.addWidget(self.import_button)
         row.addWidget(self.export_button)
+        row.addWidget(self.restore_button)
         row.addStretch(1)
         self.form.addLayout(row)
 
         self.form.addWidget(_section("Send to menu"))
         self.form.addWidget(_label(
             "Adds Document Stamper to the menu you get by right-clicking a file in Explorer "
-            "and choosing Send to.", "help"))
+            "and choosing Send to. This takes effect right away; it isn't part of Save changes.", "help"))
         self.sendto_status = _label("", "muted")
         self.form.addWidget(self.sendto_status)
         row = QHBoxLayout()
         self.sendto_add = _small("Add to the Send to menu")
-        self.sendto_remove = _small("Remove")
+        self.sendto_remove = _small("Remove from the Send to menu")
         self.sendto_add.clicked.connect(self._sendto_add)
         self.sendto_remove.clicked.connect(self._sendto_remove)
         row.addWidget(self.sendto_add)
@@ -1836,6 +1927,11 @@ class ProfileSettings(QWidget):
         self._revalidate()
         if not self.can_save() or self.valid_config is None or self.target is None:
             return
+        text = (f"Save these changes to {_shown(self.target.path.name)}?\n\n"
+                + _summary(diff_summary(self.draft.baseline, self.draft.data))
+                + (f"\n\n{SHARED_COPY_NOTE}" if self.target.kind is SourceKind.APP else ""))
+        if not self.services.confirm(self, "Save changes?", text, "Save changes"):
+            return
         try:
             save_config(self.valid_config, self.target.path, expect=self.target.digest)
         except OSError as e:
@@ -1860,21 +1956,21 @@ class ProfileSettings(QWidget):
 
     # ------------------------------------------------------------ import, export
 
-    def import_config(self) -> None:
+    def import_config(self, start: Path | None = None, name_filter: str | None = None) -> None:
         """Load another config file into the editor (saved only when the user saves)."""
-        path = self.services.ask_import_file(self)
+        path = self.services.ask_import_file(self, start, name_filter)
         if path is None:
             return
         try:
             imported = load_config(path)
         except ConfigError as e:
             shown = e.problems[:MAX_PROBLEMS]
-            self.say(f"{path.name} can't be imported:\n" + "\n".join(f"• {p}" for p in shown))
+            self.say(f"{_shown(path.name)} can't be imported:\n" + "\n".join(f"• {p}" for p in shown))
             return
         lines = diff_summary(self.draft.data, imported)
-        bak = f" The file it replaces is kept as {self.target.path.name}.bak." if self.target else ""
-        text = (f"{path.name} replaces all profiles, fields and lists:\n\n"
-                + "\n".join(f"• {line}" for line in lines)
+        bak = f" The file it replaces is kept as {_shown(self.target.path.name)}.bak." if self.target else ""
+        text = (f"{_shown(path.name)} replaces all profiles, fields and lists:\n\n"
+                + _summary(lines)
                 + f"\n\nNothing changes on disk until you click Save changes.{bak}")
         if not self.services.confirm(self, "Import this config?", text, "Import"):
             return
@@ -1882,7 +1978,13 @@ class ProfileSettings(QWidget):
         self._local.clear()
         self.show_section(self.nav.currentRow())
         self.changed()
-        self.say(f"Imported {path.name}. Check it, then Save changes.")
+        self.say(f"Imported {_shown(path.name)}. Check it, then Save changes.")
+
+    def restore_backup(self) -> None:
+        """Pick a backup of this config and load it like an import (UX-023)."""
+        path = (self.target or self.source).path
+        name = path.name
+        self.import_config(path.parent, f"Backups of {name} ({name}.bak {name}.*.bak)")
 
     def export_config(self) -> None:
         """Save a copy of what's on screen to a file the user picks."""

@@ -95,12 +95,14 @@ def test_button_shows_the_profiles_color(settings: ProfileSettings) -> None:
     assert ed.color_note.isHidden()
 
 
-def test_picking_a_swatch_changes_the_draft_and_saves(qtbot: QtBot, settings: ProfileSettings) -> None:
+def test_picking_a_swatch_changes_the_draft_and_saves(qtbot: QtBot, settings: ProfileSettings,
+                                                       fake: FakeServices) -> None:
     ed = settings.profiles_page.stamp_editors[0]
     ed.color.panel.swatch("Dark red").click()
     assert ed.color.color() == "#C00000" and ed.color.text().startswith("Dark red")
     assert settings.draft.profiles[0]["stamps"][0]["color"] == "#C00000"
     qtbot.waitUntil(settings.can_save)
+    fake.confirms.append(True)
     settings.save()
     saved = load_config(settings.source.path)
     assert saved.profiles[0].stamps[0].color.upper() == "#C00000"
