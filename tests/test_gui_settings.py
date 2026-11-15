@@ -186,10 +186,11 @@ def test_drop_is_ignored_while_settings_are_open(records_window: MainWindow) -> 
 # ------------------------------------------------------------ saving
 
 
-def test_rename_profile_and_save(qtbot: QtBot, records_window: MainWindow, locs: Locations) -> None:
+def test_rename_profile_and_save(fake: FakeServices, qtbot: QtBot, records_window: MainWindow, locs: Locations) -> None:
     s = _settings(records_window)
     _type(qtbot, s.profiles_page.name, "Records")
     assert s.can_save()
+    fake.confirms.append(True)
     s.save()
     assert load_config(locs.app_config).default_profile.name == "Records"
     assert load_config(backup_path(locs.app_config)).default_profile.name == "Records submission"
@@ -200,11 +201,13 @@ def test_rename_profile_and_save(qtbot: QtBot, records_window: MainWindow, locs:
     assert w.drop.profile_combo.currentText() == "Records"
 
 
-def test_save_refuses_a_config_someone_else_saved(qtbot: QtBot, records_window: MainWindow, locs: Locations) -> None:
+def test_save_refuses_a_config_someone_else_saved(fake: FakeServices, qtbot: QtBot, records_window: MainWindow,
+                                                  locs: Locations) -> None:
     s = _settings(records_window)
     _type(qtbot, s.profiles_page.name, "Mine")
     theirs = load_config(RECORDS_CONFIG).to_json().replace("Records submission", "Theirs")
     locs.app_config.write_text(theirs, encoding="utf-8")  # a colleague saved meanwhile
+    fake.confirms.append(True)
     s.save()
     assert locs.app_config.read_text(encoding="utf-8") == theirs
     assert records_window.stack.currentWidget() is s and "changed by someone else" in s.status.text()
@@ -221,10 +224,12 @@ def test_problem_blocks_save_and_is_listed(qtbot: QtBot, records_window: MainWin
     assert not s.problem_label.isVisible()
 
 
-def test_ctrl_s_saves(qtbot: QtBot, records_window: MainWindow, locs: Locations) -> None:
+def test_ctrl_s_saves(fake: FakeServices, qtbot: QtBot, records_window: MainWindow, locs: Locations) -> None:
     s = _settings(records_window)
     _type(qtbot, s.profiles_page.name, "Ctrl S")
+    fake.confirms.append(True)
     qtbot.keyClick(s.profiles_page.name, Qt.Key.Key_S, Qt.KeyboardModifier.ControlModifier)
+    assert fake.questions[-1][0] == "Save changes?"  # Ctrl+S asks like the button
     assert load_config(locs.app_config).default_profile.name == "Ctrl S"
 
 
@@ -233,6 +238,7 @@ def test_builtin_saves_next_to_the_app(qtbot: QtBot, fake: FakeServices, locs: L
     s = _settings(w)
     assert s.banner.isVisible() and "Saving creates" in s.banner_text.text()
     assert s.can_save()  # saving the built-in as your own needs no edit
+    fake.confirms.append(True)
     s.save()
     assert locs.app_config.is_file()
     assert w.source is not None and w.source.kind is SourceKind.APP
@@ -260,13 +266,14 @@ def test_read_only_config_offers_export_only(qtbot: QtBot, fake: FakeServices, l
 # ------------------------------------------------------------ profiles page
 
 
-def test_add_profile_and_make_it_default(records_window: MainWindow, locs: Locations) -> None:
+def test_add_profile_and_make_it_default(fake: FakeServices, records_window: MainWindow, locs: Locations) -> None:
     s = _settings(records_window)
     page = s.profiles_page
     page.master.buttons["Add"].click()
     assert page.name.text() == "New profile"
     page.master.buttons["Make default"].click()
     assert "(default)" in page.master.list.item(1).text()
+    fake.confirms.append(True)
     s.save()
     cfg = load_config(locs.app_config)
     assert [p.name for p in cfg.profiles] == ["Records submission", "New profile"]
@@ -317,13 +324,14 @@ def test_insert_menu_adds_tokens(records_window: MainWindow) -> None:
     assert "Today's date  {date}" in actions and "Optional part  [ ]" in actions
 
 
-def test_add_a_bottom_stamp(qtbot: QtBot, records_window: MainWindow, locs: Locations) -> None:
+def test_add_a_bottom_stamp(fake: FakeServices, qtbot: QtBot, records_window: MainWindow, locs: Locations) -> None:
     s = _settings(records_window)
     s.profiles_page.form.itemAt(0)  # page is built
     add = next(b for b in s.profiles_page.detail.findChildren(type(s.save_button)) if b.text() == "Add a stamp")
     add.click()
     assert len(s.profiles_page.stamp_editors) == 2
     assert s.profiles_page.stamp_editors[1].anchor.currentData() == "bottom-right"
+    fake.confirms.append(True)
     s.save()
     assert len(load_config(locs.app_config).default_profile.stamps) == 2
 
@@ -360,13 +368,15 @@ def test_preview_says_why_it_is_missing(qtbot: QtBot, records_window: MainWindow
 # ------------------------------------------------------------ fields page
 
 
-def test_relabel_identifier_keeps_its_key(qtbot: QtBot, records_window: MainWindow, locs: Locations) -> None:
+def test_relabel_identifier_keeps_its_key(fake: FakeServices, qtbot: QtBot, records_window: MainWindow,
+                                          locs: Locations) -> None:
     s = _settings(records_window)
     s.show_section(1)
     page = s.fields_page
     page.select_key("identifier")
     assert not page.type_combo.isEnabled()
     _type(qtbot, page.label_edit, "Report number")
+    fake.confirms.append(True)
     s.save()
     cfg = load_config(locs.app_config)
     assert cfg.fields["identifier"].label == "Report number"
@@ -410,7 +420,7 @@ def test_test_box_follows_unsaved_rule_edits(qtbot: QtBot, records_window: MainW
     assert page.try_value_result.text().startswith("Matches @@-####")
 
 
-def test_advanced_regex_rule(qtbot: QtBot, records_window: MainWindow, locs: Locations) -> None:
+def test_advanced_regex_rule(fake: FakeServices, qtbot: QtBot, records_window: MainWindow, locs: Locations) -> None:
     s = _settings(records_window)
     s.show_section(1)
     page = s.fields_page
@@ -420,12 +430,13 @@ def test_advanced_regex_rule(qtbot: QtBot, records_window: MainWindow, locs: Loc
     ed.regex_box.setChecked(True)
     _type(qtbot, ed.rule, r"CASE-\d{4}")
     assert "Regular expression" in ed.explanation.text()
+    fake.confirms.append(True)
     s.save()
     fmt = load_config(locs.app_config).fields["identifier"].formats[-1]
     assert fmt.regex == r"CASE-\d{4}" and fmt.pattern is None
 
 
-def test_add_field_then_use_it(qtbot: QtBot, records_window: MainWindow, locs: Locations) -> None:
+def test_add_field_then_use_it(fake: FakeServices, qtbot: QtBot, records_window: MainWindow, locs: Locations) -> None:
     s = _settings(records_window)
     s.show_section(1)
     page = s.fields_page
@@ -434,6 +445,7 @@ def test_add_field_then_use_it(qtbot: QtBot, records_window: MainWindow, locs: L
     assert "{new_field}" in page.form.itemAt(2).widget().text()  # the key was made from "New field"
     s.show_section(0)
     s.profiles_page.fields.set_ticked("new_field", True)
+    fake.confirms.append(True)
     s.save()
     cfg = load_config(locs.app_config)
     assert cfg.fields["new_field"].label == "Reviewer"
@@ -463,7 +475,7 @@ def test_change_type_to_choice(records_window: MainWindow) -> None:
 # ------------------------------------------------------------ lists page
 
 
-def test_rename_list_and_edit_choices(records_window: MainWindow, locs: Locations) -> None:
+def test_rename_list_and_edit_choices(fake: FakeServices, records_window: MainWindow, locs: Locations) -> None:
     s = _settings(records_window)
     s.show_section(2)
     page = s.lists_page
@@ -471,6 +483,7 @@ def test_rename_list_and_edit_choices(records_window: MainWindow, locs: Location
     page.name_edit.editingFinished.emit()
     page._add_item()
     page.items.item(page.items.count() - 1).setText("Evidence log")
+    fake.confirms.append(True)
     s.save()
     cfg = load_config(locs.app_config)
     assert cfg.taxonomies["Document types"][-1] == "Evidence log"
@@ -490,13 +503,14 @@ def test_emptied_list_is_a_problem(records_window: MainWindow) -> None:
 # ------------------------------------------------------------ general page
 
 
-def test_date_format(qtbot: QtBot, records_window: MainWindow, locs: Locations) -> None:
+def test_date_format(fake: FakeServices, qtbot: QtBot, records_window: MainWindow, locs: Locations) -> None:
     s = _settings(records_window)
     s.show_section(3)
     page = s.general_page
     assert page.date_example.text() == "Today is written 10-18-2026."
     _type(qtbot, page.date_format, "YYYY-MM-DD")
     assert page.date_example.text() == "Today is written 2026-10-18."
+    fake.confirms.append(True)
     s.save()
     assert load_config(locs.app_config).settings.date_format == "YYYY-MM-DD"
 
@@ -530,6 +544,7 @@ def test_import_replaces_after_confirm_and_save(qtbot: QtBot, fake: FakeServices
     assert title == "Import this config?"
     assert "Profiles added: Records submission" in text and "Nothing changes on disk" in text
     assert not locs.app_config.exists()  # not until Save
+    fake.confirms.append(True)
     s.save()
     assert load_config(locs.app_config) == load_config(RECORDS_CONFIG)
     assert w.profile is not None and w.profile.name == "Records submission"
@@ -587,6 +602,7 @@ def test_app_folder_copied_elsewhere_keeps_its_profiles(qtbot: QtBot, fake: Fake
     fake.import_files = [RECORDS_CONFIG]
     fake.confirms = [True]
     s.import_config()
+    fake.confirms.append(True)
     s.save()
     close_window(w)
     moved = tmp_path / "other-pc" / "E" / "DocumentStamper"
@@ -860,6 +876,105 @@ def test_danger_color_contrast() -> None:
 
 
 # ------------------------------------------------------------ save asks, backups, restore, paste (UX-022/023/027/033)
+
+
+def test_save_asks_and_lists_a_stamp_text_change(qtbot: QtBot, records_window: MainWindow, fake: FakeServices,
+                                                 locs: Locations) -> None:
+    s = _settings(records_window)
+    _type(qtbot, s.profiles_page.stamp_editors[0].text, "{identifier}  |  Pg {page}")
+    fake.confirms.append(True)
+    s.save()
+    title, text = fake.questions[-1]
+    assert title == "Save changes?"
+    assert "• Stamp text changed: Records submission" in text
+    assert profiles.SHARED_COPY_NOTE in text  # config.json next to the app
+    assert load_config(locs.app_config).default_profile.stamps[0].text == "{identifier}  |  Pg {page}"
+
+
+def test_declining_the_save_writes_nothing(qtbot: QtBot, records_window: MainWindow, fake: FakeServices,
+                                           locs: Locations) -> None:
+    before = locs.app_config.read_bytes()
+    s = _settings(records_window)
+    _type(qtbot, s.profiles_page.name, "Not saved")
+    s.save()  # fake.confirms is empty: Cancel
+    assert fake.questions and fake.questions[-1][0] == "Save changes?"
+    assert locs.app_config.read_bytes() == before
+    assert sorted(p.name for p in locs.app.iterdir()) == ["config.json"]  # no backups either
+    assert records_window.stack.currentWidget() is s and s.draft.dirty
+
+
+def test_user_folder_config_has_no_shared_folder_line(qtbot: QtBot, fake: FakeServices, locs: Locations) -> None:
+    shutil.copyfile(RECORDS_CONFIG, locs.user_config)
+    w = _window(qtbot, fake, locs)
+    s = _settings(w)
+    assert s.target is not None and s.target.kind is SourceKind.USER
+    _type(qtbot, s.profiles_page.name, "Mine")
+    fake.confirms.append(True)
+    s.save()
+    assert "Profiles added: Mine" in fake.questions[-1][1]
+    assert profiles.SHARED_COPY_NOTE not in fake.questions[-1][1]
+    close_window(w)
+
+
+def test_names_in_the_save_summary_are_shown_as_text(records_window: MainWindow, fake: FakeServices) -> None:
+    s = _settings(records_window)
+    name = "<b>x</b>‮"
+    s.profiles_page.name.setText(name)
+    s.profiles_page.name.textEdited.emit(name)
+    s.changed()
+    s.save()
+    text = fake.questions[-1][1]
+    assert "Profiles added: <b>x</b>⟨U+202E⟩" in text  # literal, hidden character shown
+
+
+def test_confirm_box_is_plain_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    from PySide6.QtWidgets import QMessageBox
+    from stamper.gui import services
+    make_app()
+    seen: list[QMessageBox] = []
+    monkeypatch.setattr(QMessageBox, "exec", lambda box: seen.append(box) or 0)
+    assert services._confirm(None, "Save changes?", "• Profiles added: <b>x</b>", "Save changes") is False
+    box = seen[0]
+    assert box.textFormat() == Qt.TextFormat.PlainText
+    assert box.text() == "• Profiles added: <b>x</b>"
+    assert box.defaultButton().text() == "Cancel"
+
+
+def test_summary_is_capped() -> None:
+    out = profiles._summary([f"line {i}" for i in range(25)])
+    assert out.count("• ") == profiles.MAX_SUMMARY_LINES and out.endswith("…and 5 more.")
+    assert len(profiles._summary(["y" * 1000])) == len("• ") + profiles.MAX_SUMMARY_LINE
+
+
+def test_restore_fills_the_draft_and_writes_nothing(records_window: MainWindow, fake: FakeServices,
+                                                    locs: Locations) -> None:
+    old = locs.app.joinpath("config.json.20261101-101010.bak")
+    shutil.copyfile(DEFAULT_CONFIG, old)
+    listing = sorted(p.name for p in locs.app.iterdir())
+    before = locs.app_config.read_bytes()
+    s = _settings(records_window)
+    s.show_section(3)
+    fake.import_files = [old]
+    fake.confirms = [True]
+    s.general_page.restore_button.click()
+    start, name_filter = fake.import_prompts[-1]
+    assert start == locs.app
+    assert name_filter == "Backups of config.json (config.json.bak config.json.*.bak)"
+    assert "Profiles added: Standard" in fake.questions[-1][1]  # shown as a diff and confirmed
+    assert [p["name"] for p in s.draft.profiles] == ["Standard"] and s.draft.dirty
+    assert locs.app_config.read_bytes() == before
+    assert sorted(p.name for p in locs.app.iterdir()) == listing
+
+
+def test_restore_refuses_an_invalid_backup(records_window: MainWindow, fake: FakeServices, locs: Locations) -> None:
+    bad = locs.app.joinpath("config.json.bak")
+    bad.write_text("{nope", encoding="utf-8")
+    s = _settings(records_window)
+    fake.import_files = [bad]
+    s.restore_backup()
+    assert "config.json.bak can't be imported" in s.status.text()
+    assert "this isn't valid JSON" in s.status.text()
+    assert fake.questions == [] and not s.draft.dirty
 
 
 def test_fill_in_warning_follows_the_rules(qtbot: QtBot, records_window: MainWindow) -> None:

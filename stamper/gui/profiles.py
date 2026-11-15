@@ -93,6 +93,10 @@ PROBLEM_LINES = 6  # footer lines before the problem list scrolls (D-093)
 STATUS_LINES = 4
 SAMPLE_ORIGINAL = "provider_return.pdf"
 MAX_NAME_SHOWN = 80  # a name from config in a footer message
+MAX_SUMMARY_LINES = 20  # lines of a change summary in a confirm box
+MAX_SUMMARY_LINE = 300  # characters of one summary line
+SHARED_COPY_NOTE = ("This file is next to the app, so everyone who starts Document Stamper "
+                    "from this folder gets these settings.")
 WHEEL_LATCH_S = 0.6  # a scroll this soon after the page last scrolled keeps scrolling the page
 
 _ANCHOR_LABELS = {a: a.replace("-", " ").capitalize() for a in ANCHORS}
@@ -165,6 +169,15 @@ def _shown(name: str) -> str:
     """A name from config for a footer message: hidden characters shown, length capped."""
     name = visible(name)
     return name if len(name) <= MAX_NAME_SHOWN else name[:MAX_NAME_SHOWN - 1] + "…"
+
+
+def _summary(lines: Sequence[str]) -> str:
+    """A change summary for a confirm box: hidden characters shown, lines and count capped."""
+    shown = [visible(line, keep="") for line in lines[:MAX_SUMMARY_LINES]]
+    out = [f"• {t if len(t) <= MAX_SUMMARY_LINE else t[:MAX_SUMMARY_LINE - 1] + '…'}" for t in shown]
+    if len(lines) > MAX_SUMMARY_LINES:
+        out.append(f"…and {len(lines) - MAX_SUMMARY_LINES} more.")
+    return "\n".join(out)
 
 
 def _section(text: str) -> QLabel:
@@ -1474,15 +1487,18 @@ class GeneralPage(_Page):
             lines.append(f"Saving creates {target.path} ({target.kind.description}).")
         else:
             lines.append("Saving updates this file and keeps the previous version as "
-                         f"{target.path.name}.bak.")
+                         f"{target.path.name}.bak, and the last five as dated backups you can restore.")
         self.form.addWidget(_label(" ".join(lines), "help"))
         row = QHBoxLayout()
         self.import_button = _small("Import…")
         self.export_button = _small("Export…")
-        self.import_button.clicked.connect(self.owner.import_config)
+        self.restore_button = _small("Restore a previous version…")
+        self.import_button.clicked.connect(lambda: self.owner.import_config())
         self.export_button.clicked.connect(self.owner.export_config)
+        self.restore_button.clicked.connect(self.owner.restore_backup)
         row.addWidget(self.import_button)
         row.addWidget(self.export_button)
+        row.addWidget(self.restore_button)
         row.addStretch(1)
         self.form.addLayout(row)
 
@@ -1846,6 +1862,11 @@ class ProfileSettings(QWidget):
         self._revalidate()
         if not self.can_save() or self.valid_config is None or self.target is None:
             return
+        text = (f"Save these changes to {_shown(self.target.path.name)}?\n\n"
+                + _summary(diff_summary(self.draft.baseline, self.draft.data))
+                + (f"\n\n{SHARED_COPY_NOTE}" if self.target.kind is SourceKind.APP else ""))
+        if not self.services.confirm(self, "Save changes?", text, "Save changes"):
+            return
         try:
             save_config(self.valid_config, self.target.path, expect=self.target.digest)
         except OSError as e:
@@ -1870,21 +1891,21 @@ class ProfileSettings(QWidget):
 
     # ------------------------------------------------------------ import, export
 
-    def import_config(self) -> None:
+    def import_config(self, start: Path | None = None, name_filter: str | None = None) -> None:
         """Load another config file into the editor (saved only when the user saves)."""
-        path = self.services.ask_import_file(self)
+        path = self.services.ask_import_file(self, start, name_filter)
         if path is None:
             return
         try:
             imported = load_config(path)
         except ConfigError as e:
             shown = e.problems[:MAX_PROBLEMS]
-            self.say(f"{path.name} can't be imported:\n" + "\n".join(f"• {p}" for p in shown))
+            self.say(f"{_shown(path.name)} can't be imported:\n" + "\n".join(f"• {p}" for p in shown))
             return
         lines = diff_summary(self.draft.data, imported)
-        bak = f" The file it replaces is kept as {self.target.path.name}.bak." if self.target else ""
-        text = (f"{path.name} replaces all profiles, fields and lists:\n\n"
-                + "\n".join(f"• {line}" for line in lines)
+        bak = f" The file it replaces is kept as {_shown(self.target.path.name)}.bak." if self.target else ""
+        text = (f"{_shown(path.name)} replaces all profiles, fields and lists:\n\n"
+                + _summary(lines)
                 + f"\n\nNothing changes on disk until you click Save changes.{bak}")
         if not self.services.confirm(self, "Import this config?", text, "Import"):
             return
@@ -1892,7 +1913,13 @@ class ProfileSettings(QWidget):
         self._local.clear()
         self.show_section(self.nav.currentRow())
         self.changed()
-        self.say(f"Imported {path.name}. Check it, then Save changes.")
+        self.say(f"Imported {_shown(path.name)}. Check it, then Save changes.")
+
+    def restore_backup(self) -> None:
+        """Pick a backup of this config and load it like an import (UX-023)."""
+        path = (self.target or self.source).path
+        name = path.name
+        self.import_config(path.parent, f"Backups of {name} ({name}.bak {name}.*.bak)")
 
     def export_config(self) -> None:
         """Save a copy of what's on screen to a file the user picks."""

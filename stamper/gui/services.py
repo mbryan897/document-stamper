@@ -13,7 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QColor, QDesktopServices
 from PySide6.QtWidgets import (
     QColorDialog,
@@ -38,7 +38,8 @@ class Services:
     in the suggested file's folder with its name filled in.
     ``confirm(parent, title, text, yes_label)`` returns True for the yes button.
     ``ask_import_file`` and ``ask_export_path`` pick config files for
-    Profile settings (Phase 4). ``ask_color(parent, current)`` opens the color
+    Profile settings (Phase 4); ``ask_import_file(parent, start, name_filter)``
+    can start in a folder with a filter, for restoring a backup (UX-023). ``ask_color(parent, current)`` opens the color
     wheel and returns ``#RRGGBB`` (D-094). ``ask_open_files(parent, start)``
     picks one or more PDFs for "Choose files…" (D-109); None in a test's
     Services falls back to ``ask_open_file``. ``ask_folder(parent, start)``
@@ -52,7 +53,7 @@ class Services:
     open_file: Callable[[Path], None]
     show_in_folder: Callable[[Path], None]
     confirm: Callable[[QWidget, str, str, str], bool] = lambda *_a: False
-    ask_import_file: Callable[[QWidget], Path | None] = lambda _p: None
+    ask_import_file: Callable[[QWidget, Path | None, str | None], Path | None] = lambda _p, _s, _f: None
     ask_export_path: Callable[[QWidget, Path], Path | None] = lambda _p, _s: None
     ask_color: Callable[[QWidget, str], str | None] = lambda _p, _c: None
     ask_open_files: Callable[[QWidget, Path | None], list[Path] | None] | None = None
@@ -105,6 +106,7 @@ def _ask_password(parent: QWidget, file_name: str, problem: str, owner: bool) ->
 
 def _confirm(parent: QWidget, title: str, text: str, yes_label: str) -> bool:
     box = QMessageBox(QMessageBox.Icon.Question, title, text, QMessageBox.StandardButton.NoButton, parent)
+    box.setTextFormat(Qt.TextFormat.PlainText)  # the text carries names from config files
     yes = box.addButton(yes_label, QMessageBox.ButtonRole.AcceptRole)
     no = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
     box.setDefaultButton(no)  # destructive questions default to the safe answer
@@ -113,9 +115,9 @@ def _confirm(parent: QWidget, title: str, text: str, yes_label: str) -> bool:
     return box.clickedButton() is yes
 
 
-def _ask_import_file(parent: QWidget) -> Path | None:
+def _ask_import_file(parent: QWidget, start: Path | None = None, name_filter: str | None = None) -> Path | None:
     name, _ = QFileDialog.getOpenFileName(
-        parent, "Import a config file", "", "Config files (*.json)")
+        parent, "Import a config file", str(start or ""), name_filter or "Config files (*.json)")
     return Path(name) if name else None
 
 

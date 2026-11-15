@@ -95,6 +95,11 @@ class ConfigDraft:
         """True when the draft differs from what was loaded or last saved."""
         return self.data != self._saved
 
+    @property
+    def baseline(self) -> dict[str, Any]:
+        """A copy of the config as it was loaded or last saved (what Save compares against)."""
+        return copy.deepcopy(self._saved)
+
     def mark_saved(self) -> None:
         """The draft was written; it's the new baseline."""
         self._saved = copy.deepcopy(self.data)
@@ -327,15 +332,29 @@ def sample_values(config: Config, profile: Profile, today: date) -> dict[str, st
 
 
 def diff_summary(old: Config | Mapping[str, Any], new: Config | Mapping[str, Any]) -> list[str]:
-    """What an import would change, as short lines: profiles, fields and lists added or removed."""
+    """What changes between two configs, as short lines.
 
-    def parts(cfg: Config | Mapping[str, Any]) -> tuple[list[str], dict[str, str], list[str]]:
-        d = cfg.model_dump(mode="json") if isinstance(cfg, Config) else cfg
+    Profiles, fields and lists added or removed; fields renamed; and, for the
+    ones in both, a profile's stamp text, a field's rules and the date format.
+    """
+
+    def data(cfg: Config | Mapping[str, Any]) -> Mapping[str, Any]:
+        return cfg.model_dump(mode="json") if isinstance(cfg, Config) else cfg
+
+    def parts(d: Mapping[str, Any]) -> tuple[list[str], dict[str, str], list[str]]:
         return ([p["name"] for p in d.get("profiles", [])],
                 {k: v.get("label", k) for k, v in d.get("fields", {}).items()},
                 list(d.get("taxonomies", {})))
 
-    (op, of, ot), (np_, nf, nt) = parts(old), parts(new)
+    def stamp_texts(d: Mapping[str, Any]) -> dict[str, list[str]]:
+        return {p["name"]: [st.get("text", "") for st in p.get("stamps", [])] for p in d.get("profiles", [])}
+
+    def rules(d: Mapping[str, Any]) -> dict[str, list[tuple[Any, Any]]]:
+        return {k: [(f.get("pattern"), f.get("regex")) for f in v.get("formats") or []]
+                for k, v in d.get("fields", {}).items()}
+
+    od, nd = data(old), data(new)
+    (op, of, ot), (np_, nf, nt) = parts(od), parts(nd)
     lines: list[str] = []
 
     def report(kind: str, before: Sequence[str], after: Sequence[str]) -> None:
@@ -347,6 +366,10 @@ def diff_summary(old: Config | Mapping[str, Any], new: Config | Mapping[str, Any
             lines.append(f"{kind} removed: {', '.join(removed)}")
 
     report("Profiles", op, np_)
+    ost, nst = stamp_texts(od), stamp_texts(nd)
+    restamped = [n for n in nst if n in ost and ost[n] != nst[n]]
+    if restamped:
+        lines.append(f"Stamp text changed: {', '.join(restamped)}")
     added = [nf[k] for k in nf if k not in of]
     removed = [of[k] for k in of if k not in nf]
     if added:
@@ -357,6 +380,14 @@ def diff_summary(old: Config | Mapping[str, Any], new: Config | Mapping[str, Any
     relabeled = [f"{of[k]} → {nf[k]}" for k in of if k in nf and of[k] != nf[k]]
     if relabeled:
         lines.append(f"Fields renamed: {', '.join(relabeled)}")
+    orl, nrl = rules(od), rules(nd)
+    reruled = [nf[k] for k in nrl if k in orl and orl[k] != nrl[k]]
+    if reruled:
+        lines.append(f"Rules changed: {', '.join(reruled)}")
+    odf = od.get("settings", {}).get("date_format")
+    ndf = nd.get("settings", {}).get("date_format")
+    if odf and ndf and odf != ndf:
+        lines.append(f"Date format changed: {odf} → {ndf}")
     if not lines:
         lines.append("Same profiles, fields and lists; settings inside them may differ.")
     return lines

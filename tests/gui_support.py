@@ -41,6 +41,7 @@ class FakeServices:
     confirms: list[bool] = field(default_factory=list)
     questions: list[tuple[str, str]] = field(default_factory=list)
     import_files: list[Path | None] = field(default_factory=list)
+    import_prompts: list[tuple[Path | None, str | None]] = field(default_factory=list)
     export_paths: list[Path | None] = field(default_factory=list)
     colors: list[str | None] = field(default_factory=list)
     color_prompts: list[str] = field(default_factory=list)
@@ -55,7 +56,7 @@ class FakeServices:
             open_file=self.opened.append,
             show_in_folder=self.shown.append,
             confirm=self._confirm,
-            ask_import_file=lambda _p: self.import_files.pop(0) if self.import_files else None,
+            ask_import_file=self._import,
             ask_export_path=lambda _p, _s: self.export_paths.pop(0) if self.export_paths else None,
             ask_color=self._color,
         )
@@ -63,6 +64,10 @@ class FakeServices:
     def _color(self, _parent: object, current: str) -> str | None:
         self.color_prompts.append(current)
         return self.colors.pop(0) if self.colors else None
+
+    def _import(self, _parent: object, start: Path | None = None, name_filter: str | None = None) -> Path | None:
+        self.import_prompts.append((start, name_filter))
+        return self.import_files.pop(0) if self.import_files else None
 
     def _confirm(self, _parent: object, title: str, text: str, _yes: str) -> bool:
         self.questions.append((title, text))

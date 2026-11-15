@@ -259,3 +259,20 @@ def test_import_forgets_the_snapshot(draft: ConfigDraft) -> None:
     draft.snapshot("x")
     draft.replace(load_config(DEFAULT_CONFIG).model_dump(mode="json"))
     assert not draft.can_undo
+
+
+def test_diff_summary_lists_stamp_text_rules_and_date_format(draft: ConfigDraft) -> None:
+    before = draft.baseline
+    draft.profiles[0]["stamps"][0]["text"] = "{identifier}"
+    draft.fields["identifier"]["formats"].pop()
+    draft.data["settings"]["date_format"] = "YYYY-MM-DD"
+    assert diff_summary(before, draft.data) == [
+        "Stamp text changed: Records submission",
+        "Rules changed: Case number",
+        "Date format changed: MM-DD-YYYY → YYYY-MM-DD",
+    ]
+
+
+def test_baseline_is_a_copy(draft: ConfigDraft) -> None:
+    draft.baseline["profiles"].clear()
+    assert draft.baseline["profiles"] and not draft.dirty

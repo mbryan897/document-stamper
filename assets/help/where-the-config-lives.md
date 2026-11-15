@@ -22,7 +22,8 @@ A config file larger than 1 MB is refused without being read.
 
 **Save changes** in Profile settings writes back to the file that was loaded:
 
-- The previous version is kept next to it as `config.json.bak`, so one mistake can be undone by renaming it back. Only one previous version is kept.
+- First it lists what you changed (profiles, fields and lists added or removed, fields renamed, stamp text, rules and the date format) and asks you to confirm. Cancel is the default, and Ctrl+S asks the same way. When the file is the copy next to the app, it also says that everyone who starts Document Stamper from that folder gets these settings.
+- The previous version is kept next to it as `config.json.bak`, and the last five versions are also kept as `config.json.YYYYMMDD-HHMMSS.bak` (date and time of the save). Older dated backups are deleted; no other file in the folder is touched.
 - The new file is written completely before it replaces the old one, and only if it would load. A half-written or broken config is never left behind.
 - The file is written in the app's own layout. Spacing or key order you used when editing it by hand isn't kept.
 
@@ -34,14 +35,16 @@ A config file you can't write to (made read-only, or in a folder where you don't
 
 This is the way to stop a team changing a shared config: make the file read-only (or put the app in a folder they can't write to). The app has no passwords or user accounts of its own.
 
-## This config: Import… and Export…
+## This config: Import…, Export… and Restore a previous version…
 
 Under **This config** in **General**:
 
 - **Export…** saves what's on screen, including changes you haven't saved, as a config file wherever you choose. Use it to send settings to another computer or keep a copy.
 - **Import…** loads a config file into Profile settings, replacing all profiles, fields and lists. It first lists what would change (profiles, fields and lists added or removed, fields relabelled) and asks you to confirm. Nothing changes on disk until you click **Save changes**, and the file it replaces is kept as `config.json.bak`.
 
-A file with problems can't be imported; the problems are listed.
+- **Restore a previous version…** opens the config's folder showing only its backups (`config.json.bak` and the dated ones). The one you pick is loaded exactly like **Import…**: checked, listed, confirmed, and not written until you click **Save changes**. Saving it makes a new backup of the version it replaces.
+
+A file with problems can't be imported or restored; the problems are listed.
 
 ## Date format
 

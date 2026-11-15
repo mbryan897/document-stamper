@@ -38,10 +38,12 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 
@@ -59,6 +61,7 @@ __all__ = [
     "app_dir",
     "backup_path",
     "builtin_config_path",
+    "dated_backups",
     "describe",
     "find_config",
     "folder_is_writable",
@@ -78,6 +81,7 @@ APP_FOLDER_NAME = "DocumentStamper"
 CONFIG_NAME = "config.json"
 STATE_NAME = "state.json"
 BACKUP_SUFFIX = ".bak"
+DATED_BACKUPS_KEPT = 5  # config.json.YYYYMMDD-HHMMSS.bak files kept beside config.json.bak (UX-023)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -301,6 +305,42 @@ def backup_path(path: Path) -> Path:
     return path.with_name(path.name + BACKUP_SUFFIX)
 
 
+def _dated_pattern(path: Path) -> re.Pattern[str]:
+    return re.compile(re.escape(path.name) + r"\.[0-9]{8}-[0-9]{6}" + re.escape(BACKUP_SUFFIX))
+
+
+def dated_backups(path: Path) -> list[Path]:
+    """``config.json.YYYYMMDD-HHMMSS.bak`` files beside ``path``, oldest first.
+
+    Only names matching exactly that pattern; nothing else in the folder.
+    """
+    rx = _dated_pattern(path)
+    try:
+        names = os.listdir(path.parent)
+    except OSError:
+        return []
+    return [path.with_name(n) for n in sorted(n for n in names if rx.fullmatch(n))]
+
+
+def _keep_dated_backup(path: Path) -> None:
+    """Copy ``path`` to a dated backup, then delete all but the newest few.
+
+    A failed copy raises, so the save stops as it does when ``.bak`` can't be
+    written. An existing backup with the same second is left as it is (two
+    saves in one second keep the older copy; the newer is in ``.bak``). A
+    failed delete of an old backup is ignored.
+    """
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    dated = path.with_name(f"{path.name}.{stamp}{BACKUP_SUFFIX}")
+    if not dated.exists():
+        shutil.copy2(path, dated)
+    for old in dated_backups(path)[:-DATED_BACKUPS_KEPT]:
+        try:
+            old.unlink()
+        except OSError:
+            pass
+
+
 def _write_atomic(path: Path, text: str) -> None:
     """Write UTF-8 text to a temp file in the same folder, then replace ``path``."""
     fd, tmp = tempfile.mkstemp(prefix="~stamper-", suffix=".tmp", dir=path.parent)
@@ -330,7 +370,8 @@ def save_config(config: Config, path: Path, *, backup: bool = True, expect: str 
 
     The text is re-read through the validator before anything on disk
     changes, so a file that wouldn't load is never written. With ``backup``,
-    an existing file is copied to ``config.json.bak`` first (one level kept).
+    an existing file is copied to ``config.json.bak`` first, and to a dated
+    ``config.json.YYYYMMDD-HHMMSS.bak`` (the newest five are kept).
     ``expect`` is the file's ``_config_digest`` when it was loaded (None: there
     was no file); if the file is different now, nothing is written and
     ConfigChanged is raised. Raises OSError if the folder can't be written,
@@ -344,6 +385,7 @@ def save_config(config: Config, path: Path, *, backup: bool = True, expect: str 
             "Export your changes, then restart the app to load the new version")
     if backup and path.is_file():
         shutil.copy2(path, backup_path(path))
+        _keep_dated_backup(path)
     _write_atomic(path, text)
     return path
 
