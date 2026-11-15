@@ -226,5 +226,7 @@ def test_batch_check_lists_a_passing_files_note(qtbot: QtBot, window: MainWindow
     assert "Notes for the files that will be saved:" in text
     assert "• mixed_sizes.pdf: Page 4, stamp 1: font reduced" in text
     assert PROPERTIES_NOTE_PREFIX not in text
+    # The rows are filled while the screen is already current, so Qt shows them on the next event-loop pass.
+    qtbot.waitUntil(lambda: "Saved" in _shown(window.batch_saved.rows_widget), timeout=WAIT_MS)
     texts = _shown(window.batch_saved.rows_widget)
     assert "Saved, with notes (2)" in texts and "Saved" in texts  # shrunk, and the box covers the receipt's title
