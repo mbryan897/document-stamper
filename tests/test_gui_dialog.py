@@ -194,7 +194,7 @@ def test_every_control_reachable_by_tab(qtbot: QtBot, window: MainWindow, corpus
     missing = [c.accessibleName() or c.text() if hasattr(c, "text") else type(c).__name__
                for c in controls if c not in chain]
     assert not missing, missing
-    names = [c.accessibleName() or getattr(c, "text", lambda: "")() for c in chain if c in controls]
+    names = [c.accessibleName() or getattr(c, "text", lambda: "")().replace("&", "") for c in chain if c in controls]
     for expected in ("Case number", "Document type", "Save a copy without a valid signature",
                      "Top right", "Along right edge", "Page numbers", "White box behind stamp",
                      "Cancel", "Stamp and save…"):

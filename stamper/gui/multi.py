@@ -827,7 +827,7 @@ class CombineDialog(_MultiMixin, StampDialog):
         self.originals = tuple(s.path for s in combined.sources)
         super().__init__(config=config, profile=profile, path=combined.path, info=info, password=None,
                          engine=engine, services=services, today=today, parent=parent)
-        self.save_button.setText("Stamp and save…")
+        self.save_button.setText("&Stamp and save…")
 
     # hooks
 
@@ -1024,7 +1024,7 @@ class BatchDialog(_MultiMixin, StampDialog):
         assert first.info is not None
         super().__init__(config=config, profile=profile, path=first.path, info=first.info,
                          password=first.password, engine=engine, services=services, today=today, parent=parent)
-        self.save_button.setText(f"Stamp all {len(self.files)} files…")
+        self.save_button.setText(f"&Stamp all {len(self.files)} files…")
         engine.task_done.connect(self._on_task_done)
         engine.task_failed.connect(self._on_task_failed)
         engine.task_progress.connect(self._on_task_progress)

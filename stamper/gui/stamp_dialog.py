@@ -551,7 +551,7 @@ class StampDialog(QWidget):
         extra = [] if spec.required else ["optional"]
         if not stamped:
             extra.append("not stamped")
-        label = QLabel(spec.label + (f"  ({', '.join(extra)})" if extra else ""))
+        label = QLabel(spec.label.replace("&", "&&") + (f"  ({', '.join(extra)})" if extra else ""))
         label.setObjectName("fieldLabel")
         hints = self._accepts(spec)
 
@@ -650,7 +650,7 @@ class StampDialog(QWidget):
         row.setSpacing(16)
         grid_box = QVBoxLayout()
         grid_box.setSpacing(4)
-        pos_label = QLabel("Position")
+        self.pos_label = pos_label = QLabel("&Position")
         pos_label.setObjectName("muted")
         grid_box.addWidget(pos_label)
         grid = QGridLayout()
@@ -663,20 +663,20 @@ class StampDialog(QWidget):
             b.setObjectName("anchor")
             b.setCheckable(True)
             b.setChecked(anchor == self.anchor)
-            b.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
             b.setAccessibleName(_ANCHOR_NAMES[anchor])
             b.setToolTip(_ANCHOR_NAMES[anchor])
             b.clicked.connect(lambda _c=False, a=anchor: self._set_anchor(a))
             self.anchor_group.addButton(b)
             self.anchor_buttons[anchor] = b
             grid.addWidget(b, i // 3, i % 3)
+        self._anchor_focus()
         grid_box.addLayout(grid)
         grid_box.addStretch(1)
         row.addLayout(grid_box)
 
         dir_box = QVBoxLayout()
         dir_box.setSpacing(4)
-        dir_label = QLabel("Direction")
+        self.dir_label = dir_label = QLabel("&Direction")
         dir_label.setObjectName("muted")
         dir_box.addWidget(dir_label)
         self.direction_group = QButtonGroup(self)
@@ -690,11 +690,12 @@ class StampDialog(QWidget):
             self.direction_group.addButton(b)
             self.direction_buttons[value] = b
             dir_box.addWidget(b)
+        dir_label.setBuddy(self.direction_buttons[self.direction])
         dir_box.addStretch(1)
         row.addLayout(dir_box, 1)
         col.addLayout(row)
 
-        pn_label = QLabel("Page numbers")
+        pn_label = QLabel("Page &numbers")
         pn_label.setObjectName("muted")
         self.page_numbers_combo = PageScrollCombo()
         self.page_numbers_combo.setAccessibleName("Page numbers")
@@ -739,7 +740,7 @@ class StampDialog(QWidget):
         ticks.setVerticalSpacing(6)
         for i, name in enumerate(order):
             text = "Today's date" if name == "date" else self.config.fields[name].label
-            box = QCheckBox(text)
+            box = QCheckBox(text.replace("&", "&&"))  # config text: no access keys from it
             box.setChecked(name in defaults)
             box.toggled.connect(lambda _c: self._update_name())
             self._ticks[name] = box
@@ -781,9 +782,9 @@ class StampDialog(QWidget):
         self.help_button = help_button()
         buttons.addWidget(self.help_button)
         buttons.addStretch(1)
-        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button = QPushButton("&Cancel")
         self.cancel_button.clicked.connect(self._escape)
-        self.save_button = QPushButton("Stamp and save…")
+        self.save_button = QPushButton("&Stamp and save…")
         self.save_button.setObjectName("primary")
         self.save_button.setEnabled(False)
         self.save_button.clicked.connect(self._save)
@@ -879,12 +880,25 @@ class StampDialog(QWidget):
     def _set_anchor(self, anchor: str) -> None:
         self.anchor = anchor
         self.anchor_buttons[anchor].setChecked(True)
+        self._anchor_focus()
         self._refresh_page_numbers()
         self._changed(immediate=True)
+
+    def _anchor_focus(self) -> None:
+        """Tab enters the position grid on the chosen square (UX-015).
+
+        Qt already makes an exclusive group one Tab stop and moves the choice
+        with the arrow keys, but before any square has had focus Tab lands on
+        the first one, whichever is chosen.
+        """
+        for anchor, b in self.anchor_buttons.items():
+            b.setFocusPolicy(Qt.FocusPolicy.StrongFocus if anchor == self.anchor else Qt.FocusPolicy.ClickFocus)
+        self.pos_label.setBuddy(self.anchor_buttons[self.anchor])
 
     def _set_direction(self, direction: str) -> None:
         self.direction = direction
         self.direction_buttons[direction].setChecked(True)
+        self.dir_label.setBuddy(self.direction_buttons[direction])
         self._changed(immediate=True)
 
     def _placed_stamps(self) -> list[StampSpec]:
