@@ -45,6 +45,8 @@ class FakeServices:
     export_paths: list[Path | None] = field(default_factory=list)
     colors: list[str | None] = field(default_factory=list)
     color_prompts: list[str] = field(default_factory=list)
+    folders: list[Path | None] = field(default_factory=list)
+    folder_starts: list[Path] = field(default_factory=list)
 
     def services(self) -> Services:
         """A Services object backed by these lists."""
@@ -59,7 +61,12 @@ class FakeServices:
             ask_import_file=self._import,
             ask_export_path=lambda _p, _s: self.export_paths.pop(0) if self.export_paths else None,
             ask_color=self._color,
+            ask_folder=self._folder,
         )
+
+    def _folder(self, _parent: object, start: Path) -> Path | None:
+        self.folder_starts.append(start)
+        return self.folders.pop(0) if self.folders else None
 
     def _color(self, _parent: object, current: str) -> str | None:
         self.color_prompts.append(current)

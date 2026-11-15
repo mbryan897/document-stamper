@@ -36,7 +36,8 @@ from PySide6.QtWidgets import (
 
 from ..core.config import ANCHORS, Config, Profile, StampSpec
 from ..core.fields import MAX_VALUE_LENGTH, ValidationResult, prefill_fields, validate_field, value_from_filename
-from ..core.filenames import suggest_filename, visible
+from ..core.filenames import first_free_name, suggest_filename, visible
+from ..core.locations import state_folder
 from ..core.paths import same_file, size_text
 from ..core.template import TemplateError, template_tokens
 from ..handlers.base import (
@@ -443,9 +444,15 @@ class StampDialog(QWidget):
         return (bool(self.signature_tick and self.signature_tick.isChecked()),
                 bool(self.restriction_tick and self.restriction_tick.isChecked()))
 
-    def _save_folder(self) -> Path:
-        """The folder Save As starts in."""
+    last_save_folder: object = None  # state.json's last_save_folder, set by the window; untrusted (UX-037)
+
+    def _original_folder(self) -> Path:
+        """The original's folder, where Save As starts when there's no usable last folder."""
         return self.path.parent
+
+    def _save_folder(self) -> Path:
+        """The folder Save As starts in: the last save's folder if it's still usable (UX-037)."""
+        return state_folder(self.last_save_folder) or self._original_folder()
 
     def _progress_text(self, done: int, total: int) -> str:
         return f"Stamping page {done + 1} of {total}…"
@@ -1205,15 +1212,19 @@ class StampDialog(QWidget):
     def _save(self) -> None:
         if not self.save_button.isEnabled():
             return
-        suggested = self._save_folder() / self.suggested_name()
-        out = self.services.ask_save_path(self, suggested)
-        if out is None:
-            return
-        problem = self.check_output(out)
-        if problem:
+        folder = self._save_folder()
+        suggested = folder / first_free_name(folder, self.suggested_name())
+        while True:
+            out = self.services.ask_save_path(self, suggested)
+            if out is None:
+                return
+            problem = self.check_output(out)
+            if not problem:
+                break
+            # Say why, then ask again in the same folder until a free name or cancel (UX-020).
             self._refuse(problem)
-            return
-        self.start_save(out)
+            suggested = out.parent / first_free_name(out.parent, out.name)
+        self.start_save(out)  # the engine checks again just before the rename (D-055)
 
     def start_save(self, out: Path) -> None:
         """Start stamping to ``out`` on the engine thread (no checks; ``_save`` does them)."""

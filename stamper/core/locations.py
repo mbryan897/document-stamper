@@ -73,6 +73,7 @@ __all__ = [
     "save_config",
     "save_state",
     "save_target",
+    "state_folder",
     "user_dir",
     "work_dir",
 ]
@@ -400,6 +401,9 @@ class AppState:
     last_profile: str | None = None
     last_folder: str | None = None
     last_config: str | None = None  # the config found at the last start-up (D-121)
+    last_save_folder: str | None = None  # where the last single or combined copy was saved (UX-037)
+    batch_folder: str | None = None  # the last batch's "In one folder" folder (UX-039)
+    batch_in_one_folder: bool = False  # the last batch saved in one folder (UX-039)
     extra: dict[str, object] = field(default_factory=dict)  # keys from newer versions, kept as-is
 
     def to_json(self) -> str:
@@ -408,6 +412,9 @@ class AppState:
         data["last_profile"] = self.last_profile
         data["last_folder"] = self.last_folder
         data["last_config"] = self.last_config
+        data["last_save_folder"] = self.last_save_folder
+        data["batch_folder"] = self.batch_folder
+        data["batch_in_one_folder"] = self.batch_in_one_folder
         return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
 
@@ -423,12 +430,38 @@ def load_state(locs: Locations | None = None) -> AppState:
     profile = data.pop("last_profile", None)
     folder = data.pop("last_folder", None)
     config = data.pop("last_config", None)
+    save_folder = data.pop("last_save_folder", None)
+    batch_folder = data.pop("batch_folder", None)
+    in_one = data.pop("batch_in_one_folder", None)
     return AppState(
         last_profile=profile if isinstance(profile, str) else None,
         last_folder=folder if isinstance(folder, str) else None,
         last_config=config if isinstance(config, str) else None,
+        last_save_folder=save_folder if isinstance(save_folder, str) else None,
+        batch_folder=batch_folder if isinstance(batch_folder, str) else None,
+        batch_in_one_folder=in_one is True,  # a real bool only, not 1 or "true"
         extra=data,
     )
+
+
+_MAX_PATH16 = 32767  # the longest path Windows accepts, in UTF-16 units
+
+
+def state_folder(value: object) -> Path | None:
+    """A folder read back from ``state.json``, or None unless it's usable now.
+
+    Usable means a string, an absolute path and an existing folder. The
+    file is only a convenience and may have been edited, so anything else
+    is ignored. Checked when the folder is used, since it may have been
+    deleted or renamed after start-up.
+    """
+    if not isinstance(value, str) or not value or len(value) > _MAX_PATH16:
+        return None
+    try:
+        path = Path(value)
+        return path if path.is_absolute() and path.is_dir() else None
+    except (OSError, ValueError):
+        return None
 
 
 def save_state(state: AppState, locs: Locations | None = None) -> bool:

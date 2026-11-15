@@ -53,6 +53,7 @@ from PySide6.QtWidgets import (
 
 from ..core.config import Config, Profile
 from ..core.filenames import visible
+from ..core.locations import state_folder
 from ..core.multi import FilenameAgreement, agree_from_filenames, combined_original_name, disagreement_note
 from ..core.paths import FileIndex, same_file
 from ..core.template import TemplateError, template_tokens
@@ -920,7 +921,7 @@ class CombineDialog(_MultiMixin, StampDialog):
     def _name_source(self) -> str:
         return combined_original_name(self.originals[0])
 
-    def _save_folder(self) -> Path:
+    def _original_folder(self) -> Path:
         return self.originals[0].parent
 
     def _accept_flags(self) -> tuple[bool, bool]:
@@ -1132,7 +1133,7 @@ class BatchDialog(_MultiMixin, StampDialog):
         col.addWidget(self.next_to_radio)
         row = QHBoxLayout()
         row.addWidget(self.folder_radio)
-        self.folder_label = _wrap_label("", "help")
+        self.folder_label = _plain_label("", "help")  # shows a path read back from state.json
         row.addWidget(self.folder_label, 1)
         col.addLayout(row)
         return col
@@ -1151,7 +1152,13 @@ class BatchDialog(_MultiMixin, StampDialog):
         self.out_folder = Path(folder) if folder else None
         if folder:
             self.folder_radio.setChecked(True)
-        self.folder_label.setText(str(folder) if folder else "")
+        self.folder_label.setText(visible(str(folder)) if folder else "")
+
+    def preselect(self, folder: object, in_one_folder: object) -> None:
+        """Start with the last batch's choice; both values come from state.json (UX-039)."""
+        usable = state_folder(folder)
+        if in_one_folder is True and usable is not None:
+            self._set_folder(usable)
 
     def _prefill(self) -> None:
         self._prefill_from([f.path.name for f in self.files])

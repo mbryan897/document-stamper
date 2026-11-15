@@ -69,6 +69,7 @@ from ..core.locations import (
     load_state,
     locations,
     save_state,
+    state_folder,
     work_dir,
 )
 from ..core.pending import Leftover
@@ -529,9 +530,7 @@ class MainWindow(QMainWindow):
         self._mode = ""
         self._opening: tuple[int, Path, str | None] | None = None
         self._thumb_req = 0
-        self._last_folder: Path | None = (
-            Path(self.state.last_folder) if self.state.last_folder and Path(self.state.last_folder).is_dir()
-            else None)
+        self._last_folder: Path | None = state_folder(self.state.last_folder)
 
         self.stack = QStackedWidget()
         self.drop = DropScreen()
@@ -893,6 +892,7 @@ class MainWindow(QMainWindow):
             config=self.config, profile=self.profile, path=path, info=info,
             password=password, engine=self.engine, services=self.services, today=self.today,
         )
+        dialog.last_save_folder = self.state.last_save_folder
         dialog.cancelled.connect(lambda: self.show_drop())
         dialog.saved.connect(self._on_saved)
         dialog.edited.connect(self.update_title)
@@ -1035,6 +1035,7 @@ class MainWindow(QMainWindow):
         self._close_prepare()
         dialog = CombineDialog(config=self.config, profile=self.profile, combined=combined, info=info,
                                engine=self.engine, services=self.services, today=self.today)
+        dialog.last_save_folder = self.state.last_save_folder
         dialog.cancelled.connect(lambda: self._back_to_files())
         dialog.saved.connect(self._on_saved)
         dialog.edited.connect(self.update_title)
@@ -1052,6 +1053,7 @@ class MainWindow(QMainWindow):
         dialog = BatchDialog(config=self.config, profile=self.profile, files=files,
                              accept_signature_loss=accept_signature, accept_restrictions=accept_restrictions,
                              engine=self.engine, handler=self.handler, services=self.services, today=self.today)
+        dialog.preselect(self.state.batch_folder, self.state.batch_in_one_folder)
         dialog.cancelled.connect(lambda: self._back_to_files())
         dialog.batch_saved.connect(self._on_batch_saved)
         dialog.edited.connect(self.update_title)
@@ -1063,6 +1065,12 @@ class MainWindow(QMainWindow):
         return dialog
 
     def _on_batch_saved(self, outcomes: list[object]) -> None:
+        dialog = self.dialog
+        if isinstance(dialog, BatchDialog):  # remember where the copies went (UX-039); never field values
+            self.state.batch_in_one_folder = dialog.out_folder is not None
+            if dialog.out_folder is not None:
+                self.state.batch_folder = str(dialog.out_folder)
+            save_state(self.state, self.locs)
         self._close_dialog()
         self.batch_saved.show_outcomes(outcomes)  # type: ignore[arg-type]
         self.stack.setCurrentWidget(self.batch_saved)
@@ -1101,6 +1109,8 @@ class MainWindow(QMainWindow):
             extra = dialog.saved_notes()
             n = len(dialog.originals)
             original = (f"All {n} files unchanged" + (", signed files still signed" if dialog.combined.signed else ""))
+        self.state.last_save_folder = str(result.output_path.parent)  # Save As starts here next time (UX-037)
+        save_state(self.state, self.locs)
         self._close_dialog()
         self._drop_combined()
         self.saved.show_result(result, label=label, identifier=ident, signed=signed,
