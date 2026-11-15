@@ -29,6 +29,10 @@ def _isolated_folders(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pyt
     monkeypatch.setenv("STAMPER_APP_DIR", str(root / "app"))
     monkeypatch.setenv("STAMPER_USER_DIR", str(root / "user"))
     monkeypatch.setenv("STAMPER_LOCAL_DIR", str(root / "local"))
+    # Nor may a test read or write the real Send to folder (UX-011: every window checks it).
+    from stamper import sendto
+
+    monkeypatch.setattr(sendto, "sendto_dir", lambda: root / "SendTo")
 
 
 @pytest.fixture(scope="session")

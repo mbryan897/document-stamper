@@ -52,7 +52,7 @@ Run it after changing a screen. `tests\test_help.py` fails when a topic links to
 
 ## Profile settings and where the config lives
 
-"Profile settings…" on the drop screen edits profiles, fields, validation rules, lists and the date format, with a live preview and test boxes. Save writes the config back safely and keeps the previous version as `config.json.bak`; Import and Export move a whole config between machines.
+"Organization setup… › Edit profiles and fields…" on the drop screen opens Profile settings, which edits profiles, fields, validation rules, lists and the date format, with a live preview and test boxes. Save writes the config back safely and keeps the previous version as `config.json.bak`; Import and Export move a whole config between machines.
 
 The config is looked for in this order:
 
@@ -60,7 +60,7 @@ The config is looked for in this order:
 2. `%APPDATA%\DocumentStamper\config.json`.
 3. The built-in `config\default.json` (never written to; saving it creates one of the files above).
 
-`--config` on the command line and "Open another config…" in the window override the lookup. A config file you can't write to opens read-only. The last profile and the last folder you opened a file from are remembered in `%APPDATA%\DocumentStamper\state.json`; field values never are.
+`--config` on the command line and "Organization setup… › Use a different settings file…" in the window override the lookup. A config file you can't write to opens read-only. The last profile and the last folder you opened a file from are remembered in `%APPDATA%\DocumentStamper\state.json`; field values never are.
 
 General → "Add to the Send to menu" puts Document Stamper in Explorer's right-click Send to menu.
 

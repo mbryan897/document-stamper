@@ -1,6 +1,6 @@
 # Profiles and stamps
 
-This part of the help is for whoever sets up Document Stamper for an agency or team. Everything an agency decides (its fields and formats, its document types, what the stamp says and where it goes) lives in one config file, edited in **Profile settings…** on the drop screen. Nothing agency-specific is built into the app.
+This part of the help is for whoever sets up Document Stamper for an agency or team. Everything an agency decides (its fields and formats, its document types, what the stamp says and where it goes) lives in one config file, edited in Profile settings: on the drop screen, choose **Organization setup…** › **Edit profiles and fields…**. Nothing agency-specific is built into the app.
 
 ![Profile settings, Profiles section](images/settings-profiles.png)
 

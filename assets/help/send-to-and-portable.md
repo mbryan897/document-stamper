@@ -4,7 +4,7 @@
 
 With Document Stamper in Explorer's *Send to* menu, you can right-click one or more PDFs and choose *Send to › Document Stamper*. One file opens its stamp dialog; several open the files screen.
 
-To add it, open **Profile settings…**, choose **General**, and under **Send to menu** click **Add to the Send to menu**. It adds a shortcut for your Windows account only (in `%APPDATA%\Microsoft\Windows\SendTo`); nothing is installed and no administrator rights are needed.
+To add it, click **Add Document Stamper to Explorer's Send to menu** on the drop screen. The link is there only while the shortcut is missing or points at another copy of the app, and goes away once it's added. If adding fails (some managed computers don't allow it), the reason is shown and the link stays. You can also choose **Organization setup…** › **Edit profiles and fields…**, then **General**, and under **Send to menu** click **Add to the Send to menu**. It adds a shortcut for your Windows account only (in `%APPDATA%\Microsoft\Windows\SendTo`); nothing is installed and no administrator rights are needed.
 
 Adding or removing the shortcut takes effect right away; it isn't part of **Save changes**, and Cancel doesn't undo it.
 

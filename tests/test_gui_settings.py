@@ -99,7 +99,7 @@ def test_invalid_config_next_to_the_app_is_reported(qtbot: QtBot, fake: FakeServ
     locs.app_config.write_text('{"schema_version": 1}', encoding="utf-8")
     w = _window(qtbot, fake, locs)
     assert "config.json can't be used" in w.drop.message.text()
-    assert not w.drop.settings_button.isEnabled()
+    assert not w.drop.settings_action.isEnabled()
     close_window(w)
 
 

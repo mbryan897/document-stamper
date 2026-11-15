@@ -2,7 +2,7 @@
 
 One window, screens in a stack. The drop screen takes PDFs (drag and drop
 or "Choose files…") and shows the active profile, with a way to switch
-profiles or open another config file for testing. One file opens its stamp
+profiles, and "Organization setup…" for whoever looks after the tool. One file opens its stamp
 dialog; problems opening it (not a PDF, missing, XFA, no password) are plain
 messages on the drop screen, which stays put. Several files open the files
 screen, where the user orders them and picks Combine or Batch (Phase 4.5,
@@ -14,9 +14,10 @@ more height than ``MINIMUM_SIZE``, so the buttons at the bottom of each
 screen stay inside the window at any size the user can choose.
 
 The config comes from the lookup in ``core/locations.py`` (D-017, D-080):
-next to the app, then ``%APPDATA%``, then the built-in default. "Open another
-config…" is a per-session override on top of it (D-072). "Profile
-settings…" edits whichever config is loaded and saves it back (D-082). The
+next to the app, then ``%APPDATA%``, then the built-in default. "Organization
+setup… › Use a different settings file…" is a per-session override on top of it
+(D-072). "Organization setup… › Edit profiles and fields…" opens Profile
+settings, which edits whichever config is loaded and saves it back (D-082). The
 last profile and the last folder a file came from are remembered in
 ``state.json`` (D-081); field values never are.
 """
@@ -24,6 +25,7 @@ last profile and the last folder a file came from are remembered in
 from __future__ import annotations
 
 import gc
+import os
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -49,6 +51,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMenu,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -57,6 +60,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .. import sendto
 from ..core import pending
 from ..core.config import Config, ConfigError, Profile, load_config
 from ..core.filenames import visible
@@ -167,6 +171,7 @@ def _message_frame() -> tuple[QFrame, QLabel]:
     lay = QVBoxLayout(frame)
     lay.setContentsMargins(16, 12, 16, 12)
     label = QLabel()
+    label.setTextFormat(Qt.TextFormat.PlainText)  # messages carry file names and paths
     label.setWordWrap(True)
     label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
     lay.addWidget(label)
@@ -266,24 +271,32 @@ class DropScreen(QWidget):
         self.profile_combo.setAccessibleName("Profile")
         self.profile_combo.setMinimumWidth(220)
         with_label.setBuddy(self.profile_combo)
-        self.config_button = QPushButton("Open another config…")
-        self.config_button.setObjectName("link")
-        self.config_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.settings_button = QPushButton("Profile settings…")
-        self.settings_button.setObjectName("link")
-        self.settings_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        # One entry for whoever looks after the tool (UX-009); users don't need either item.
+        self.setup_button = QPushButton("Organization setup…")
+        self.setup_button.setObjectName("link")
+        self.setup_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        setup_menu = QMenu(self.setup_button)
+        self.settings_action = setup_menu.addAction("Edit profiles and fields…")
+        self.file_action = setup_menu.addAction("Use a different settings file…")
+        self.setup_button.setMenu(setup_menu)
         self.help_button = help_button()
         row.addWidget(with_label)
         row.addWidget(self.profile_combo)
-        row.addWidget(self.settings_button)
-        row.addWidget(self.config_button)
+        row.addWidget(self.setup_button)
         row.addWidget(self.help_button)
         row.addStretch(1)
         outer.addLayout(row)
         self.config_label = QLabel("")
         self.config_label.setObjectName("muted")
+        self.config_label.setTextFormat(Qt.TextFormat.PlainText)  # shows a path
         self.config_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         outer.addWidget(self.config_label)
+        # Offered only while the Send to shortcut is missing or points at another copy (UX-011).
+        self.sendto_link = QPushButton("Add Document Stamper to Explorer's Send to menu")
+        self.sendto_link.setObjectName("mutedLink")
+        self.sendto_link.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.sendto_link.hide()
+        outer.addWidget(self.sendto_link, 0, Qt.AlignmentFlag.AlignHCenter)
         outer.addStretch(1)
 
     def help_topic(self) -> str:
@@ -547,8 +560,9 @@ class MainWindow(QMainWindow):
         self.stack.currentChanged.connect(lambda _i: self.update_title())
 
         self.drop.choose_button.clicked.connect(self.choose_file)
-        self.drop.config_button.clicked.connect(self.choose_config)
-        self.drop.settings_button.clicked.connect(self.open_settings)
+        self.drop.file_action.triggered.connect(self.choose_config)
+        self.drop.settings_action.triggered.connect(self.open_settings)
+        self.drop.sendto_link.clicked.connect(self.add_sendto)
         self.drop.profile_combo.activated.connect(self._profile_picked)
         self.saved.open_button.clicked.connect(self._open_saved)
         self.saved.folder_button.clicked.connect(self._show_saved)
@@ -593,7 +607,7 @@ class MainWindow(QMainWindow):
         now, before = str(self.config_path), self.state.last_config
         if before and before != now:
             self.drop.show_message(
-                "This is a different config from last time. "
+                "This is a different settings file from last time. "
                 f"Now: {visible(now)} ({self.source.kind.description}). Before: {visible(before)}. "
                 "Check the profile and fields before you stamp.", warning=True)
         if before != now:
@@ -700,7 +714,7 @@ class MainWindow(QMainWindow):
         """Load a config file; problems are shown on the drop screen.
 
         ``source`` says where it came from (the lookup, or "Open another
-        config…" when not given).
+        settings file…" when not given).
         """
         path = Path(path)
         try:
@@ -713,8 +727,9 @@ class MainWindow(QMainWindow):
             self.drop.show_message(f"{visible(path.name)} can't be used:\n{lines}{tail}")
             if self.config is None:
                 self.drop.profile_combo.clear()
-                self.drop.config_label.setText("No config loaded. Open another config to continue.")
-                self.drop.settings_button.setEnabled(False)
+                self.drop.config_label.setText(
+                    "No settings file loaded. Open Organization setup… and choose Use a different settings file…")
+                self.drop.settings_action.setEnabled(False)
             return False
         keep = self.profile.name if self.profile and self.config else self.state.last_profile
         self.config, self.config_path = config, path
@@ -729,13 +744,14 @@ class MainWindow(QMainWindow):
             combo.addItem(p.name, p.name)
         combo.setCurrentIndex(combo.findData(self.profile.name))
         combo.setEnabled(len(config.profiles) > 1)
-        self.drop.config_label.setText(f"Config: {self.config_path} ({self.source.kind.description})")
-        self.drop.settings_button.setEnabled(True)
+        self.drop.config_label.setText(
+            f"Settings file: {visible(str(self.config_path))} ({self.source.kind.description})")
+        self.drop.settings_action.setEnabled(True)
         self.drop.show_message("")
         return True
 
     def choose_config(self) -> None:
-        """"Open another config…": load a config.json for this session only."""
+        """"Use a different settings file…": load a config.json for this session only."""
         path = self.services.ask_config_file(self)
         if path is not None:
             self.load_config(path)
@@ -756,6 +772,30 @@ class MainWindow(QMainWindow):
         self._drop_combined()
         self.stack.setCurrentWidget(self.drop)
         self.drop.show_message(message)
+        self._offer_sendto()
+        self.drop.choose_button.setFocus()
+
+    # ------------------------------------------------------------ Send to (UX-011)
+
+    def sendto_available(self) -> bool:
+        """Shortcuts can only be made on Windows (the same test as Profile settings)."""
+        return os.name == "nt"
+
+    def _offer_sendto(self) -> None:
+        """Show the Send to link while the shortcut is missing or points at another copy."""
+        offer = self.sendto_available() and sendto.status(self._sendto_shortcut).state in (
+            sendto.SendToState.MISSING, sendto.SendToState.ELSEWHERE)
+        self.drop.sendto_link.setVisible(offer)
+
+    def add_sendto(self) -> None:
+        """The drop screen's Send to link: the same shortcut the General page makes."""
+        try:
+            sendto.create(self._sendto_shortcut)
+        except sendto.SendToError as e:
+            self.drop.show_message(visible(str(e)), warning=True)
+            return
+        self.drop.sendto_link.hide()
+        self.drop.show_message("Added to the Send to menu.")
         self.drop.choose_button.setFocus()
 
     def update_title(self) -> None:
@@ -847,7 +887,7 @@ class MainWindow(QMainWindow):
         """Check a file and, if it can be stamped, show the stamp dialog for it."""
         path = Path(path)
         if self.config is None or self.profile is None:
-            self.show_drop("Open a config file that works before choosing a PDF.")
+            self.show_drop("Open a settings file that works before choosing a PDF.")
             return
         if path.is_dir():
             self.show_drop(f"{visible(path.name)} is a folder. Choose the PDF files in it instead.")
@@ -914,7 +954,7 @@ class MainWindow(QMainWindow):
     def open_several(self, paths: Sequence[Path]) -> None:
         """Check several files on the engine thread, then show the files screen."""
         if self.config is None or self.profile is None:
-            self.show_drop("Open a config file that works before choosing PDFs.")
+            self.show_drop("Open a settings file that works before choosing PDFs.")
             return
         paths = [Path(p) for p in paths]
         self.show_drop()

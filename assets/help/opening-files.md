@@ -18,17 +18,20 @@ Dropping PDFs onto `DocumentStamper.exe`, or onto a shortcut to it, in Explorer 
 
 ## Send to
 
-Once it's set up, you can right-click PDFs in Explorer and choose *Send to › Document Stamper*. It's added from **Profile settings…** › **General**; see [Send to menu and running from a USB drive](send-to-and-portable.md).
+Once it's set up, you can right-click PDFs in Explorer and choose *Send to › Document Stamper*. While it isn't set up, the drop screen offers **Add Document Stamper to Explorer's Send to menu** under the settings file line; click it to add the shortcut. It can also be added or removed from **Organization setup…** › **Edit profiles and fields…** › **General**; see [Send to menu and running from a USB drive](send-to-and-portable.md).
 
 ## Which profile is used
 
-The list next to "Stamping with" shows the profile the next file will use. Pick another one before you open the file. The app remembers your choice next time. When the config has only one profile, the list can't be changed.
+The list next to "Stamping with" shows the profile the next file will use. Pick another one before you open the file. The app remembers your choice next time. When the settings file has only one profile, the list can't be changed.
 
-Under it, the "Config:" line shows which config file is in use and where it came from: next to the app, in your user folder, the built-in default, or opened for this session. If the app finds a different config file from the one it found last time, an amber note says so when it starts. Check the profile and fields before you stamp, because a different config can mean different rules. See [Where the config lives](where-the-config-lives.md).
+Under it, the "Settings file:" line shows which settings file (`config.json`) is in use and where it came from: next to the app, in your user folder, the built-in default, or opened for this session. If the app finds a different settings file from the one it found last time, an amber note says so when it starts. Check the profile and fields before you stamp, because a different settings file can mean different rules. See [Where the config lives](where-the-config-lives.md).
 
-## Open another config…
+## Organization setup…
 
-**Open another config…** loads a different `config.json` for this session only, for example to try out a config someone sent you. It isn't remembered: next time the app starts, it uses the usual config again. Problems in the file are listed on the drop screen and nothing changes.
+**Organization setup…**, next to the profile list, is for whoever sets up Document Stamper for the agency or team. It opens a menu with two choices:
+
+- **Edit profiles and fields…** opens Profile settings, where the profiles, fields, lists and date format are changed; see [Profiles and stamps](profiles-and-stamps.md). It's greyed out while no settings file is loaded.
+- **Use a different settings file…** loads a different `config.json` for this session only, for example to try out one someone sent you. It isn't remembered: next time the app starts, it uses the usual settings file again. Problems in the file are listed on the drop screen and nothing changes.
 
 ## Files that need a password
 

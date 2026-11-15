@@ -45,7 +45,7 @@ def test_a_different_config_from_last_time_is_noted(qtbot: QtBot, fake: FakeServ
     shutil.copyfile(RECORDS_CONFIG, locs.app_config)  # someone puts a config next to the app
     second = _start(qtbot, fake, locs)
     note = _note(second)
-    assert note.startswith("This is a different config from last time.")
+    assert note.startswith("This is a different settings file from last time.")
     assert str(locs.app_config) in note and "next to the app" in note and str(DEFAULT_CONFIG) in note
     assert second.drop.message_frame.objectName() == "warning"
 

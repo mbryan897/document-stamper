@@ -7,7 +7,7 @@ Config lookup (D-017, D-080)
 2. ``config.json`` in the user folder (``%APPDATA%\\DocumentStamper``).
 3. The shipped ``config/default.json``, which is never written to.
 
-"Open another config…" in the window and ``--config`` on the command line
+"Use a different settings file…" in the window and ``--config`` on the command line
 override the lookup for that session or run; they are not part of it.
 
 Profile settings saves back to the file it loaded. A file that can't be
@@ -203,7 +203,7 @@ class SourceKind(Enum):
     APP = "app"  # next to the exe
     USER = "user"  # %APPDATA%
     BUILTIN = "builtin"  # shipped default, read-only
-    OTHER = "other"  # "Open another config…" or --config
+    OTHER = "other"  # "Use a different settings file…" or --config
 
     @property
     def description(self) -> str:

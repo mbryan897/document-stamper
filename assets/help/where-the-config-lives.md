@@ -12,7 +12,7 @@ When it starts, the app uses the first of these it finds:
 2. *In your user folder*: `%APPDATA%\DocumentStamper\config.json`, for settings that belong to one Windows user.
 3. *The built-in default*: generic settings shipped inside the app, with one "Standard" profile and an "Identifier" field that accepts any value. It's never changed.
 
-The drop screen shows which one is in use, on the "Config:" line under the profile list, and so does the top of Profile settings.
+The drop screen shows which one is in use, on the "Settings file:" line under the profile list, and so does the top of Profile settings.
 
 If the app finds a different file from the one it found last time, it says so in an amber note when it starts. That can happen when someone puts a `config.json` next to the app, or a copy of the app is run from somewhere else. Check the profile and fields before stamping.
 
@@ -52,7 +52,7 @@ A file with problems can't be imported or restored; the problems are listed.
 
 ## Trying another config
 
-**Open another config…** on the drop screen uses a different config file for this session only, without moving or copying anything, and isn't remembered. Use it to check a config before putting it in place. Profile settings then edits that file.
+**Organization setup…** › **Use a different settings file…** on the drop screen uses a different config file for this session only, without moving or copying anything, and isn't remembered. Use it to check a config before putting it in place. Profile settings then edits that file.
 
 ## What's stored besides the config
 

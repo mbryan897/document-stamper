@@ -26,7 +26,7 @@ To stamp several PDFs at once, drop them together. You can combine them into one
 
 ## Profiles
 
-What goes in the stamp, which fields you're asked for, where the stamp sits and how the copy is named all come from a *profile*. There can be several, one for each kind of submission, and you choose one on the drop screen next to "Stamping with". Profiles are set up in **Profile settings…**, usually by whoever looks after the tool; see [Profiles and stamps](profiles-and-stamps.md).
+What goes in the stamp, which fields you're asked for, where the stamp sits and how the copy is named all come from a *profile*. There can be several, one for each kind of submission, and you choose one on the drop screen next to "Stamping with". Profiles are set up under **Organization setup…** › **Edit profiles and fields…**, usually by whoever looks after the tool; see [Profiles and stamps](profiles-and-stamps.md).
 
 ## What it remembers, and what it doesn't
 

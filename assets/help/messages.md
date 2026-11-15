@@ -12,13 +12,13 @@ If Document Stamper was stopped while writing a copy (closed from Task Manager, 
 
 Nothing is deleted unless you choose to. The app only lists copies it recorded itself; it never searches your folders.
 
-## A different config from last time
+## A different settings file from last time
 
-"This is a different config from last time. Now: … Before: … Check the profile and fields before you stamp." The app found a different `config.json` from the one it used last time, for example because a copy of the app now has its own config next to it. The rules, lists and stamp may differ. See [Where the config lives](where-the-config-lives.md).
+"This is a different settings file from last time. Now: … Before: … Check the profile and fields before you stamp." The app found a different `config.json` from the one it used last time, for example because a copy of the app now has its own config next to it. The rules, lists and stamp may differ. See [Where the config lives](where-the-config-lives.md).
 
 ## The config can't be used
 
-"config.json can't be used:" followed by a list of problems. The file is broken or has a setting that doesn't make sense, such as a stamp using a field the profile doesn't have. Each problem names where it is in the file. Fix it in a text editor, or use **Open another config…** to load a good one for now. A config larger than 1 MB is refused without being read, because a real one is far smaller.
+"config.json can't be used:" followed by a list of problems. The file is broken or has a setting that doesn't make sense, such as a stamp using a field the profile doesn't have. Each problem names where it is in the file. Fix it in a text editor, or use **Organization setup…** › **Use a different settings file…** to load a good one for now. Until one loads, the drop screen says "No settings file loaded." A config larger than 1 MB is refused without being read, because a real one is far smaller.
 
 ## Notes before saving and on the saved screen
 
