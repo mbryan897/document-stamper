@@ -166,13 +166,13 @@ def test_saved_screen_note_is_plain_text(qtbot: QtBot, window: MainWindow) -> No
 
 
 def test_saved_screen_names_the_original(qtbot: QtBot, window: MainWindow) -> None:
-    src = Path("C:/cases/return<b>x</b>\u202e.pdf")
+    src = Path("C:/cases/return<b>x<b>\u202e.pdf")  # no "/" in the name: Windows reads it as a folder
     saved = window.saved
     saved.show_result(_result([PROPS]), label="Case number", identifier="X", signed=True, source=src)
     label = saved.original_label
     shown = str(src).replace("‮", "⟨U+202E⟩")
     assert label.text() == f"{shown} – unchanged, still digitally signed"
-    assert "<b>x</b>" in label.text()
+    assert "return<b>x<b>" in label.text()
     assert label.textFormat() == Qt.TextFormat.PlainText
     assert label.textInteractionFlags() & Qt.TextInteractionFlag.TextSelectableByMouse
     assert saved.path_label.textFormat() == Qt.TextFormat.PlainText
