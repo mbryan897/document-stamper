@@ -346,10 +346,15 @@ def _interface_strings() -> set[str]:
     for path in [*GUI.glob("*.py"), REPO / "stamper" / "sendto.py"]:
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
-                out.add(node.value)
+                out.add(_shown(node.value))
             elif isinstance(node, ast.JoinedStr):
-                out.add("".join(v.value if isinstance(v, ast.Constant) else "N" for v in node.values))
+                out.add(_shown("".join(v.value if isinstance(v, ast.Constant) else "N" for v in node.values)))
     return out
+
+
+def _shown(text: str) -> str:
+    """Text as the interface shows it: an access-key "&" marker dropped, "&&" read as "&"."""
+    return re.sub(r"&(.)", r"\1", text)
 
 
 def _bold(book: HelpBook) -> set[tuple[str, str]]:
@@ -381,7 +386,7 @@ def _controls() -> set[str]:
                 name = fn.id if isinstance(fn, ast.Name) else fn.attr if isinstance(fn, ast.Attribute) else ""
                 arg = node.args[0]
                 if name in names and isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-                    out.add(arg.value)
+                    out.add(_shown(arg.value))
     out.update(profiles.SECTIONS)
     out.update(text for _, text in profiles._NORMALIZERS)
     out.update(text for _, text in profiles._DIRECTIONS)

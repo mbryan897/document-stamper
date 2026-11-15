@@ -8,10 +8,10 @@ Drop several PDFs on the window (or pick several with **Choose files…**, or se
 
 The files are listed in order, each with its page count, or "needs a password".
 
-- Drag a file up or down the list, or select it and use **Move up** and **Move down**. For Combine, the pages follow this order.
-- **Remove** takes the selected file off the list. The file itself isn't touched.
+- Drag a file up or down the list, or select it and use **Move up** and **Move down** (or Alt+Up and Alt+Down). For Combine, the pages follow this order.
+- **Remove** (or Delete) takes the selected file off the list. The file itself isn't touched.
 - **Add files…** adds more from the file picker.
-- **Back** goes back to the drop screen.
+- **Cancel**, at the bottom right, goes back to the drop screen.
 
 Files that can't be used are listed under "Left out" with the reason: they can't be found, are listed twice, aren't PDF files, are XFA forms, or are damaged beyond repair. The others carry on without them.
 

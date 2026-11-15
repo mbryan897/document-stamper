@@ -407,7 +407,7 @@ def test_batch_five_files(qtbot: QtBot, window: MainWindow, fake: FakeServices, 
     wait_ready(qtbot, d)
     assert d.placement_problem()
     assert d.save_button.isEnabled(), d.blockers()
-    assert d.save_button.text() == "Stamp all 5 files…"
+    assert d.save_button.text() == "&Stamp all 5 files…"
     fake.confirms.append(True)
     d.save_button.click()
     qtbot.waitUntil(lambda: window.stack.currentWidget() is window.batch_saved, timeout=WAIT_MS)

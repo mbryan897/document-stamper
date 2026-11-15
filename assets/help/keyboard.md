@@ -7,6 +7,9 @@ Everything can be done with the keyboard: Tab moves between controls, and Space 
 | Key | Does |
 | --- | --- |
 | F1 | Opens this help at the topic for the screen you're on. |
+| Ctrl+O | **Choose files…**, on the drop screen, the saved screen and the batch results. |
+
+Underlined letters are access keys: hold Alt and press the letter to go to that control or press that button.
 
 ## The stamp dialog
 
@@ -14,6 +17,10 @@ Everything can be done with the keyboard: Tab moves between controls, and Space 
 | --- | --- |
 | Enter | **Stamp and save…**, once it's available. |
 | Esc | **Cancel**: back to the drop screen, nothing saved; asks first if there are changes. While saving, stops the save. |
+| Alt+S, Alt+C | **Stamp and save…** and **Cancel**. |
+| Alt+P | Goes to **Position**. The chosen position is one Tab stop; the arrow keys move it, and stop at the edges. |
+| Alt+D | Goes to **Direction**. |
+| Alt+N | Goes to **Page numbers**. |
 | Page Up, Page Down | The previous or next page in the preview. |
 
 The same keys work when stamping a combined file or several files separately.
@@ -22,7 +29,10 @@ The same keys work when stamping a combined file or several files separately.
 
 | Key | Does |
 | --- | --- |
-| Up, Down | Select a file in the list, then Tab to **Move up**, **Move down** or **Remove** and press Space. |
+| Up, Down | Select a file in the list. |
+| Alt+Up, Alt+Down | Move the selected file up or down the list. |
+| Delete | Takes the selected file off the list. The file itself isn't touched. |
+| Alt+C | **Cancel** on the files screen: back to the drop screen. |
 | Enter in a password box | **Check** that password. |
 
 ## Profile settings
