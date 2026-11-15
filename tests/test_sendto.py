@@ -15,7 +15,11 @@ windows = pytest.mark.skipif(os.name != "nt", reason="shell shortcuts are Window
 REPO = Path(__file__).resolve().parents[1]
 
 
+_REAL_SENDTO_DIR = sendto.sendto_dir  # conftest points it at a temp folder for every other test
+
+
 def test_shortcut_goes_in_the_users_sendto_folder(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(sendto, "sendto_dir", _REAL_SENDTO_DIR)
     monkeypatch.setenv("APPDATA", str(tmp_path))
     assert sendto.shortcut_path() == tmp_path / "Microsoft" / "Windows" / "SendTo" / "Document Stamper.lnk"
 

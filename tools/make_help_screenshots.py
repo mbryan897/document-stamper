@@ -487,6 +487,8 @@ def main(argv: list[str] | None = None) -> int:
         os.environ["STAMPER_APP_DIR"] = str(root / "app")
         os.environ["STAMPER_USER_DIR"] = str(root / "user")
         os.environ["STAMPER_LOCAL_DIR"] = str(root / "local")
+        # The Send to shortcut is looked for here, so it's always missing: the drop screen shows its link.
+        os.environ["APPDATA"] = str(root / "appdata")
         shutil.copyfile(CONFIG, root / "app" / "config.json")
         work = root / "files"
         work.mkdir()
