@@ -96,10 +96,10 @@ def _ask_save_path(parent: QWidget, suggested: Path) -> Path | None:
 
 
 def _ask_password(parent: QWidget, file_name: str, problem: str, owner: bool) -> str | None:
-    what = "the owner password" if owner else "the password"
+    what = "the permissions password" if owner else "the password"
     lead = f"{problem}\n\n" if problem else ""
     text, ok = QInputDialog.getText(
-        parent, "Password needed" if not owner else "Owner password",
+        parent, "Password needed" if not owner else "Permissions password",
         f"{lead}Enter {what} for {file_name}:", QLineEdit.EchoMode.Password)
     return text if ok else None
 

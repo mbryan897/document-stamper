@@ -387,7 +387,8 @@ def _controls() -> set[str]:
     out.update(text for _, text in profiles._DIRECTIONS)
     out.update(page_numbers.CHOICE_LABELS.values())
     out.update(("Add", "Duplicate", "Delete", "Make default", "Add field", "Add list", "Add choice"))
-    out.update(("Combine without valid signatures", "Save copies without valid signatures", "Stamp them anyway"))
+    out.update(("Combine without valid signatures", "Save copies without valid signatures",
+                "Stamp a copy", "Stamp copies"))
     out.update(("Dark colors", "Standard colors"))
     assert color_picker.STAMP_COLORS and multi.COMBINE  # the modules these come from are imported
     return out

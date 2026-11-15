@@ -132,6 +132,28 @@ def group_warnings(warnings: Sequence[str], limit: int | None = MAX_LISTED_WARNI
     return out
 
 
+def restricted_notice(names: Sequence[str] = (), *, combined: bool = False) -> str:
+    """The notice for PDFs set not to allow changes (UX-044), for the stamp and prepare screens.
+
+    ``names`` are the files' shown names; none on the one-file stamp screen.
+    A stamped copy keeps the setting (D-050); a combined file has none.
+    """
+    many = len(names) > 1
+    lead = ("These PDFs are" if many else "This PDF is") + " set not to allow changes"
+    lead += f": {', '.join(names)}." if names else "."
+    kept = "The originals aren't touched." if many else "The original isn't touched."
+    if combined:
+        after = "The combined file won't have this setting."
+    else:
+        after = "Each stamped copy keeps the same setting." if many else "The stamped copy keeps the same setting."
+    return f"{lead} {kept} {after}"
+
+
+def restricted_tick(count: int = 1) -> str:
+    """The tick that confirms stamping PDFs set not to allow changes (UX-044)."""
+    return "Stamp copies" if count > 1 else "Stamp a copy"
+
+
 def _notice(kind: str) -> tuple[QFrame, QVBoxLayout]:
     frame = QFrame()
     frame.setObjectName(kind)
@@ -600,13 +622,11 @@ class StampDialog(QWidget):
             lay.addWidget(frame)
         if self.info.restricted:
             frame, fl = _notice("warning")
-            fl.addWidget(_wrap_label(
-                "This PDF's owner restrictions don't allow changes. The stamped copy "
-                "keeps the same restrictions."))
-            self.restriction_tick = QCheckBox("Stamp it anyway")
+            fl.addWidget(_plain_label(restricted_notice()))
+            self.restriction_tick = QCheckBox(restricted_tick())
             self.restriction_tick.toggled.connect(lambda _c: self._update_button())
             fl.addWidget(self.restriction_tick)
-            self.owner_button = QPushButton("Enter the owner password instead…")
+            self.owner_button = QPushButton("I have the permissions password (optional)…")
             self.owner_button.setObjectName("link")
             self.owner_button.setCursor(Qt.CursorShape.PointingHandCursor)
             self.owner_button.clicked.connect(self._ask_owner_password)
@@ -1119,7 +1139,7 @@ class StampDialog(QWidget):
         if self.signature_tick is not None and not self.signature_tick.isChecked():
             out.append("Tick \"Save a copy without a valid signature\" to continue.")
         if self.restriction_tick is not None and not self.restriction_tick.isChecked():
-            out.append("Tick \"Stamp it anyway\" to continue.")
+            out.append(f"Tick \"{restricted_tick()}\" to continue.")
         if self._plan_done_revision != self.revision:
             out.append("Checking all pages…")
         elif self._plan_error is not None:
@@ -1188,7 +1208,7 @@ class StampDialog(QWidget):
             self.info = info
             if self.restriction_tick is not None:
                 self.restriction_tick.setChecked(True)
-                self.restriction_tick.setText("Owner password given; restrictions lifted")
+                self.restriction_tick.setText("Permissions password given; changes allowed")
                 self.restriction_tick.setEnabled(False)
             if self.owner_button is not None:
                 self.owner_button.hide()

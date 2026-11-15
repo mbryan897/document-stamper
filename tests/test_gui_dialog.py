@@ -219,11 +219,19 @@ def test_signed_needs_tick(qtbot: QtBot, window: MainWindow, corpus_dir: Path, t
 
 def test_restricted_needs_tick(qtbot: QtBot, window: MainWindow, corpus_dir: Path) -> None:
     d = open_dialog(qtbot, window, corpus_dir / "owner_restrictions.pdf")
-    assert d.restriction_tick is not None and d.restriction_tick.text() == "Stamp it anyway"
+    assert d.restriction_tick is not None and d.restriction_tick.text() == "Stamp a copy"
+    notice = d.restriction_tick.parentWidget().findChildren(QLabel)[0]
+    assert notice.textFormat() == Qt.TextFormat.PlainText
+    assert notice.text() == ("This PDF is set not to allow changes. The original isn't touched. "
+                             "The stamped copy keeps the same setting.")
+    assert d.owner_button is not None and d.owner_button.text() == "I have the permissions password (optional)…"
     type_into(qtbot, d, "identifier", SO)
     choose(d, "doc_type", "Court order")
     wait_ready(qtbot, d)
     assert not d.save_button.isEnabled()
+    assert 'Tick "Stamp a copy" to continue.' in d.blockers()
+    shown = "\n".join(lab.text() for lab in d.findChildren(QLabel)) + d.restriction_tick.text()
+    assert "owner restriction" not in shown.lower() and "anyway" not in shown
     d.restriction_tick.setChecked(True)
     wait_ready(qtbot, d)
     assert d.save_button.isEnabled()
@@ -241,6 +249,7 @@ def test_owner_password_lifts_restrictions(
     assert d.password == make_corpus.OWNER_PASSWORD
     assert d.restriction_tick is not None and d.restriction_tick.isChecked()
     assert not d.restriction_tick.isEnabled()
+    assert d.restriction_tick.text() == "Permissions password given; changes allowed"
 
 
 def test_password_prompt_retries_then_opens(
