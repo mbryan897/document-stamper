@@ -9,7 +9,7 @@ Everything can be done with the keyboard: Tab moves between controls, and Space 
 | F1 | Opens this help at the topic for the screen you're on. |
 | Ctrl+O | **Choose files…**, on the drop screen, the saved screen and the batch results. |
 
-Underlined letters are access keys: hold Alt and press the letter to go to that control or press that button. Windows shows the underlines once you press Alt.
+Underlined letters are access keys: hold Alt and press the letter to go to that control or press that button.
 
 ## The stamp dialog
 
