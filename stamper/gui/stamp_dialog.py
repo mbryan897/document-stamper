@@ -62,6 +62,7 @@ from .engine import ApplyRequest, EngineClient, EngineFailure
 from .help import help_button
 from .page_numbers import (
     CHOICE_LABELS,
+    PROFILE,
     WITH_IDENTIFIER,
     apply_page_numbers,
     main_stamp_index,
@@ -873,12 +874,18 @@ class StampDialog(QWidget):
         return stamps
 
     def _refresh_page_numbers(self) -> None:
-        option = page_number_option(self._placed_stamps())
+        stamps = self._placed_stamps()
+        option = page_number_option(stamps)
         combo = self.page_numbers_combo
         combo.blockSignals(True)
         combo.clear()
         for choice in option.choices:
-            combo.addItem(CHOICE_LABELS[choice], choice)
+            if choice == PROFILE:
+                assert option.stamp is not None
+                label = f"{_ANCHOR_NAMES[stamps[option.stamp].anchor]}, as set up"
+            else:
+                label = CHOICE_LABELS[choice]
+            combo.addItem(label, choice)
         model = combo.model()
         assert isinstance(model, QStandardItemModel)
         for i, ok in enumerate(option.enabled):

@@ -328,7 +328,7 @@ def test_page_numbers_option_in_dialog(qtbot: QtBot, window: MainWindow, corpus_
     choose(d, "doc_type", "Court order")
     combo = d.page_numbers_combo
     assert [combo.itemText(i) for i in range(combo.count())] == [
-        "With the identifier", "Bottom left", "Bottom center", "Bottom right"]
+        "In the main stamp", "Bottom left", "Bottom center", "Bottom right"]  # the field is "Case number" (UX-028)
     assert d.page_numbers == WITH_IDENTIFIER
     assert [s.text for s in d.job().stamps] == ["{identifier}  |  {doc_type}  |  Page {page} of {total}"]
     combo.setCurrentIndex(3)
@@ -393,13 +393,13 @@ REGEX = r"[A-Z]{2}\d{6}"
 
 
 @pytest.fixture
-def rules_window(qtbot: QtBot, fake: FakeServices, tmp_path: Path) -> Iterator[Callable[[list[dict[str, str]]], MainWindow]]:
-    """A window on the Records config with the identifier's rules replaced."""
+def edited_window(qtbot: QtBot, fake: FakeServices, tmp_path: Path) -> Iterator[Callable[..., MainWindow]]:
+    """A window on the Records config after ``edit(config_dict)``."""
     opened: list[MainWindow] = []
 
-    def make(formats: list[dict[str, str]]) -> MainWindow:
+    def make(edit: Callable[[dict], None]) -> MainWindow:
         data = json.loads(RECORDS_CONFIG.read_text(encoding="utf-8"))
-        data["fields"]["identifier"]["formats"] = formats
+        edit(data)
         path = tmp_path / f"config_{len(opened)}.json"
         path.write_text(json.dumps(data), encoding="utf-8")
         w = MainWindow(config_path=path, services=fake.services(), today=TODAY)
@@ -412,6 +412,14 @@ def rules_window(qtbot: QtBot, fake: FakeServices, tmp_path: Path) -> Iterator[C
     yield make
     for w in opened:
         close_window(w)
+
+
+@pytest.fixture
+def rules_window(edited_window: Callable[..., MainWindow]) -> Callable[[list[dict[str, str]]], MainWindow]:
+    """A window on the Records config with the identifier's rules replaced."""
+    def make(formats: list[dict[str, str]]) -> MainWindow:
+        return edited_window(lambda c: c["fields"]["identifier"].__setitem__("formats", formats))
+    return make
 
 
 def _all_text(d: QWidget) -> str:
@@ -470,3 +478,18 @@ def test_regex_never_appears_on_screen(qtbot: QtBot, rules_window, corpus_dir: P
     type_into(qtbot, d2, "identifier", "99-20")
     for text in (_all_text(d), _all_text(d2)):
         assert REGEX not in text and "\\d" not in text
+
+
+# ------------------------------------------------------------ Page numbers wording (UX-028)
+
+
+def test_page_numbers_already_separate_names_its_place(qtbot: QtBot, edited_window, corpus_dir: Path) -> None:  # noqa: ANN001
+    def edit(c: dict) -> None:
+        c["profiles"][0]["stamps"] = [{"text": "{identifier}  |  {doc_type}"},
+                                      {"text": "Page {page} of {total}", "anchor": "middle-left"}]
+    d = open_dialog(qtbot, edited_window(edit), corpus_dir / "rotate_mixed.pdf")
+    combo = d.page_numbers_combo
+    assert [combo.itemText(i) for i in range(combo.count())] == [
+        "Middle left, as set up", "Bottom left", "Bottom center", "Bottom right"]
+    labels = " ".join(combo.itemText(i) for i in range(combo.count())) + d.page_numbers_note.text()
+    assert "identifier" not in labels.lower() and "Case number" not in labels

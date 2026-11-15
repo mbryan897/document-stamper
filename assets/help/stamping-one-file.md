@@ -63,10 +63,10 @@ Positions and directions are as you see the page. A page stored on its side (rot
 
 **Page numbers** chooses where "Page 1 of 3" goes:
 
-- **With the identifier**: as part of the main stamp, as the profile has it.
+- **In the main stamp**: as part of the main stamp, as the profile has it.
 - **Bottom left**, **Bottom center** or **Bottom right**: as a separate stamp at the bottom of each page, with the same size and color. The rest stays where it was.
 
-Some profiles can't offer every choice. A note under the list says why: the stamp has no page number, the page number can't be separated from the rest of the stamp, or another stamp already uses that position. When a profile already prints page numbers as a stamp of their own, **As in the profile** keeps them where the profile puts them.
+Some profiles can't offer every choice. A note under the list says why: the stamp has no page number, the page number can't be separated from the rest of the stamp, or another stamp already uses that position. When a profile already prints page numbers as a stamp of their own somewhere other than the bottom, the first choice names where that is, for example "Top right, as set up", and keeps them there.
 
 ### White box behind stamp
 
