@@ -998,3 +998,23 @@ def test_fill_in_warning_follows_the_rules(qtbot: QtBot, records_window: MainWin
     page.rebuild_detail()
     s.changed()
     assert page.no_usable_rule.isHidden()
+
+
+def test_paste_choices_skips_bad_lines_and_can_be_undone(records_window: MainWindow) -> None:
+    from PySide6.QtWidgets import QPushButton
+    s = _settings(records_window)
+    s.show_section(2)
+    page = s.lists_page
+    before = list(s.draft.taxonomies["doc_types"])
+    head = ["court ORDER", "", "   ", "Has\ttab", "x" * 129, "  Alpha  ", "alpha"]
+    lines = head + [f"Item {i}" for i in range(600 - len(head))]
+    QApplication.clipboard().setText("\r\n".join(lines))
+    paste = next(b for b in page.findChildren(QPushButton) if b.text() == "Paste choices")
+    paste.click()
+    added = s.draft.taxonomies["doc_types"][len(before):]
+    assert added == ["Alpha"] + [f"Item {i}" for i in range(500 - len(head))]
+    assert s.status.text() == "Added 494 choices; 4 skipped. Only the first 500 lines were read."
+    assert s.undo_button.isVisible() and s.valid_config is not None
+    s.undo_button.click()
+    assert s.draft.taxonomies["doc_types"] == before
+    assert page.items.count() == len(before)

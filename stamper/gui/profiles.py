@@ -27,13 +27,14 @@ import re
 import shutil
 import tempfile
 import time
+import unicodedata
 from collections.abc import Callable, Sequence
 from datetime import date
 from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QKeySequence, QPixmap, QResizeEvent, QShortcut, QWheelEvent
+from PySide6.QtGui import QGuiApplication, QKeySequence, QPixmap, QResizeEvent, QShortcut, QWheelEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -95,6 +96,8 @@ SAMPLE_ORIGINAL = "provider_return.pdf"
 MAX_NAME_SHOWN = 80  # a name from config in a footer message
 MAX_SUMMARY_LINES = 20  # lines of a change summary in a confirm box
 MAX_SUMMARY_LINE = 300  # characters of one summary line
+MAX_PASTE_LINES = 500  # clipboard lines read by "Paste choices" (UX-033)
+MAX_PASTE_CHARS = 1_000_000  # clipboard text looked at; a config is never larger
 SHARED_COPY_NOTE = ("This file is next to the app, so everyone who starts Document Stamper "
                     "from this folder gets these settings.")
 WHEEL_LATCH_S = 0.6  # a scroll this soon after the page last scrolled keeps scrolling the page
@@ -1385,7 +1388,8 @@ class ListsPage(_Page):
         self.items.itemChanged.connect(lambda _i: self._write())
         row.addWidget(self.items, 1)
         col = QVBoxLayout()
-        for text, slot in (("Add choice", self._add_item), ("Remove", self._remove_item),
+        for text, slot in (("Add choice", self._add_item), ("Paste choices", self.paste_items),
+                           ("Remove", self._remove_item),
                            ("Up", lambda: self._move(-1)), ("Down", lambda: self._move(1))):
             b = _small(text)
             b.clicked.connect(slot)
@@ -1423,6 +1427,40 @@ class ListsPage(_Page):
         self.items.setCurrentItem(it)
         self._write()
         self.items.editItem(it)
+
+    def paste_items(self) -> None:
+        """Add the clipboard's lines as choices, skipping blanks, repeats and odd lines (UX-033)."""
+        text = (QGuiApplication.clipboard().text() or "")[:MAX_PASTE_CHARS]
+        lines = text.splitlines()
+        more = len(lines) > MAX_PASTE_LINES
+        seen = {self.items.item(i).text().strip().casefold() for i in range(self.items.count())}
+        new: list[str] = []
+        skipped = 0
+        for line in lines[:MAX_PASTE_LINES]:
+            line = line.strip()
+            if not line:
+                continue
+            key = line.casefold()
+            if (key in seen or len(line) > MAX_VALUE_LENGTH
+                    or any(unicodedata.category(c) == "Cc" for c in line)):
+                skipped += 1
+                continue
+            seen.add(key)
+            new.append(line)
+        tail = f" Only the first {MAX_PASTE_LINES} lines were read." if more else ""
+        if not new:
+            self.owner.say(f"No choices added; {skipped} skipped.{tail}")
+            return
+        self.draft.snapshot("the list as it was before the paste")
+        self.items.blockSignals(True)
+        for line in new:
+            it = QListWidgetItem(line)
+            it.setFlags(it.flags() | Qt.ItemFlag.ItemIsEditable)
+            self.items.addItem(it)
+        self.items.blockSignals(False)
+        self._write()
+        self.owner.say(f"Added {len(new)} choice{'s' if len(new) != 1 else ''}; {skipped} skipped.{tail}",
+                       undo=True)
 
     def _remove_item(self) -> None:
         row = self.items.currentRow()
