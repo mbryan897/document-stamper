@@ -857,3 +857,29 @@ def test_danger_color_contrast() -> None:
 
     assert (1.05) / (lum(COLORS["danger"]) + 0.05) >= 4.5
     assert "QPushButton#danger" in STYLE_SHEET
+
+
+# ------------------------------------------------------------ save asks, backups, restore, paste (UX-022/023/027/033)
+
+
+def test_fill_in_warning_follows_the_rules(qtbot: QtBot, records_window: MainWindow) -> None:
+    s = _settings(records_window)
+    s.show_section(1)
+    page = s.fields_page
+    page.select_key("identifier")
+    assert page.no_usable_rule is not None and page.no_usable_rule.isHidden()  # simple patterns
+    for only in ({"name": None, "pattern": "*", "regex": None},
+                 {"name": None, "pattern": None, "regex": "[A-Z]{2}[0-9]+"}):
+        s.draft.fields["identifier"]["formats"] = [dict(only)]
+        page.rebuild_detail()
+        s.changed()
+        assert not page.no_usable_rule.isHidden(), only
+        assert "Add a rule without *" in page.no_usable_rule.text()
+    page._add_format()
+    _type(qtbot, page.format_editors[-1].rule, "##-YYYY-######")
+    assert s.valid_config is not None and page.no_usable_rule.isHidden()
+    page.from_filename.setChecked(False)  # unticked: nothing to warn about
+    s.draft.fields["identifier"]["formats"] = [{"name": None, "pattern": "*", "regex": None}]
+    page.rebuild_detail()
+    s.changed()
+    assert page.no_usable_rule.isHidden()

@@ -58,7 +58,7 @@ from PySide6.QtWidgets import (
 
 from .. import sendto
 from ..core.config import ANCHORS, Config, ConfigError, Profile, load_config
-from ..core.fields import MAX_VALUE_LENGTH, validate_field, value_from_filename
+from ..core.fields import MAX_VALUE_LENGTH, usable_for_filename, validate_field, value_from_filename
 from ..core.filenames import suggest_filename, visible
 from ..core.locations import ConfigSource, Locations, SourceKind, describe, save_config, save_target
 from ..core.paths import same_file
@@ -1014,6 +1014,7 @@ class FieldsPage(_Page):
         outer.addWidget(_scroll(self.detail), 1)
         self.try_value: QLineEdit | None = None
         self.try_file: QLineEdit | None = None
+        self.no_usable_rule: QLabel | None = None
 
     @property
     def keys(self) -> list[str]:
@@ -1065,7 +1066,7 @@ class FieldsPage(_Page):
     def rebuild_detail(self) -> None:
         """Rebuild the form for the selected field."""
         _clear(self.form)
-        self.try_value = self.try_file = None
+        self.try_value = self.try_file = self.no_usable_rule = None
         key = self.key
         spec = self.draft.fields[key]
         kind = spec.get("type", "text")
@@ -1167,6 +1168,11 @@ class FieldsPage(_Page):
             self.from_filename.setChecked(bool(spec.get("from_filename")))
             self.from_filename.toggled.connect(self._toggle_from_filename)
             self.form.addWidget(self.from_filename)
+            self.no_usable_rule = _label(
+                "No rule here can be used to fill in from the file name. "
+                "Add a rule without * (for example ##-YYYY-######).", "msgBad")
+            self.no_usable_rule.setVisible(False)
+            self.form.addWidget(self.no_usable_rule)
 
         self.form.addWidget(_section("Try it"))
         self.form.addWidget(_label("A value, as someone would type it:", "muted"))
@@ -1238,6 +1244,10 @@ class FieldsPage(_Page):
             return
         config = self.owner.valid_config
         key = self.key
+        if self.no_usable_rule is not None:
+            spec = config.fields.get(key) if config is not None else None
+            self.no_usable_rule.setVisible(spec is not None and spec.from_filename
+                                           and not any(usable_for_filename(f) for f in spec.formats))
         if config is None or key not in config.fields:
             self.try_value_result.setText("Fix the problems listed below to try values.")
             _restyle(self.try_value_result, "msgNeutral")

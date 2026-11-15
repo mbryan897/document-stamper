@@ -21,7 +21,7 @@
       "formats": [
         { "name": "Any value", "pattern": "*" }
       ],
-      "from_filename": true
+      "from_filename": false
     },
     "doc_type": {
       "label": "Document type",
