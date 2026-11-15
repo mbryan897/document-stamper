@@ -34,8 +34,16 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..core.config import ANCHORS, Config, Profile, StampSpec
-from ..core.fields import MAX_VALUE_LENGTH, ValidationResult, prefill_fields, validate_field, value_from_filename
+from ..core.config import ANCHORS, Config, FieldSpec, Profile, StampSpec
+from ..core.fields import (
+    MAX_VALUE_LENGTH,
+    ValidationResult,
+    format_hint,
+    prefill_fields,
+    validate_field,
+    value_from_filename,
+    wildcard_only,
+)
 from ..core.filenames import first_free_name, suggest_filename, visible
 from ..core.locations import state_folder
 from ..core.paths import same_file, size_text
@@ -241,12 +249,14 @@ class NotesView(QWidget):
 class _FieldRow:
     """One field's widgets and its latest validation."""
 
-    def __init__(self, name: str, label: QLabel, editor: QWidget, message: QLabel, note: QLabel) -> None:
+    def __init__(self, name: str, label: QLabel, editor: QWidget, message: QLabel, note: QLabel,
+                 accepts: QLabel) -> None:
         self.name = name
         self.label = label
         self.editor = editor
         self.message = message
         self.note = note  # future-date and missing-character notes
+        self.accepts = accepts  # what several rules accept, shown while the field is empty (UX-018)
         self.result: ValidationResult | None = None
         self.prefilled: str | None = None
 
@@ -536,25 +546,38 @@ class StampDialog(QWidget):
             line.setClearButtonEnabled(False)
             if spec.type == "date":
                 line.setPlaceholderText(self.config.settings.date_format)
+            elif len(hints := self._accepts(spec)) == 1:
+                line.setPlaceholderText(hints[0])
             if name == "identifier" or spec.from_filename:
                 line.setObjectName("identifier")  # Mono font, 0/O and 1/l distinct
             line.textEdited.connect(lambda _t, n=name: self._field_edited(n))
             editor = line
         editor.setAccessibleName(spec.label)
         label.setBuddy(editor)
-        message = _wrap_label("", "msgNeutral")
-        note = _wrap_label("", "msgBad")
+        message = _plain_label("", "msgNeutral")  # shows rule names from the config
+        note = _plain_label("", "msgBad")
         note.hide()
+        hints = self._accepts(spec)
+        accepts = _plain_label(f"Accepted: {'; '.join(hints)}." if len(hints) > 1 else "", "msgNeutral")
+        if len(hints) <= 1:
+            accepts.hide()  # never show() before it's in the layout: it would open as a window
         editor.setAccessibleDescription("")
 
         col = QVBoxLayout()
         col.setSpacing(6)
         col.addWidget(label)
         col.addWidget(editor)
+        col.addWidget(accepts)
         col.addWidget(message)
         col.addWidget(note)
-        self._rows[name] = _FieldRow(name, label, editor, message, note)
+        self._rows[name] = _FieldRow(name, label, editor, message, note, accepts)
         return col
+
+    def _accepts(self, spec: FieldSpec) -> list[str]:
+        """What a text field's rules accept, one line each; empty if any rule takes anything (UX-018)."""
+        if spec.type != "text" or any(wildcard_only(f) for f in spec.formats):
+            return []
+        return [h for f in spec.formats if (h := format_hint(f, self.today))]
 
     def _build_confirmations(self) -> QWidget:
         box = QWidget()
@@ -766,9 +789,10 @@ class StampDialog(QWidget):
     def _validate(self, row: _FieldRow) -> None:
         spec = self.config.fields[row.name]
         raw = row.raw()
-        result = validate_field(self.config, row.name, raw)
+        result = validate_field(self.config, row.name, raw, self.today)
         row.result = result
         empty = not raw.strip()
+        row.accepts.setVisible(empty and bool(row.accepts.text()))
         parts: list[str] = []
         if row.prefilled is not None and result.value == row.prefilled:
             parts.append("Taken from the file name.")

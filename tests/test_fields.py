@@ -6,13 +6,21 @@ formats in tests/fixtures/records_sample.json.
 
 from __future__ import annotations
 
+import json
 from datetime import date
 from pathlib import Path
 
 import pytest
 
-from stamper.core.config import Config, load_config
-from stamper.core.fields import NORMALIZERS, fold_dashes, normalize, validate_field, value_from_filename
+from stamper.core.config import Config, FormatSpec, load_config
+from stamper.core.fields import (
+    NORMALIZERS,
+    fold_dashes,
+    format_hint,
+    normalize,
+    validate_field,
+    value_from_filename,
+)
 
 FIXTURE = Path(__file__).parent / "fixtures" / "records_sample.json"
 DEFAULT = Path(__file__).resolve().parents[1] / "config" / "default.json"
@@ -291,3 +299,98 @@ def test_year_zero_is_refused_not_a_crash() -> None:
     pattern = compile_pattern("SOYYYYMMDD-##")
     assert not pattern.test("SO00000101-01").ok
     assert pattern.date_of("SO00000101-01") is None  # date(0, 1, 1) would raise
+
+
+# ------------------------------------------------------------ what a rule accepts (UX-017, UX-043)
+DAY = date(2026, 10, 18)
+REGEX = r"[A-Z]{2}\d{6}"
+
+
+def _with_formats(tmp_path: Path, formats: list[dict[str, str]]) -> Config:
+    data = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    data["fields"]["identifier"]["formats"] = formats
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return load_config(path)
+
+
+@pytest.mark.parametrize(
+    ("rule", "hint"),
+    [
+        ({"name": "Agency case number", "pattern": "##-YYYY-######"}, "Agency case number"),
+        ({"pattern": "##-YYYY-######"}, "like 12-2026-345678"),
+        ({"pattern": "SOYYMMDD-######"}, "like SO261018-123456"),
+        ({"pattern": "*"}, ""),
+        ({"name": "Any value", "pattern": "*"}, ""),
+        ({"pattern": "**"}, ""),
+        ({"pattern": "SO-*"}, "like SO-Example"),  # a * with something else is still described
+        ({"regex": REGEX}, "the required format"),
+        ({"name": "Two letters, six digits", "regex": REGEX}, "Two letters, six digits"),
+    ],
+)
+def test_format_hint(rule: dict[str, str], hint: str) -> None:
+    assert format_hint(FormatSpec(**rule), DAY) == hint
+
+
+def test_format_hint_shows_hidden_characters_and_caps_names() -> None:
+    assert format_hint(FormatSpec(name="Case\u202enumber", pattern="#"), DAY) == "Case\u27e8U+202E\u27e9number"
+    long = format_hint(FormatSpec(name="N" * 500, pattern="#"), DAY)
+    assert len(long) == 60 and long.endswith("\u2026")
+
+
+def test_error_for_a_named_rule(tmp_path: Path) -> None:
+    config = _with_formats(tmp_path, [{"name": "Agency case number", "pattern": "##-YYYY-######"}])
+    r = validate_field(config, "identifier", "99-2026-12", DAY)
+    assert r.message == ("Case number must match Agency case number. "
+                         "Too short: expected a digit after character 10.")
+
+
+def test_error_for_an_unnamed_pattern_shows_an_example(tmp_path: Path) -> None:
+    config = _with_formats(tmp_path, [{"pattern": "##-YYYY-######"}])
+    r = validate_field(config, "identifier", "99-2026-12", DAY)
+    assert r.message.startswith("Case number must match a value like 12-2026-345678. ")
+    assert "#" not in r.message and "YYYY" not in r.message
+
+
+def test_closest_hint_uses_the_description(tmp_path: Path) -> None:
+    config = _with_formats(tmp_path, [{"name": "Agency case number", "pattern": "##-YYYY-######"},
+                                      {"pattern": "SOYYMMDD-######"}])
+    r = validate_field(config, "identifier", "SO261317-999902", DAY)
+    assert r.message == (
+        "Case number must match one of: Agency case number, a value like SO261018-123456. "
+        "Closest is a value like SO261018-123456: not a real date: month 13 isn't a real month (01-12).")
+
+
+def test_regex_text_is_never_shown(tmp_path: Path) -> None:
+    config = _with_formats(tmp_path, [{"regex": REGEX}, {"pattern": "##-YYYY-######"}])
+    bad = validate_field(config, "identifier", "99-20", DAY)
+    assert bad.message == ("Case number must match one of: the required format, a value like 12-2026-345678. "
+                           "Closest is a value like 12-2026-345678: character 4: expected a 4-digit year, "
+                           "found '2'.")
+    good = validate_field(config, "identifier", "AB123456", DAY)
+    assert good.valid and good.message == "Matches the required format." and good.format == "the required format"
+    for r in (bad, good):
+        assert REGEX not in r.message and "\\d" not in r.message
+
+
+def test_named_regex_match_uses_the_name(tmp_path: Path) -> None:
+    config = _with_formats(tmp_path, [{"name": "Two letters, six digits", "regex": REGEX}])
+    assert validate_field(config, "identifier", "AB123456", DAY).message == "Matches Two letters, six digits."
+    assert validate_field(config, "identifier", "x", DAY).message == "Case number must match Two letters, six digits."
+
+
+@pytest.mark.parametrize("rule", [{"pattern": "*"}, {"name": "Any value", "pattern": "*"}])
+def test_wildcard_match_says_nothing(tmp_path: Path, rule: dict[str, str]) -> None:
+    config = _with_formats(tmp_path, [rule])
+    r = validate_field(config, "identifier", "ANYTHING-1", DAY)
+    assert r.valid and r.message == "" and r.format is None
+
+
+def test_default_identifier_says_nothing_on_match() -> None:
+    r = validate_field(load_config(DEFAULT), "identifier", "abc 123")
+    assert r.valid and "Matches" not in r.message
+
+
+def test_pattern_match_still_names_the_pattern(records: Config) -> None:
+    # Unchanged on purpose: a valid value shows the rule it matched, as the rule editor writes it.
+    assert validate_field(records, "identifier", "SO261017-999902").message == "Matches SOYYMMDD-######."

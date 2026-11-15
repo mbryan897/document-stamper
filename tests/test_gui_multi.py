@@ -623,3 +623,20 @@ def test_batch_preview_not_cropped_at_minimum(qtbot: QtBot, small: MainWindow, c
     assert isinstance(b, BatchDialog)
     assert b.file_list.geometry().bottom() < b.preview.mapTo(b, QPoint(0, 0)).y()  # list above the page
     assert b.preview.width() >= 200  # the preview's own minimum; narrower crops the page
+
+
+# ------------------------------------------------------------ what a field accepts (UX-018)
+
+
+def test_combine_and_batch_show_what_the_field_accepts(qtbot: QtBot, window: MainWindow, corpus_dir: Path,
+                                                       tmp_path: Path) -> None:
+    files = [copy_to(corpus_dir / "letter_portrait.pdf", tmp_path, f"plain_{i}.pdf") for i in range(2)]
+    open_several(qtbot, window, files)
+    fs = window.files_screen
+    for button, kind in ((fs.combine_button, CombineDialog), (fs.batch_button, BatchDialog)):
+        button.click()
+        d = wait_dialog(qtbot, window, kind)
+        accepts = d._rows["identifier"].accepts
+        assert accepts.isVisible() and accepts.text() == "Accepted: like 12-2026-345678; like SO261018-123456."
+        d.cancel_button.click()
+        qtbot.waitUntil(lambda: window.stack.currentWidget() is fs, timeout=WAIT_MS)

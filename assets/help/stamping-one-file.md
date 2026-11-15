@@ -28,7 +28,7 @@ Next to a field's name, "(optional)" means you can leave it empty, and "(not sta
 
 ### Checking as you type
 
-A message under each field says whether the value is acceptable. When the field has rules (for example, the format an identifier must follow), it names the rule the value matched: "Matches ##-YYYY-######." If the rule contains a date, the date is written out so you can check it.
+A message under each field says whether the value is acceptable. When the field has rules (for example, the format an identifier must follow), the empty box shows what it accepts, such as "like 12-2026-123456"; with several rules, a line under the box lists them. Once a value fits, the message names the rule it matched: "Matches ##-YYYY-######." If the rule contains a date, the date is written out so you can check it.
 
 ![A value that doesn't match](images/stamp-field-invalid.png)
 
