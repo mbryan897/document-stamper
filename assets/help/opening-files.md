@@ -20,9 +20,15 @@ Dropping PDFs onto `DocumentStamper.exe`, or onto a shortcut to it, in Explorer 
 
 Once it's set up, you can right-click PDFs in Explorer and choose *Send to › Document Stamper*. While it isn't set up, the drop screen offers **Add Document Stamper to Explorer's Send to menu** under the settings file line; click it to add the shortcut. It can also be added or removed from **Organization setup…** › **Edit profiles and fields…** › **General**; see [Send to menu and running from a USB drive](send-to-and-portable.md).
 
+## Copies stamped this session
+
+Once you've saved a copy, "Stamped this session" under the drop target lists the newest five, with the time and the original's name. **Show in folder** on a line opens that copy's folder in Explorer, with the copy selected. Point at a line to see where the copy was saved. The list covers one file, a combined file and each file saved in a batch. It isn't saved anywhere: it starts empty each time the app starts.
+
+After **Stamp another with the same values**, a note on the drop screen says the next file you open starts with the last file's values and placement.
+
 ## Which profile is used
 
-The list next to "Stamping with" shows the profile the next file will use. Pick another one before you open the file. The app remembers your choice next time. When the settings file has only one profile, the list can't be changed.
+The list next to "Stamping with" shows the profile the next file will use. Pick another one before you open the file, or switch on the stamp screen (see [Switching the profile](stamping-one-file.md#switching-the-profile)). The app remembers your choice next time. When the settings file has only one profile, the list can't be changed.
 
 Under it, the "Settings file:" line shows which settings file (`config.json`) is in use and where it came from: next to the app, in your user folder, the built-in default, or opened for this session. If the app finds a different settings file from the one it found last time, an amber note says so when it starts. Check the profile and fields before you stamp, because a different settings file can mean different rules. See [Where the config lives](where-the-config-lives.md).
 

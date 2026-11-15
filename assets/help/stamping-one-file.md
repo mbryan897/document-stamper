@@ -48,11 +48,24 @@ If a field is set to, and the file name contains exactly one value that fits the
 
 Nothing is filled in when the file name contains no match, or two different matches.
 
+## Filled in from the last file
+
+After **Stamp another with the same values** on the saved screen, the next file's screen starts with the last file's values, placement, page numbers, white box and file-name ticks, instead of blank. Every field filled in this way says "Filled in from the last file. Check it before saving." until you change it. Read each one: a value that was right for the last document may be wrong for this one.
+
+- A value the new file's name gives is used instead of the last file's. If the two differ, an amber note names both, for example "The file name gives identifier 99-2026-999902; the last file had 99-2026-999901."
+- Fields the profile doesn't have are left out, and every value is checked again as if you had typed it.
+- Only the next file gets the values. Nothing is written to disk, and they are gone when the app closes.
+- Cancel on that screen doesn't ask first unless you changed something.
+
+## Switching the profile
+
+When the settings file has more than one profile, the line under the title is a list: pick another profile to stamp this file with it. The screen is rebuilt for the same file. Values in fields both profiles have are kept; an amber note at the top names any field whose value couldn't be kept because the new profile doesn't have it. A confirmation you already ticked, or a permissions password you already gave, stays given, and the note says so. The new profile is also the one the next file uses, as if you had picked it on the drop screen.
+
 ## Placement
 
 ![Placement and page numbers](images/stamp-placement.png)
 
-The placement controls move the main stamp (the one with the identifier) for this document only. The profile isn't changed, and the next document starts from the profile's placement again.
+The placement controls move the main stamp (the one with the identifier) for this document only. The profile isn't changed, and the next document starts from the profile's placement again, unless you use **Stamp another with the same values** (see [Filled in from the last file](#filled-in-from-the-last-file)).
 
 - **Position**: nine places on the page. Corners and edge centers keep the profile's margin from the edges.
 - **Direction**: **Along top edge** runs the stamp across the page. **Along right edge** turns it 90° to run down the side of the page, reading from top to bottom, which leaves the top of the page clear.
