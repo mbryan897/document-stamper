@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import datetime
 import json
 import os
 import subprocess
@@ -342,3 +343,21 @@ def test_window_shows_the_source_as_plain_text(qtbot: QtBot, fake: FakeServices,
     from PySide6.QtCore import Qt
     assert w.drop.leftover_label.textFormat() == Qt.TextFormat.PlainText
     assert "The stamped copy of <b>R<b>.pdf wasn't finished. Stamp it again." in w.drop.leftover_label.text()
+
+
+def test_combine_records_the_temporary_combined_file(corpus_dir: Path, tmp_path: Path,
+                                                     monkeypatch: pytest.MonkeyPatch) -> None:
+    """Combine stamps the temporary file through apply; the notice must not call it the first file."""
+    from stamper.handlers.combine import CombineInput, combine_pdfs
+
+    seen: list[Path] = []
+    real = pending.record
+    monkeypatch.setattr(pending, "record", lambda tmp, **kw: (seen.append(kw["source"]), real(tmp, **kw))[1])
+    a = copy_to(corpus_dir / "letter_portrait.pdf", tmp_path)
+    b = copy_to(corpus_dir / "rotate_90.pdf", tmp_path)
+    with combine_pdfs([CombineInput(a), CombineInput(b)], tmp_path) as combined:
+        PdfHandler().apply(combined.path, default_job(), tmp_path / "combined copy.pdf")
+    assert len(seen) == 1 and seen[0].name == "letter_portrait.pdf" and seen[0] != a
+    lo = pending.Leftover(Path("x"), tmp_path / "~stamper-x.tmp", 1, datetime.datetime(2026, 1, 1),
+                          str(seen[0]))
+    assert "a combined file starting with letter_portrait.pdf" in pending.describe([lo])
