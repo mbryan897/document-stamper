@@ -19,6 +19,7 @@ COLORS = {
     "well": "#DDE2E9",
     "border": "#CDD4DE",
     "border_strong": "#8B96A8",
+    "control_border": "#7A8699",  # resting edge of fields and buttons; 3.7:1 on white (UX-041)
     "text": "#18202E",
     "muted": "#4F5B6E",
     "ink": "#2B3A8F",
@@ -84,7 +85,7 @@ QFrame#savedCard {{ background: {_C["surface"]}; border: 1px solid {_C["border"]
 
 QLineEdit, QComboBox {{
     min-height: 40px; padding: 0 10px; background: {_C["surface"]};
-    border: 1.5px solid {_C["border"]}; border-radius: 8px; font-size: 16px;
+    border: 1.5px solid {_C["control_border"]}; border-radius: 8px; font-size: 16px;
 }}
 QLineEdit[invalid="true"] {{ border-color: {_C["amber_field"]}; }}
 QLineEdit:focus, QComboBox:focus {{ border-color: {_C["ink"]}; }}
@@ -97,9 +98,9 @@ QComboBox QAbstractItemView {{
 
 QPushButton {{
     min-height: 40px; padding: 0 18px; font-size: 16px; font-weight: 500;
-    background: {_C["surface"]}; border: 1.5px solid {_C["border"]}; border-radius: 8px;
+    background: {_C["surface"]}; border: 1.5px solid {_C["control_border"]}; border-radius: 8px;
 }}
-QPushButton:hover {{ border-color: {_C["border_strong"]}; }}
+QPushButton:hover {{ border-color: {_C["ink"]}; }}
 QPushButton:focus {{ border: 3px solid {_C["ink"]}; }}
 QPushButton:disabled {{ color: {_C["muted"]}; background: {_C["disabled_bg"]}; border-color: {_C["disabled_bg"]}; }}
 QPushButton#primary {{
@@ -121,8 +122,8 @@ QPushButton#choice {{
 }}
 QPushButton#choice:checked {{ background: {_C["ink_tint"]}; border-color: {_C["ink"]}; }}
 QToolButton#anchor {{
-    min-width: 28px; min-height: 22px; background: {_C["surface"]};
-    border: 1.5px solid {_C["border"]}; border-radius: 4px;
+    min-width: 32px; min-height: 32px; background: {_C["surface"]};
+    border: 1.5px solid {_C["control_border"]}; border-radius: 4px;
 }}
 QToolButton#anchor:checked {{ background: {_C["ink"]}; border-color: {_C["ink"]}; }}
 QToolButton#anchor:focus {{ border: 2px solid {_C["ink_dark"]}; }}
