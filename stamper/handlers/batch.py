@@ -71,13 +71,18 @@ class BatchItem:
 
 @dataclass(frozen=True, slots=True)
 class BatchCheck:
-    """The up-front check for one file: ``status`` is ok, skipped or failed."""
+    """The up-front check for one file: ``status`` is ok, skipped or failed.
+
+    ``output_exists`` is True only when it was skipped because a file with its
+    output name is already there (not for two files in the batch sharing a name).
+    """
 
     item: BatchItem
     status: str
     message: str = ""
     plan: PlanResult | None = None
     error: Exception | None = None
+    output_exists: bool = False
 
     @property
     def ok(self) -> bool:
@@ -97,8 +102,8 @@ class BatchOutcome:
 
 
 def _output_problem(item: BatchItem, sources: FileIndex[BatchItem], saving: FileIndex[BatchItem],
-                    overwrite: bool) -> tuple[str, str]:
-    """``(status, message)`` for an output-name problem, or ``("", "")``.
+                    overwrite: bool) -> tuple[str, str, bool]:
+    """``(status, message, output_exists)`` for an output-name problem, or ``("", "", False)``.
 
     ``sources`` holds every file in the batch; ``saving`` the earlier files
     whose check passed, by output path.
@@ -107,16 +112,16 @@ def _output_problem(item: BatchItem, sources: FileIndex[BatchItem], saving: File
     original = sources.find(out)
     if original is not None:
         return Status.FAILED, (f"Its copy would be saved over {original.path.name}, one of the originals. "
-                               "Choose another folder.")
+                               "Choose another folder."), False
     prior = saving.find(out)
     if prior is not None:
         return Status.SKIPPED, (f"{prior.path.name} in this batch is saved to the same name, "
-                                f"{out.name}.")
+                                f"{out.name}."), False
     if not out.parent.is_dir():
-        return Status.FAILED, f"The folder {out.parent} doesn't exist."
+        return Status.FAILED, f"The folder {out.parent} doesn't exist.", False
     if out.exists() and not overwrite:
-        return Status.SKIPPED, f"{out.name} already exists, so it wasn't replaced."
-    return "", ""
+        return Status.SKIPPED, f"{out.name} already exists, so it wasn't replaced.", True
+    return "", "", False
 
 
 def check_batch(
@@ -141,9 +146,9 @@ def check_batch(
     for i, item in enumerate(items):
         if cancel is not None and cancel():
             raise Cancelled("The check was cancelled. Nothing was saved.")
-        status, message = _output_problem(item, sources, saving, overwrite)
+        status, message, exists = _output_problem(item, sources, saving, overwrite)
         if status:
-            checks.append(BatchCheck(item, status, message))
+            checks.append(BatchCheck(item, status, message, output_exists=exists))
         else:
             try:
                 plan = handler.plan(item.path, job, password=item.password, cancel=cancel, expect=item.expect)

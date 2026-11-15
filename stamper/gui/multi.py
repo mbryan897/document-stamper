@@ -961,6 +961,31 @@ def _passing_notes(good: Sequence[BatchCheck]) -> str:
     return "Notes for the files that will be saved:\n" + "\n".join(lines[:MAX_CHECK_NOTES]) + tail + "\n\n"
 
 
+def _check_list(checks: Sequence[BatchCheck], limit: int) -> str:
+    """One line per file, with its reason unless its copy is already there; at most ``limit`` lines."""
+    lines = [f"• {visible(c.item.path.name)}" + ("" if c.output_exists else f": {visible(c.message)}")
+             for c in checks[:limit]]
+    if len(checks) > limit:
+        lines.append(f"…and {len(checks) - limit} more.")
+    return "\n".join(lines)
+
+
+def _check_groups(there: Sequence[BatchCheck], bad: Sequence[BatchCheck], limit: int) -> str:
+    """The files that won't be saved; headed groups when some are already there and some can't be stamped."""
+    if not there:
+        return _check_list(bad, limit)
+    if not bad:
+        return _check_list(there, limit)
+    return f"Already there:\n{_check_list(there, limit)}\n\nCan't be stamped:\n{_check_list(bad, limit)}"
+
+
+def _have_copies(count: int, *, all_: bool = False) -> str:
+    """"3 already have a stamped copy" (the app can't tell its own copy from another file of that name)."""
+    if count == 1:
+        return "The file already has a stamped copy" if all_ else "1 already has a stamped copy"
+    return f"All {count} already have a stamped copy" if all_ else f"{count} already have a stamped copy"
+
+
 @dataclass
 class _BatchRun:
     """State of the batch save in progress."""
@@ -1225,28 +1250,39 @@ class BatchDialog(_MultiMixin, StampDialog):
     def _after_check(self, checks: list[BatchCheck]) -> None:
         for i, c in enumerate(checks):
             item = self.file_list.item(i)
-            mark = "✓ " if c.ok else ("– " if c.status == Status.SKIPPED else "! ")
+            mark = "✓ " if c.ok else ("– " if c.output_exists else "! ")
             item.setText(mark + visible(c.item.path.name))
-            item.setToolTip(c.message or str(c.item.out_path))
+            item.setToolTip(visible(c.message or str(c.item.out_path)))
         good = [c for c in checks if c.ok]
-        bad = [c for c in checks if not c.ok]
+        there = [c for c in checks if c.output_exists]  # already stamped, or a file of that name (UX-034)
+        bad = [c for c in checks if not c.ok and not c.output_exists]
         if not good:
             self._finish()
-            listed = "\n".join(f"• {visible(c.item.path.name)}: {c.message}" for c in bad[:6])
-            self._refuse(f"None of the files can be saved as set up:\n{listed}")
+            if not bad:
+                self._refuse(f"{_have_copies(len(there), all_=True)} in the output folder, "
+                             "so nothing was saved.")
+            else:
+                self._refuse(f"None of the files can be saved as set up:\n{_check_groups(there, bad, 6)}")
             return
-        if bad:
-            listed = "\n".join(f"• {visible(c.item.path.name)}: {visible(c.message)}" for c in bad[:8])
-            more = f"\n…and {len(bad) - 8} more." if len(bad) > 8 else ""
+        if there and not bad:
+            ok = self.services.confirm(
+                self, "Some files are already stamped",
+                f"{_have_copies(len(there))} in the output folder and will be left as they are:\n"
+                f"{_check_list(there, 8)}\n\n{_passing_notes(good)}Stamp the remaining {len(good)}?",
+                f"Stamp the remaining {len(good)}")
+        elif bad:
             ok = self.services.confirm(
                 self, "Some files can't be stamped",
-                f"{len(bad)} of {len(checks)} files won't be saved:\n{listed}{more}\n\n"
-                f"{_passing_notes(good)}Stamp the other {len(good)}?",
+                f"{len(bad) + len(there)} of {len(checks)} files won't be saved:\n{_check_groups(there, bad, 8)}"
+                f"\n\n{_passing_notes(good)}Stamp the other {len(good)}?",
                 f"Stamp the other {len(good)}")
-            if not ok:
-                self._finish()
-                self._refuse("Nothing was saved. Fix the problems, or remove those files from the list.")
-                return
+        else:
+            ok = True
+        if not ok:
+            self._finish()
+            self._refuse("Nothing was saved." if not bad else
+                         "Nothing was saved. Fix the problems, or remove those files from the list.")
+            return
         self._run.checks = checks
         self._start_run(checks)
 
