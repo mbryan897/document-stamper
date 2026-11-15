@@ -23,6 +23,7 @@ combining and the batch run there as tasks.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date
@@ -1358,7 +1359,7 @@ class BatchSavedScreen(QWidget):
         scroll.setWidget(self.rows_widget)
         lay.addWidget(scroll, 1)
         buttons = QHBoxLayout()
-        self.folder_button = QPushButton("Open folder")
+        self.folder_button = QPushButton("Show in folder")
         self.folder_button.setObjectName("primary")
         self.folder_button.clicked.connect(self._open_folder)
         self.another_button = QPushButton("Stamp more files")
@@ -1371,6 +1372,7 @@ class BatchSavedScreen(QWidget):
         lay.addLayout(buttons)
         _centre(outer, card)
         self.open_buttons: list[QPushButton] = []
+        self.folder_buttons: list[QPushButton] = []
 
     def help_topic(self) -> str:
         """The help topic for this screen."""
@@ -1384,7 +1386,11 @@ class BatchSavedScreen(QWidget):
             if item.widget() is not None:
                 item.widget().deleteLater()
         self.open_buttons = []
+        self.folder_buttons = []
         saved = [o for o in outcomes if o.status == Status.SAVED]
+        folders = {os.path.normcase(str(o.result.output_path.parent)) for o in saved if o.result is not None}
+        several = len(folders) > 1  # one Show in folder per row (UX-031)
+        toggle_col = 5 if several else 4
         self.title.setText(f"Stamped {len(saved)} of {len(outcomes)} files")
         counts = {s: sum(1 for o in outcomes if o.status == s) for s in _STATUS_TEXT}
         parts = [f"{n} {(_STATUS_TEXT[s]).lower()}" for s, n in counts.items() if n]
@@ -1414,6 +1420,13 @@ class BatchSavedScreen(QWidget):
                 b.clicked.connect(lambda _c=False, p=o.result.output_path: self.services.open_file(p))
                 self.grid.addWidget(b, row, 3, Qt.AlignmentFlag.AlignTop)
                 self.open_buttons.append(b)
+                if several:
+                    f = QPushButton("Show in folder")
+                    f.setObjectName("small")
+                    f.setAccessibleName(f"Show the copy of {visible(o.item.path.name)} in its folder")
+                    f.clicked.connect(lambda _c=False, p=o.result.output_path: self.services.show_in_folder(p))
+                    self.grid.addWidget(f, row, 4, Qt.AlignmentFlag.AlignTop)
+                    self.folder_buttons.append(f)
             if o.result is not None and count:
                 notes = NotesView()
                 notes.set_notes(o.result.warnings)
@@ -1421,18 +1434,20 @@ class BatchSavedScreen(QWidget):
                 toggle.setObjectName("small")
                 toggle.setAccessibleName(f"Notes for {visible(o.item.path.name)}")
                 toggle.clicked.connect(lambda _c=False, v=notes, t=toggle: self._toggle_notes(v, t))
-                self.grid.addWidget(toggle, row, 4, Qt.AlignmentFlag.AlignTop)
+                self.grid.addWidget(toggle, row, toggle_col, Qt.AlignmentFlag.AlignTop)
                 self.notes_buttons.append(toggle)
                 row += 1
                 notes.hide()
-                self.grid.addWidget(notes, row, 0, 1, 5)
+                self.grid.addWidget(notes, row, 0, 1, toggle_col + 1)
                 self.notes_views.append(notes)
             else:
                 self.notes_views.append(None)
             row += 1
         self.grid.setColumnStretch(2, 1)
         self.grid.setRowStretch(row, 1)
-        self.folder_button.setEnabled(bool(saved))
+        self.folder_button.setEnabled(bool(saved) and not several)
+        self.folder_button.setToolTip("The copies are in several folders: use Show in folder on each row."
+                                      if several else "")
         (self.folder_button if saved else self.another_button).setFocus()
 
     @staticmethod

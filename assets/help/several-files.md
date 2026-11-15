@@ -88,4 +88,4 @@ A copy with notes reads **Saved, with notes (N)**. **Show notes** opens them und
 
 When some files can't be stamped, the question before stamping the others also lists the notes for the files that will be saved.
 
-**Open folder** shows the first saved copy in Explorer. **Stamp more files** goes back to the drop screen, or drop more files on the window.
+**Show in folder** shows the saved copies in Explorer. When they're in several folders it's turned off, and each saved row has its own **Show in folder**. **Stamp more files** goes back to the drop screen, or drop more files on the window.

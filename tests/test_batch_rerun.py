@@ -1,4 +1,4 @@
-"""Re-running a batch (UX-034).
+"""Re-running a batch, the results screen's Show in folder (UX-034, UX-031).
 
 Synthetic data only.
 """
@@ -8,12 +8,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from PySide6.QtWidgets import QPushButton
 from pytestqt.qtbot import QtBot
 
 from stamper.cli import ExitCode
 from stamper.gui.main_window import MainWindow
 from stamper.gui.multi import BatchDialog
-from stamper.handlers.batch import BatchCheck, BatchItem, Status, check_batch
+from stamper.handlers.base import ApplyResult
+from stamper.handlers.batch import BatchCheck, BatchItem, BatchOutcome, Status, check_batch
 from stamper.handlers.pdf import PdfHandler
 from tests.gui_support import (  # noqa: F401 - fixtures
     WAIT_MS,
@@ -160,3 +162,89 @@ def test_refusal_shows_names_and_messages_through_visible(dialog: BatchDialog, f
     assert "Already there:" in message and "Can't be stamped:" in message
     from PySide6.QtCore import Qt
     assert dialog.save_error.textFormat() == Qt.TextFormat.PlainText
+
+
+# ------------------------------------------------------------ results screen: Show in folder (UX-031)
+
+
+def _saved(name: str, out: Path) -> BatchOutcome:
+    result = ApplyResult(output_path=out, pages_stamped=1, warnings=(), placements=(),
+                         metadata_written={}, metadata_replaced={}, encryption_kept=False)
+    return BatchOutcome(BatchItem(Path(f"/x/{name}"), out), Status.SAVED, result=result)
+
+
+def _row_buttons(window: MainWindow, text: str) -> list[QPushButton]:
+    return [b for b in window.batch_saved.rows_widget.findChildren(QPushButton) if b.text() == text]
+
+
+def test_one_folder_keeps_one_button(qtbot: QtBot, window: MainWindow, fake: FakeServices, tmp_path: Path) -> None:
+    screen = window.batch_saved
+    screen.show_outcomes([_saved("a.pdf", tmp_path / "a_s.pdf"), _saved("b.pdf", tmp_path / "b_s.pdf"),
+                          BatchOutcome(BatchItem(Path("/elsewhere/c.pdf"), Path("/elsewhere/c_s.pdf")),
+                                       Status.FAILED, "No.")])
+    assert screen.folder_button.text() == "Show in folder"
+    assert screen.folder_button.isEnabled() and screen.folder_button.toolTip() == ""
+    assert _row_buttons(window, "Show in folder") == []
+    screen.folder_button.click()
+    assert fake.shown == [tmp_path / "a_s.pdf"]
+
+
+def test_several_folders_give_each_row_a_button(qtbot: QtBot, window: MainWindow, fake: FakeServices,
+                                                tmp_path: Path) -> None:
+    screen = window.batch_saved
+    screen.show_outcomes([_saved("a.pdf", tmp_path / "one" / "a_s.pdf"),
+                          _saved("b&‮x.pdf", tmp_path / "two" / "b_s.pdf"),
+                          BatchOutcome(BatchItem(Path("/x/c.pdf"), Path("/x/c_s.pdf")), Status.SKIPPED, "There.")])
+    assert screen.folder_button.text() == "Show in folder"
+    assert not screen.folder_button.isEnabled()
+    assert "several folders" in screen.folder_button.toolTip()
+    buttons = screen.folder_buttons
+    assert [b.accessibleName() for b in buttons] == [
+        "Show the copy of a.pdf in its folder", "Show the copy of b&⟨U+202E⟩x.pdf in its folder"]
+    buttons[1].click()
+    assert fake.shown == [tmp_path / "two" / "b_s.pdf"]
+    # beside Open, on the same row; the notes span still covers every column
+    grid = screen.grid
+    open_pos = grid.getItemPosition(grid.indexOf(screen.open_buttons[1]))
+    show_pos = grid.getItemPosition(grid.indexOf(buttons[1]))
+    assert show_pos[0] == open_pos[0] and show_pos[1] == open_pos[1] + 1
+
+
+def test_several_folders_with_notes_keep_the_full_span(qtbot: QtBot, window: MainWindow, tmp_path: Path) -> None:
+    from tests.test_saved_notes import SHRINK
+
+    screen = window.batch_saved
+    noted = _saved("a.pdf", tmp_path / "one" / "a_s.pdf")
+    assert noted.result is not None
+    noted = BatchOutcome(noted.item, noted.status, result=ApplyResult(
+        output_path=noted.result.output_path, pages_stamped=1, warnings=(SHRINK[0],), placements=(),
+        metadata_written={}, metadata_replaced={}, encryption_kept=False))
+    screen.show_outcomes([noted, _saved("b.pdf", tmp_path / "two" / "b_s.pdf")])
+    grid = screen.grid
+    view = screen.notes_views[0]
+    assert view is not None
+    _r, col, _rs, span = grid.getItemPosition(grid.indexOf(view))
+    assert col == 0 and span == grid.columnCount()
+    toggle = grid.getItemPosition(grid.indexOf(screen.notes_buttons[0]))
+    assert toggle[1] == grid.columnCount() - 1
+
+
+def test_real_batch_into_two_folders(qtbot: QtBot, window: MainWindow, fake: FakeServices, corpus_dir: Path,
+                                     tmp_path: Path) -> None:
+    """Next to each original, from two folders: the batch button is disabled and each row has its own."""
+    (tmp_path / "one").mkdir()
+    (tmp_path / "two").mkdir()
+    files = [copy_to(corpus_dir / "letter_portrait.pdf", tmp_path / "one"),
+             copy_to(corpus_dir / "rotate_90.pdf", tmp_path / "two")]
+    open_several(qtbot, window, files)
+    window.files_screen.batch_button.click()
+    d = wait_dialog(qtbot, window, BatchDialog)
+    choose(d, "doc_type", "Court order")
+    type_into(qtbot, d, "identifier", CASE)
+    qtbot.waitUntil(d.ready, timeout=WAIT_MS)
+    d.save_button.click()
+    qtbot.waitUntil(lambda: window.stack.currentWidget() is window.batch_saved, timeout=WAIT_MS)
+    screen = window.batch_saved
+    qtbot.waitUntil(lambda: all(b.isVisible() for b in screen.folder_buttons) and len(screen.folder_buttons) == 2,
+                    timeout=WAIT_MS)
+    assert not screen.folder_button.isEnabled()
