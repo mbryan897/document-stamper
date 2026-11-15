@@ -129,7 +129,7 @@ def test_successful_save_passes_the_exit_check(qtbot: QtBot, window: MainWindow,
         assert doc.metadata is not None
     saved = window.saved
     assert saved.path_label.text() == str(out)
-    assert saved.original_label.text() == "Unchanged"
+    assert saved.original_label.text() == f"{src} – unchanged"
     assert "All 4 pages carry case number" in saved.lead.text() and SO in saved.lead.text()
     qtbot.waitUntil(lambda: saved.thumbnail.pixmap() is not None and not saved.thumbnail.pixmap().isNull(),
                     timeout=15000)
@@ -154,10 +154,10 @@ def test_signed_save_notes_and_original(qtbot: QtBot, window: MainWindow, fake: 
     d.save_button.click()
     qtbot.waitUntil(lambda: window.stack.currentWidget() is window.saved, timeout=15000)
     assert sha256(src) == before
-    notes = window.saved.notes.text().splitlines()
-    assert "Note: The original is digitally signed; the stamped copy's signature won't validate." in notes
-    assert all(line.startswith("Note: ") for line in notes)
-    assert window.saved.original_label.text() == "Unchanged, still digitally signed"
+    notes = window.saved.notes
+    assert "The original is digitally signed; the stamped copy's signature won't validate." in notes.texts()
+    assert notes.check_frame.isVisible()  # under "Check the copy" (UX-019)
+    assert window.saved.original_label.text() == f"{src} – unchanged, still digitally signed"
 
 
 def test_encrypted_copy_keeps_password(qtbot: QtBot, window: MainWindow, fake: FakeServices,

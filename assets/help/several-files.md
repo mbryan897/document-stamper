@@ -82,4 +82,8 @@ Click **Stamp all N files…**. Every file is checked first. If some can't be sa
 
 The results list each file as **Saved** (with **Open** to open the copy), **Skipped** (a file with that name already exists, so nothing was replaced), **Failed** (with the reason), or **Cancelled** / **Not started** if you cancelled. The originals are unchanged.
 
+A copy with notes reads **Saved, with notes (N)**. **Show notes** opens them under the row, laid out as on the [saved screen](saving.md#the-saved-screen), and **Hide notes** closes them again.
+
+When some files can't be stamped, the question before stamping the others also lists the notes for the files that will be saved.
+
 **Open folder** shows the first saved copy in Explorer. **Stamp more files** goes back to the drop screen, or drop more files on the window.

@@ -35,6 +35,7 @@ import pymupdf
 
 from ..core import pending
 from ..core.config import MIN_FONT_PT, StampSpec
+from ..core.filenames import visible
 from ..core.geometry import (
     Placement,
     TextMetrics,
@@ -76,6 +77,7 @@ __all__ = [
     "PdfHandler",
     "SHRINK_STEP_PT",
     "font_path",
+    "needs_check",
     "stamp_font",
     "write_sample_page",
     "xfa_refusal",
@@ -251,6 +253,27 @@ def active_content_notes(info: DocumentInfo) -> list[str]:
 PROPERTIES_NOTE_PREFIX = "Document properties in the copy:"
 _STANDARD_PROPERTIES = ("Title", "Author", "Subject", "Keywords", "Creator", "Producer",
                         "CreationDate", "ModDate", "Trapped")
+_PROPERTY_LABELS = {"Creator": "Made with", "Producer": "PDF made by", "CreationDate": "Created",
+                    "ModDate": "Last changed"}
+MAX_PROPERTY_CHARS = 60  # a value longer than this is cut, with "…"
+MAX_CUSTOM_PROPERTIES = 8
+_PDF_DATE_RE = re.compile(r"D:(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)(\d\d)(?:(Z)|([+-])(\d\d)'?(\d\d)'?)?")
+
+# Notes the saved screens show first, under "Check the copy" (UX-019): the copy differs
+# from the original in a way the sender should look at. Worded here, classified here.
+SIGNATURE_LOST_NOTE = "The original is digitally signed; the stamped copy's signature won't validate."
+UNPROTECTED_NOTE = "The copy isn't password-protected, unlike the original."
+COMBINED_UNPROTECTED_NOTE = "The combined file is saved without a password or restrictions."
+_REPAIRED_NOTE_END = " was damaged and was repaired when opened. Check the stamped copy carefully."
+_REPLACED_NOTE_START = "Document property "
+
+
+def needs_check(note: str) -> bool:
+    """True for a note about something to check in the copy: repaired, signature lost,
+    a document property replaced, or protection removed. Every other note is information."""
+    return (note in (SIGNATURE_LOST_NOTE, UNPROTECTED_NOTE)
+            or note.startswith((COMBINED_UNPROTECTED_NOTE, _REPLACED_NOTE_START))
+            or note.endswith(_REPAIRED_NOTE_END))
 
 
 def xfa_refusal(name: str) -> str:
@@ -265,29 +288,56 @@ def _info_dict(doc: pymupdf.Document) -> int:
     return int(val.split()[0]) if kind == "xref" else 0
 
 
-def _info_keys(doc: pymupdf.Document) -> tuple[list[str], str]:
-    """The Info dictionary's keys and its StamperSources text, without changing the document."""
+def _info_values(doc: pymupdf.Document) -> tuple[dict[str, str], str]:
+    """The Info dictionary's entries as text, and its StamperSources text, without changing the document."""
     xref = _info_dict(doc)
     if not xref:
-        return [], ""
+        return {}, ""
+    values: dict[str, str] = {}
+    for key in doc.xref_get_keys(xref):
+        kind, val = doc.xref_get_key(xref, key)
+        values[key] = val.removeprefix("/") if kind == "name" else val
     sources = doc.xref_get_key(xref, "StamperSources")
-    return list(doc.xref_get_keys(xref)), sources[1] if sources[0] == "string" else ""
+    return values, sources[1] if sources[0] == "string" else ""
 
 
-def properties_note(keys: list[str], sources: str, has_xmp: bool) -> str:
-    """What document properties the copy carries, for whoever discloses it (D-125)."""
-    standard = [k for k in _STANDARD_PROPERTIES if k in keys]
-    custom = sorted(set(keys) - set(_STANDARD_PROPERTIES))
+def _shown_value(value: str) -> str:
+    """A property value for the note: one line, at most MAX_PROPERTY_CHARS, hidden characters shown."""
+    m = _PDF_DATE_RE.fullmatch(value)
+    if m:
+        y, mo, d, h, mi, sec, z, sign, oh, om = m.groups()
+        zone = " UTC" if z else (f" {sign}{oh}:{om or '00'}" if sign else "")
+        return f"{y}-{mo}-{d} {h}:{mi}:{sec}{zone}"
+    flat = "".join(" " if unicodedata.category(c) in ("Cc", "Zl", "Zp") else c for c in value)
+    if len(flat) > MAX_PROPERTY_CHARS:
+        flat = flat[:MAX_PROPERTY_CHARS - 1].rstrip() + "…"
+    return visible(flat)
+
+
+def properties_note(values: Mapping[str, str | None], sources: str, has_xmp: bool) -> str:
+    """What document properties the copy carries, with their values (D-125, UX-046).
+
+    ``values`` maps each Info key to the value the copy carries; None means
+    the value is set when the copy is saved (ModDate before saving).
+    """
+    def item(key: str) -> str:
+        value = values[key]
+        shown = "when saved" if value is None else f'"{_shown_value(value)}"'
+        return f"{_PROPERTY_LABELS.get(key) or _shown_value(key)}: {shown}"
+
+    standard = [item(k) for k in _STANDARD_PROPERTIES if k in values]
+    custom = sorted(set(values) - set(_STANDARD_PROPERTIES))
     parts = [f"{PROPERTIES_NOTE_PREFIX} {', '.join(standard) if standard else 'none of the standard ones'}."]
     if custom:
         named = []
-        for k in custom:
+        for k in custom[:MAX_CUSTOM_PROPERTIES]:
             if k == "StamperSources":
                 count = len([line for line in sources.splitlines() if line.strip()])
                 named.append(f"StamperSources (the {count} source file names)")
             else:
-                named.append(k)
-        parts.append(f"Custom properties: {', '.join(named)}.")
+                named.append(item(k))
+        more = len(custom) - len(named)
+        parts.append(f"Custom properties: {', '.join(named)}" + (f" and {more} more." if more else "."))
     parts.append("XMP metadata: yes, carried over unchanged." if has_xmp else "XMP metadata: none.")
     return " ".join(parts)
 
@@ -641,7 +691,7 @@ class PdfHandler(Handler):
     def _document_notes(info: DocumentInfo) -> list[str]:
         notes = []
         if info.repaired:
-            notes.append(f"{info.path.name} was damaged and was repaired when opened. Check the stamped copy carefully.")
+            notes.append(f"{info.path.name}{_REPAIRED_NOTE_END}")
         if info.has_xmp:
             notes.append("The original has XMP metadata, which wasn't updated; only the document properties were.")
         notes.extend(size_notes(info))
@@ -676,9 +726,9 @@ class PdfHandler(Handler):
                 planned = self._plan_page(page, job, values, warnings)
                 placements.extend(self._placements(page.number + 1, planned))
             written, replaced = self._metadata_plan(doc, job, src.stem, today, warnings)
-            keys, sources = _info_keys(doc)
-            warnings.append(properties_note([*keys, *[k for k in (*written, "ModDate") if k not in keys]],
-                                            sources, info.has_xmp))
+            values, sources = _info_values(doc)
+            planned_values: dict[str, str | None] = {**values, **written, "ModDate": None}
+            warnings.append(properties_note(planned_values, sources, info.has_xmp))
         return PlanResult(
             page_count=total,
             warnings=tuple(warnings),
@@ -733,7 +783,7 @@ class PdfHandler(Handler):
             if kind != "null" and old != value:
                 replaced[key] = (old, value)
                 warnings.append(
-                    f'Document property {key} was "{old}" in the original; '
+                    f'{_REPLACED_NOTE_START}{key} was "{old}" in the original; '
                     f'the copy has "{value}".'
                 )
             written[key] = value
@@ -807,7 +857,7 @@ class PdfHandler(Handler):
                         f"{src.name} is digitally signed. The stamped copy won't carry a valid "
                         "signature; the original keeps it. Confirm to continue.",
                     )
-                warnings.append("The original is digitally signed; the stamped copy's signature won't validate.")
+                warnings.append(SIGNATURE_LOST_NOTE)
             if info.restricted:
                 if not accept_restrictions:
                     raise ConfirmationRequired(
@@ -832,12 +882,12 @@ class PdfHandler(Handler):
             written, replaced = self._write_metadata(doc, job, original_name, today, warnings)
             if cancel is not None and cancel():
                 raise Cancelled("Stamping was cancelled. Nothing was saved.")
-            keys, sources = _info_keys(doc)
-            warnings.append(properties_note(keys, sources, info.has_xmp))
+            values, sources = _info_values(doc)
+            warnings.append(properties_note(values, sources, info.has_xmp))
 
             keep = info.encrypted and not remove_encryption
             if info.encrypted and remove_encryption:
-                warnings.append("The copy isn't password-protected, unlike the original.")
+                warnings.append(UNPROTECTED_NOTE)
             self._check_output(src, out, overwrite)  # again, just before writing
             check_unchanged(src, expect)  # MuPDF reads pages lazily: still the file that was checked
             self._save_atomic(

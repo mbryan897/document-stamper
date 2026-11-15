@@ -61,7 +61,7 @@ from .base import (
     UnsupportedDocument,
     check_unchanged,
 )
-from .pdf import _REF_RE, PdfHandler, xfa_refusal
+from .pdf import _REF_RE, COMBINED_UNPROTECTED_NOTE, PdfHandler, xfa_refusal
 
 __all__ = [
     "SOURCES_PROPERTY",
@@ -165,7 +165,7 @@ class CombinedFile:
         """The D-096 warning, or an empty string when no source was protected."""
         if not self.protected:
             return ""
-        return ("The combined file is saved without a password or restrictions. "
+        return (f"{COMBINED_UNPROTECTED_NOTE} "
                 f"Protected files in it: {', '.join(self.protected)}.")
 
     def location_warning(self) -> str:

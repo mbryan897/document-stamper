@@ -71,7 +71,16 @@ from .engine import EngineClient, EngineFailure, TaskContext
 from .help import help_button
 from .profiles import PageScrollCombo
 from .services import Services
-from .stamp_dialog import StampDialog, _notice, _wrap_label
+from .stamp_dialog import (
+    NotesView,
+    StampDialog,
+    _before_saving,
+    _notice,
+    _plain_label,
+    _wrap_label,
+    group_warnings,
+    sort_notes,
+)
 
 __all__ = [
     "LARGE_FILE_COUNT",
@@ -937,6 +946,20 @@ class CombineDialog(_MultiMixin, StampDialog):
 
 # ------------------------------------------------------------------ batch
 
+MAX_CHECK_NOTES = 6  # notes for passing files listed in the pre-run question
+
+
+def _passing_notes(good: Sequence[BatchCheck]) -> str:
+    """The notes for files that will be saved, for the pre-run question (UX-005); "" when none."""
+    lines = [f"• {visible(c.item.path.name)}: {visible(n)}"
+             for c in good if c.plan is not None
+             for n in group_warnings(_before_saving(c.plan.warnings), limit=None)]
+    if not lines:
+        return ""
+    more = len(lines) - MAX_CHECK_NOTES
+    tail = f"\n…and {more} more note{'' if more == 1 else 's'}." if more > 0 else ""
+    return "Notes for the files that will be saved:\n" + "\n".join(lines[:MAX_CHECK_NOTES]) + tail + "\n\n"
+
 
 @dataclass
 class _BatchRun:
@@ -1213,12 +1236,12 @@ class BatchDialog(_MultiMixin, StampDialog):
             self._refuse(f"None of the files can be saved as set up:\n{listed}")
             return
         if bad:
-            listed = "\n".join(f"• {visible(c.item.path.name)}: {c.message}" for c in bad[:8])
+            listed = "\n".join(f"• {visible(c.item.path.name)}: {visible(c.message)}" for c in bad[:8])
             more = f"\n…and {len(bad) - 8} more." if len(bad) > 8 else ""
             ok = self.services.confirm(
                 self, "Some files can't be stamped",
                 f"{len(bad)} of {len(checks)} files won't be saved:\n{listed}{more}\n\n"
-                f"Stamp the other {len(good)}?",
+                f"{_passing_notes(good)}Stamp the other {len(good)}?",
                 f"Stamp the other {len(good)}")
             if not ok:
                 self._finish()
@@ -1330,28 +1353,56 @@ class BatchSavedScreen(QWidget):
         counts = {s: sum(1 for o in outcomes if o.status == s) for s in _STATUS_TEXT}
         parts = [f"{n} {(_STATUS_TEXT[s]).lower()}" for s, n in counts.items() if n]
         self.lead.setText(", ".join(parts).capitalize() + ". The originals are unchanged.")
-        for r, o in enumerate(outcomes):
-            name = QLabel(visible(o.item.path.name))
-            name.setWordWrap(True)
-            name.setToolTip(str(o.item.path))
-            status = QLabel(_STATUS_TEXT.get(o.status, o.status))
+        self.notes_views: list[NotesView | None] = []
+        self.notes_buttons: list[QPushButton] = []
+        row = 0
+        for o in outcomes:
+            name = _plain_label(visible(o.item.path.name))
+            name.setToolTip(visible(str(o.item.path)))
+            check, other = sort_notes(o.result.warnings)[:2] if o.result is not None else ([], [])
+            count = len(check) + len(other)
+            status_text = _STATUS_TEXT.get(o.status, o.status)
+            if o.result is not None and count:
+                status_text = f"Saved, with notes ({count})"
+            status = QLabel(status_text)
             status.setObjectName("msgOk" if o.status == Status.SAVED else "msgBad")
             detail_text = str(o.result.output_path) if o.result else o.message
-            detail = _wrap_label(detail_text, "help")
-            self.grid.addWidget(name, r, 0, Qt.AlignmentFlag.AlignTop)
-            self.grid.addWidget(status, r, 1, Qt.AlignmentFlag.AlignTop)
-            self.grid.addWidget(detail, r, 2)
+            detail = _plain_label(visible(detail_text), "help")
+            self.grid.addWidget(name, row, 0, Qt.AlignmentFlag.AlignTop)
+            self.grid.addWidget(status, row, 1, Qt.AlignmentFlag.AlignTop)
+            self.grid.addWidget(detail, row, 2)
             if o.result is not None:
                 b = QPushButton("Open")
                 b.setObjectName("small")
                 b.setAccessibleName(f"Open the copy of {visible(o.item.path.name)}")
                 b.clicked.connect(lambda _c=False, p=o.result.output_path: self.services.open_file(p))
-                self.grid.addWidget(b, r, 3, Qt.AlignmentFlag.AlignTop)
+                self.grid.addWidget(b, row, 3, Qt.AlignmentFlag.AlignTop)
                 self.open_buttons.append(b)
+            if o.result is not None and count:
+                notes = NotesView()
+                notes.set_notes(o.result.warnings)
+                toggle = QPushButton("Show notes")
+                toggle.setObjectName("small")
+                toggle.setAccessibleName(f"Notes for {visible(o.item.path.name)}")
+                toggle.clicked.connect(lambda _c=False, v=notes, t=toggle: self._toggle_notes(v, t))
+                self.grid.addWidget(toggle, row, 4, Qt.AlignmentFlag.AlignTop)
+                self.notes_buttons.append(toggle)
+                row += 1
+                notes.hide()
+                self.grid.addWidget(notes, row, 0, 1, 5)
+                self.notes_views.append(notes)
+            else:
+                self.notes_views.append(None)
+            row += 1
         self.grid.setColumnStretch(2, 1)
-        self.grid.setRowStretch(len(outcomes), 1)
+        self.grid.setRowStretch(row, 1)
         self.folder_button.setEnabled(bool(saved))
         (self.folder_button if saved else self.another_button).setFocus()
+
+    @staticmethod
+    def _toggle_notes(view: NotesView, button: QPushButton) -> None:
+        view.setVisible(view.isHidden())
+        button.setText("Show notes" if view.isHidden() else "Hide notes")
 
     def statuses(self) -> list[tuple[str, str]]:
         """``(file name, status)`` per row (tests)."""

@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from stamper.handlers.base import Cancelled, StampDoesNotFit, StampJob, UnsupportedDocument
-from stamper.handlers.pdf import PdfHandler
+from stamper.handlers.pdf import PROPERTIES_NOTE_PREFIX, PdfHandler
 from tests.stamping import (
     default_job,
     make_xfa_pdf,
@@ -33,7 +33,11 @@ def test_plan_matches_apply(name: str, corpus_dir: Path, tmp_path: Path) -> None
     assert plan.page_count == result.pages_stamped
     assert plan.placements == result.placements
     applied = tuple(w for w in result.warnings if not any(n in w for n in CONFIRMATION_NOTES))
-    assert plan.warnings == applied
+    # The properties note names values, and the copy's "Last changed" is only known once saved (UX-046).
+    assert [w for w in plan.warnings if not w.startswith(PROPERTIES_NOTE_PREFIX)] == \
+        [w for w in applied if not w.startswith(PROPERTIES_NOTE_PREFIX)]
+    assert sum(w.startswith(PROPERTIES_NOTE_PREFIX) for w in plan.warnings) == 1
+    assert sum(w.startswith(PROPERTIES_NOTE_PREFIX) for w in applied) == 1
     assert plan.metadata_written == result.metadata_written
     assert plan.metadata_replaced == result.metadata_replaced
 

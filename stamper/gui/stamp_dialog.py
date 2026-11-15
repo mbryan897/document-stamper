@@ -48,7 +48,7 @@ from ..handlers.base import (
     StampDoesNotFit,
     StampJob,
 )
-from ..handlers.pdf import PROPERTIES_NOTE_PREFIX
+from ..handlers.pdf import PROPERTIES_NOTE_PREFIX, needs_check
 from .engine import ApplyRequest, EngineClient, EngineFailure
 from .help import help_button
 from .page_numbers import (
@@ -62,7 +62,7 @@ from .profiles import PageScrollCombo, watch_page_scroll
 from .services import Services
 from .wrap_label import WrapAnywhereLabel
 
-__all__ = ["DEBOUNCE_MS", "StampDialog", "describe_date", "group_warnings"]
+__all__ = ["DEBOUNCE_MS", "NotesView", "StampDialog", "describe_date", "group_warnings", "sort_notes"]
 
 DEBOUNCE_MS = 150  # typing; clicks redraw at once
 MAX_PREVIEW_DPI = 150
@@ -91,11 +91,11 @@ def _before_saving(warnings: Sequence[str]) -> list[str]:
     return [w for w in warnings if not w.startswith(PROPERTIES_NOTE_PREFIX)]
 
 
-def group_warnings(warnings: Sequence[str]) -> list[str]:
+def group_warnings(warnings: Sequence[str], limit: int | None = MAX_LISTED_WARNINGS) -> list[str]:
     """Engine warnings for the dialog: form-field warnings grouped into one line (D-066).
 
-    Other warnings are the engine's own sentences; past ``MAX_LISTED_WARNINGS``
-    they are summarised as "… and N more".
+    Other warnings are the engine's own sentences; past ``limit`` they are
+    summarised as "… and N more notes" (``None``: no limit).
     """
     form_pages: list[int] = []
     other: list[str] = []
@@ -112,10 +112,11 @@ def group_warnings(warnings: Sequence[str]) -> list[str]:
             f"On {_pages_text(form_pages)} a form field covers part of the stamp and is drawn on "
             "top of it. Choose another position under Placement to avoid it."
         )
-    if len(other) > MAX_LISTED_WARNINGS:
-        shown = other[: MAX_LISTED_WARNINGS - 1]
+    if limit is not None and len(other) > limit:
+        shown = other[: limit - 1]
         out.extend(shown)
-        out.append(f"… and {len(other) - len(shown)} more notes like these.")
+        hidden = len(other) - len(shown)
+        out.append(f"… and {hidden} more note{'' if hidden == 1 else 's'}.")
     else:
         out.extend(other)
     return out
@@ -137,6 +138,103 @@ def _wrap_label(text: str = "", name: str = "") -> QLabel:
     if name:
         label.setObjectName(name)
     return label
+
+
+
+def _plain_label(text: str = "", name: str = "") -> QLabel:
+    """A selectable, wrapping label that never reads its text as rich text."""
+    label = _wrap_label(text, name)
+    label.setTextFormat(Qt.TextFormat.PlainText)
+    return label
+
+
+def sort_notes(notes: Sequence[str]) -> tuple[list[str], list[str], str]:
+    """``(check the copy, other, properties line)`` from saved notes, grouped as in the dialog (D-066)."""
+    props = next((n for n in notes if n.startswith(PROPERTIES_NOTE_PREFIX)), "")
+    grouped = group_warnings([n for n in notes if not n.startswith(PROPERTIES_NOTE_PREFIX)], limit=None)
+    return [n for n in grouped if needs_check(n)], [n for n in grouped if not needs_check(n)], props
+
+
+class NotesView(QWidget):
+    """Notes after saving, for the saved screen and each batch row (UX-019).
+
+    "Check the copy" notes (``pdf.needs_check``) come first, in the warning
+    style; the rest follow muted. Past ``MAX_LISTED_WARNINGS`` the rest wait
+    behind "Show all notes". The document-properties line is always shown,
+    last, and never counted against the limit. Whoever shows this puts it in
+    a scroll area, so the window still fits at 880 x 560 (D-093).
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
+        self.check_frame, self._check_layout = _notice("warning")
+        title = QLabel("Check the copy")
+        title.setStyleSheet("font-weight: 700;")
+        self._check_layout.addWidget(title)
+        lay.addWidget(self.check_frame)
+        self._other_layout = QVBoxLayout()
+        self._other_layout.setSpacing(6)
+        lay.addLayout(self._other_layout)
+        self.more_row = QWidget()
+        mr = QHBoxLayout(self.more_row)
+        mr.setContentsMargins(0, 0, 0, 0)
+        self.more_label = _plain_label("", "help")
+        self.more_button = QPushButton("Show all notes")
+        self.more_button.setObjectName("link")
+        self.more_button.clicked.connect(self._show_all)
+        mr.addWidget(self.more_label)
+        mr.addWidget(self.more_button)
+        mr.addStretch(1)
+        lay.addWidget(self.more_row)
+        self.more_box = QWidget()
+        self._more_layout = QVBoxLayout(self.more_box)
+        self._more_layout.setContentsMargins(0, 0, 0, 0)
+        self._more_layout.setSpacing(6)
+        lay.addWidget(self.more_box)
+        self.properties = _plain_label("", "help")
+        lay.addWidget(self.properties)
+        self._labels: list[QLabel] = []
+
+    def set_notes(self, notes: Sequence[str]) -> None:
+        """Show ``notes`` (the engine's warnings, with any extra notes first)."""
+        for label in self._labels:
+            label.setParent(None)
+            label.deleteLater()
+        self._labels = []
+        check, other, props = sort_notes(notes)
+        shown_other = max(0, MAX_LISTED_WARNINGS - len(check))  # "Check the copy" notes are never hidden
+        hidden = max(0, len(other) - shown_other)
+        for n in check:
+            self._add(self._check_layout, n, "")
+        for i, n in enumerate(other):
+            self._add(self._other_layout if i < shown_other else self._more_layout, n, "help")
+        self.check_frame.setVisible(bool(check))
+        self.more_label.setText(f"{hidden} more note{'' if hidden == 1 else 's'}." if hidden else "")
+        self.more_row.setVisible(bool(hidden))
+        self.more_box.setVisible(False)
+        self.properties.setText(visible(props))
+        self.properties.setVisible(bool(props))
+
+    def count(self) -> int:
+        """How many notes there are, the properties line not counted."""
+        return len(self._labels)
+
+    def texts(self) -> list[str]:
+        """Every note's text, in order, the hidden ones included (tests)."""
+        return [label.text() for label in self._labels] + (
+            [self.properties.text()] if self.properties.text() else [])
+
+    def _add(self, layout: QVBoxLayout, text: str, name: str) -> None:
+        label = _plain_label(visible(text), name)
+        layout.addWidget(label)
+        self._labels.append(label)
+
+    def _show_all(self) -> None:
+        self.more_row.hide()
+        self.more_box.show()
 
 
 class _FieldRow:

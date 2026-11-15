@@ -33,10 +33,12 @@ Just before writing, the app checks that the original is still the file you open
 - the first page of the stamped copy, read back from the saved file
 - how many pages carry the stamp, and the identifier, so you can check it once more
 - **Saved to**: the full path of the copy
-- **Original**: "Unchanged", or "Unchanged, still digitally signed" for a signed file, or "All N files unchanged" after combining
+- **Original**: the original's path followed by "– unchanged", or "– unchanged, still digitally signed" for a signed file, or "All N files unchanged" after combining. You can select the path and copy it.
 - any notes about the copy (see [Messages and what to do](messages.md))
 
-A note lists the document properties the copy carries, for example: "Document properties in the copy: ModDate. Custom properties: Identifier. XMP metadata: none." This matters if the copy is going to be disclosed; see [What changes in the stamped copy](what-changes.md#document-properties).
+Notes under **Check the copy**, in amber, come first: the file was damaged and repaired, the copy's digital signature won't validate, a document property was replaced, or the copy has no password where the original had one. Look at the copy for these before sending it. Other notes follow in grey. When there are more than six, the rest wait behind **Show all notes**, which opens them in a scrolling list.
+
+The last line always lists the document properties the copy carries, with their values, for example: "Document properties in the copy: Title: "Lab report", Last changed: "2026-11-14 14:02:07 -05:00". Custom properties: Identifier: "SO26-0001". XMP metadata: none." Long values are cut at about 60 characters. This matters if the copy is going to be disclosed; see [What changes in the stamped copy](what-changes.md#document-properties).
 
 Then:
 

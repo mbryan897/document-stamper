@@ -38,7 +38,7 @@ Document properties are the information a PDF carries about itself, such as Titl
 - The modification date (`ModDate`) is set to the time of stamping.
 - XMP metadata, a second, separate set of properties some PDFs carry, is left exactly as it was. It isn't updated, so it may still show the original's details; a note says when the original has XMP.
 
-The saved screen lists the properties the copy carries: which of the standard ones are present, any custom ones, and whether there's XMP. Properties such as Author or Creator, and any custom ones, go wherever the copy goes. If they must be removed before the copy is disclosed, that's a separate step with another tool.
+The saved screen lists the properties the copy carries, with their values: the standard ones present (Title, Author, Subject, Keywords, Created, Last changed, Made with, PDF made by), any custom ones, and whether there's XMP. Properties such as Author or Creator, and any custom ones, go wherever the copy goes. If they must be removed before the copy is disclosed, that's a separate step with another tool.
 
 ## Combined files
 
