@@ -553,6 +553,7 @@ class StampDialog(QWidget):
             extra.append("not stamped")
         label = QLabel(spec.label + (f"  ({', '.join(extra)})" if extra else ""))
         label.setObjectName("fieldLabel")
+        hints = self._accepts(spec)
 
         editor: QWidget
         if spec.type == "choice":
@@ -569,7 +570,7 @@ class StampDialog(QWidget):
             line.setClearButtonEnabled(False)
             if spec.type == "date":
                 line.setPlaceholderText(self.config.settings.date_format)
-            elif len(hints := self._accepts(spec)) == 1:
+            elif len(hints) == 1:
                 line.setPlaceholderText(hints[0])
             if name == "identifier" or spec.from_filename:
                 line.setObjectName("identifier")  # Mono font, 0/O and 1/l distinct
@@ -580,7 +581,6 @@ class StampDialog(QWidget):
         message = _plain_label("", "msgNeutral")  # shows rule names from the config
         note = _plain_label("", "msgBad")
         note.hide()
-        hints = self._accepts(spec)
         accepts = _plain_label(f"Accepted: {'; '.join(hints)}." if len(hints) > 1 else "", "msgNeutral")
         if len(hints) <= 1:
             accepts.hide()  # never show() before it's in the layout: it would open as a window
