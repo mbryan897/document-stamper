@@ -823,12 +823,13 @@ class PdfHandler(Handler):
         return written, replaced
 
     @staticmethod
-    def _save_atomic(doc: pymupdf.Document, out: Path, encryption: int, overwrite: bool) -> None:
+    def _save_atomic(doc: pymupdf.Document, out: Path, encryption: int, overwrite: bool,
+                     source: Path | None = None) -> None:
         fd, tmp_name = tempfile.mkstemp(prefix=pending.TEMP_NAME_PREFIX, suffix=pending.TEMP_NAME_SUFFIX,
                                         dir=out.parent)
         os.close(fd)
         tmp = Path(tmp_name)
-        entry = pending.record(tmp)  # so a crash before the rename can be cleaned up later (D-124)
+        entry = pending.record(tmp, source=source)  # so a crash before the rename can be cleaned up later (D-124)
         try:
             doc.save(tmp, garbage=0, deflate=False, clean=False, encryption=encryption)
             if overwrite:
@@ -919,6 +920,7 @@ class PdfHandler(Handler):
                 doc, out,
                 pymupdf.PDF_ENCRYPT_KEEP if keep else pymupdf.PDF_ENCRYPT_NONE,
                 overwrite,
+                source=src,
             )
 
         return ApplyResult(

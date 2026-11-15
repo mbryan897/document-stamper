@@ -72,7 +72,9 @@ The stamp dialog for a batch, titled "Stamp N files", has a list of the files ab
 - **Save the copies**: **Next to each original** (the default), or **In one folder**, which asks for the folder.
 - A page problem in the file shown, such as a stamp that doesn't fit, doesn't stop the button: that file will be reported instead of saved.
 
-Click **Stamp all N files…**. Every file is checked first. If some can't be saved as set up (a copy with that name already exists, two files would get the same name, or the stamp doesn't fit), you're told which and why, and asked whether to stamp the others. Answer no and nothing is saved.
+Click **Stamp all N files…**. Every file is checked first. If some can't be saved as set up (two files would get the same name, or the stamp doesn't fit), you're told which and why, and asked whether to stamp the others. Answer no and nothing is saved.
+
+If you stamp the same files again, for example after a batch was interrupted, the files whose copy is already in the output folder are listed under **Already there** and left as they are; only the rest are stamped. The program can't tell its own earlier copy from another file with the same name, so check that list. When every file's copy is already there, nothing is saved.
 
 **Cancel** while it's stamping stops the batch: the file in progress isn't saved and the rest aren't started. Copies already saved stay, and the results list says which.
 
@@ -86,4 +88,4 @@ A copy with notes reads **Saved, with notes (N)**. **Show notes** opens them und
 
 When some files can't be stamped, the question before stamping the others also lists the notes for the files that will be saved.
 
-**Open folder** shows the first saved copy in Explorer. **Stamp more files** goes back to the drop screen, or drop more files on the window.
+**Show in folder** shows the saved copies in Explorer. When they're in several folders it's turned off, and each saved row has its own **Show in folder**. **Stamp more files** goes back to the drop screen, or drop more files on the window.

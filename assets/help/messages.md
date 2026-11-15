@@ -4,7 +4,7 @@ Messages are written to say what happened and what to do next. This topic collec
 
 ## Partial copies left behind
 
-If Document Stamper was stopped while writing a copy (closed from Task Manager, a power cut, a crash), the unfinished copy stays in the folder you were saving to, named like `~stamper-….tmp`. Next time the app starts, the drop screen lists it: "A partial copy was left behind when Document Stamper stopped unexpectedly: … It's an unfinished stamped copy, not the original."
+If Document Stamper was stopped while writing a copy (closed from Task Manager, a power cut, a crash), the unfinished copy stays in the folder you were saving to, named like `~stamper-….tmp`. Next time the app starts, the drop screen lists it: "A partial copy was left behind when Document Stamper stopped unexpectedly: … It's an unfinished stamped copy, not the original." It also names the file that was being stamped ("The stamped copy of … wasn't finished. Stamp it again."), or, for files being combined, the first of them ("a combined file starting with …"). Copies left by older versions don't carry that name.
 
 - **Delete** (or **Delete all**) removes it. Each file is checked again first, and anything that is no longer the file that was left behind is kept.
 - **Show in folder** opens its folder in Explorer (when only one is listed).

@@ -708,6 +708,7 @@ class StampDialog(QWidget):
         lay.setSpacing(10)
 
         self.save_error = _wrap_label("", "previewMessage")
+        self.save_error.setTextFormat(Qt.TextFormat.PlainText)  # refusals carry file names
         self.save_error.hide()
         lay.addWidget(self.save_error)
 
