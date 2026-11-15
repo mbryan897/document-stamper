@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QWheelEvent
-from PySide6.QtWidgets import QApplication, QCheckBox, QComboBox, QLineEdit, QWidget
+from PySide6.QtWidgets import QApplication, QCheckBox, QComboBox, QLabel, QLineEdit, QWidget
 from pytestqt.qtbot import QtBot
 
 from stamper.gui import profiles
@@ -15,8 +17,10 @@ from stamper.gui.main_window import MainWindow
 from stamper.gui.page_numbers import WITH_IDENTIFIER
 from stamper.handlers.pdf import COVERS_TEXT_NOTE_END
 from tests.gui_support import (  # noqa: F401 - fixtures
+    TODAY,
     FakeServices,
     choose,
+    close_window,
     copy_to,
     default_window,
     fake,
@@ -25,7 +29,7 @@ from tests.gui_support import (  # noqa: F401 - fixtures
     wait_ready,
     window,
 )
-from tests.stamping import make_signed_pdf
+from tests.stamping import RECORDS_CONFIG, make_signed_pdf
 from tools import make_corpus
 
 SO = make_corpus.FAKE_CASE_SO
@@ -65,8 +69,8 @@ def test_live_validation_messages(qtbot: QtBot, window: MainWindow, corpus_dir: 
     assert d.message("identifier") == "Case number is required."
     type_into(qtbot, d, "identifier", "so261332-999902")
     assert d.message("identifier") == (
-        "Case number must match one of: ##-YYYY-######, SOYYMMDD-######. "
-        "Closest is SOYYMMDD-######: not a real date: month 13 isn't a real month (01-12).")
+        "Case number must match one of: a value like 12-2026-345678, a value like SO261018-123456. "
+        "Closest is a value like SO261018-123456: not a real date: month 13 isn't a real month (01-12).")
     assert d._rows["identifier"].message.objectName() == "msgBad"
     type_into(qtbot, d, "identifier", "so261017–999902")  # lower case, en dash
     assert d.message("identifier") == "Matches SOYYMMDD-######, dated October 17, 2026."
@@ -215,11 +219,19 @@ def test_signed_needs_tick(qtbot: QtBot, window: MainWindow, corpus_dir: Path, t
 
 def test_restricted_needs_tick(qtbot: QtBot, window: MainWindow, corpus_dir: Path) -> None:
     d = open_dialog(qtbot, window, corpus_dir / "owner_restrictions.pdf")
-    assert d.restriction_tick is not None and d.restriction_tick.text() == "Stamp it anyway"
+    assert d.restriction_tick is not None and d.restriction_tick.text() == "Stamp a copy"
+    notice = d.restriction_tick.parentWidget().findChildren(QLabel)[0]
+    assert notice.textFormat() == Qt.TextFormat.PlainText
+    assert notice.text() == ("This PDF is set not to allow changes. The original isn't touched. "
+                             "The stamped copy keeps the same setting.")
+    assert d.owner_button is not None and d.owner_button.text() == "I have the permissions password (optional)…"
     type_into(qtbot, d, "identifier", SO)
     choose(d, "doc_type", "Court order")
     wait_ready(qtbot, d)
     assert not d.save_button.isEnabled()
+    assert 'Tick "Stamp a copy" to continue.' in d.blockers()
+    shown = "\n".join(lab.text() for lab in d.findChildren(QLabel)) + d.restriction_tick.text()
+    assert "owner restriction" not in shown.lower() and "anyway" not in shown
     d.restriction_tick.setChecked(True)
     wait_ready(qtbot, d)
     assert d.save_button.isEnabled()
@@ -237,6 +249,7 @@ def test_owner_password_lifts_restrictions(
     assert d.password == make_corpus.OWNER_PASSWORD
     assert d.restriction_tick is not None and d.restriction_tick.isChecked()
     assert not d.restriction_tick.isEnabled()
+    assert d.restriction_tick.text() == "Permissions password given; changes allowed"
 
 
 def test_password_prompt_retries_then_opens(
@@ -324,7 +337,7 @@ def test_page_numbers_option_in_dialog(qtbot: QtBot, window: MainWindow, corpus_
     choose(d, "doc_type", "Court order")
     combo = d.page_numbers_combo
     assert [combo.itemText(i) for i in range(combo.count())] == [
-        "With the identifier", "Bottom left", "Bottom center", "Bottom right"]
+        "In the main stamp", "Bottom left", "Bottom center", "Bottom right"]  # the field is "Case number" (UX-028)
     assert d.page_numbers == WITH_IDENTIFIER
     assert [s.text for s in d.job().stamps] == ["{identifier}  |  {doc_type}  |  Page {page} of {total}"]
     combo.setCurrentIndex(3)
@@ -382,3 +395,110 @@ def test_scroll_that_starts_on_a_drop_down_changes_it(qtbot: QtBot, window: Main
     doc_type = d.editor("doc_type")
     _wheel(doc_type)
     assert doc_type.currentIndex() == 1  # type: ignore[attr-defined]
+
+
+# ------------------------------------------------------------ what a field accepts (UX-017, UX-018, UX-043)
+REGEX = r"[A-Z]{2}\d{6}"
+
+
+@pytest.fixture
+def edited_window(qtbot: QtBot, fake: FakeServices, tmp_path: Path) -> Iterator[Callable[..., MainWindow]]:
+    """A window on the Records config after ``edit(config_dict)``."""
+    opened: list[MainWindow] = []
+
+    def make(edit: Callable[[dict], None]) -> MainWindow:
+        data = json.loads(RECORDS_CONFIG.read_text(encoding="utf-8"))
+        edit(data)
+        path = tmp_path / f"config_{len(opened)}.json"
+        path.write_text(json.dumps(data), encoding="utf-8")
+        w = MainWindow(config_path=path, services=fake.services(), today=TODAY)
+        qtbot.addWidget(w)
+        w.resize(1200, 780)
+        w.show()
+        opened.append(w)
+        return w
+
+    yield make
+    for w in opened:
+        close_window(w)
+
+
+@pytest.fixture
+def rules_window(edited_window: Callable[..., MainWindow]) -> Callable[[list[dict[str, str]]], MainWindow]:
+    """A window on the Records config with the identifier's rules replaced."""
+    def make(formats: list[dict[str, str]]) -> MainWindow:
+        return edited_window(lambda c: c["fields"]["identifier"].__setitem__("formats", formats))
+    return make
+
+
+def _all_text(d: QWidget) -> str:
+    """Every label, placeholder and accessible description in the dialog."""
+    parts = [lab.text() for lab in d.findChildren(QLabel)]
+    for edit in d.findChildren(QLineEdit):
+        parts += [edit.placeholderText(), edit.accessibleDescription()]
+    return "\n".join(parts)
+
+
+def test_one_rule_is_the_placeholder(qtbot: QtBot, rules_window, corpus_dir: Path) -> None:  # noqa: ANN001
+    w = rules_window([{"name": "Agency case number", "pattern": "##-YYYY-######"}])
+    d = open_dialog(qtbot, w, corpus_dir / "letter_portrait.pdf")
+    assert d.editor("identifier").placeholderText() == "Agency case number"
+    assert d._rows["identifier"].accepts.isHidden()
+    w2 = rules_window([{"pattern": "##-YYYY-######"}])
+    d2 = open_dialog(qtbot, w2, corpus_dir / "letter_portrait.pdf")
+    assert d2.editor("identifier").placeholderText() == "like 12-2026-345678"
+
+
+def test_several_rules_show_a_line_until_typing(qtbot: QtBot, window: MainWindow, corpus_dir: Path) -> None:
+    d = open_dialog(qtbot, window, corpus_dir / "letter_portrait.pdf")
+    accepts = d._rows["identifier"].accepts
+    assert d.editor("identifier").placeholderText() == ""
+    assert accepts.isVisible() and accepts.textFormat() == Qt.TextFormat.PlainText
+    assert accepts.text() == "Accepted: like 12-2026-345678; like SO261018-123456."
+    type_into(qtbot, d, "identifier", "SO")
+    assert not accepts.isVisible()
+    type_into(qtbot, d, "identifier", "")
+    assert accepts.isVisible()
+    assert d._rows["doc_title"].accepts.isHidden()  # no rules, nothing to say
+
+
+def test_wildcard_field_has_no_hint_and_no_matches(qtbot: QtBot, default_window: MainWindow,
+                                                   corpus_dir: Path) -> None:
+    d = open_dialog(qtbot, default_window, corpus_dir / "letter_portrait.pdf")
+    assert d.editor("identifier").placeholderText() == ""
+    assert d._rows["identifier"].accepts.isHidden()
+    type_into(qtbot, d, "identifier", "ABC-123")
+    assert "Matches" not in d.message("identifier")
+    assert d._rows["identifier"].label.text() == "Identifier"  # D-031
+
+
+def test_regex_never_appears_on_screen(qtbot: QtBot, rules_window, corpus_dir: Path) -> None:  # noqa: ANN001
+    w = rules_window([{"regex": REGEX}])
+    d = open_dialog(qtbot, w, corpus_dir / "letter_portrait.pdf")
+    assert d.editor("identifier").placeholderText() == "the required format"
+    type_into(qtbot, d, "identifier", "nope")
+    assert d.message("identifier") == "Case number must match the required format."
+    assert REGEX not in _all_text(d)
+    type_into(qtbot, d, "identifier", "AB123456")
+    assert d.message("identifier") == "Matches the required format."
+    w2 = rules_window([{"regex": REGEX}, {"name": "Agency case number", "pattern": "##-YYYY-######"}])
+    d2 = open_dialog(qtbot, w2, corpus_dir / "letter_portrait.pdf")
+    assert d2._rows["identifier"].accepts.text() == "Accepted: the required format; Agency case number."
+    type_into(qtbot, d2, "identifier", "99-20")
+    for text in (_all_text(d), _all_text(d2)):
+        assert REGEX not in text and "\\d" not in text
+
+
+# ------------------------------------------------------------ Page numbers wording (UX-028)
+
+
+def test_page_numbers_already_separate_names_its_place(qtbot: QtBot, edited_window, corpus_dir: Path) -> None:  # noqa: ANN001
+    def edit(c: dict) -> None:
+        c["profiles"][0]["stamps"] = [{"text": "{identifier}  |  {doc_type}"},
+                                      {"text": "Page {page} of {total}", "anchor": "middle-left"}]
+    d = open_dialog(qtbot, edited_window(edit), corpus_dir / "rotate_mixed.pdf")
+    combo = d.page_numbers_combo
+    assert [combo.itemText(i) for i in range(combo.count())] == [
+        "Middle left, as set up", "Bottom left", "Bottom center", "Bottom right"]
+    labels = " ".join(combo.itemText(i) for i in range(combo.count())) + d.page_numbers_note.text()
+    assert "identifier" not in labels.lower() and "Case number" not in labels

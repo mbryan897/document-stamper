@@ -10,16 +10,16 @@ The stamped copy keeps the original's password and permissions, so it opens with
 
 Combining is different: a combined file is saved without any password. See [Several files at once](several-files.md#combine-or-stamp-each-file-separately).
 
-## Owner restrictions
+## Files set not to allow changes
 
-Some PDFs open without a password but carry *owner restrictions*: settings, made by whoever produced the file, that don't allow changes. Stamping is a change, so the dialog asks first.
+Some PDFs open without a password but are set not to allow changes, by whoever produced the file (PDF tools call these *owner restrictions* or *permissions*). Stamping is a change, so the dialog asks first. Your original isn't touched either way.
 
 ![The restrictions notice](images/notice-restricted.png)
 
 You have two ways on:
 
-- Tick **Stamp it anyway**. The stamped copy keeps the same restrictions as the original.
-- Click **Enter the owner password instead…** if you have the owner password. If it lifts the restrictions, the tick is replaced by "Owner password given; restrictions lifted". The copy still keeps the original's password settings and permissions. A password that opens the file but doesn't lift the restrictions is refused, and you can try again.
+- Tick **Stamp a copy**. This is the usual way. The stamped copy keeps the same setting as the original.
+- Click **I have the permissions password (optional)…** if you have it (PDF tools also call it the owner password). If it allows changes, the tick is replaced by "Permissions password given; changes allowed". The copy still keeps the original's password settings and permissions. A password that opens the file but doesn't allow changes is refused, and you can try again.
 
 Whether you may stamp a restricted file is a question about where it came from, not about this tool. Check your agency's practice if you're not sure.
 

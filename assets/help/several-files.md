@@ -44,7 +44,7 @@ When any file needs something from you, the "Before stamping" screen collects it
 
 - A password box for each file that needs one. Type it and press Enter or click **Check**. "Opens the file." means it's right.
 - One tick for every digitally signed file in the set: **Combine without valid signatures** or **Save copies without valid signatures**.
-- One tick for every file with owner restrictions: **Stamp it anyway** (or **Stamp them anyway**). When combining, the combined file has no restrictions; when stamping separately, each copy keeps its own.
+- One tick for every file set not to allow changes: **Stamp a copy** (or **Stamp copies**). The originals aren't touched. When combining, the combined file doesn't have the setting; when stamping separately, each copy keeps its own.
 - When combining files of which any is protected, the warning that the combined file is saved without a password or restrictions.
 
 The line above **Continue** says what's still needed. **Back** returns to the files screen.

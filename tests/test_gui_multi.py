@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pymupdf
 import pytest
-from PySide6.QtCore import QPoint
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import QCheckBox, QLabel, QPushButton, QWidget
 from pytestqt.qtbot import QtBot
 
@@ -623,3 +623,54 @@ def test_batch_preview_not_cropped_at_minimum(qtbot: QtBot, small: MainWindow, c
     assert isinstance(b, BatchDialog)
     assert b.file_list.geometry().bottom() < b.preview.mapTo(b, QPoint(0, 0)).y()  # list above the page
     assert b.preview.width() >= 200  # the preview's own minimum; narrower crops the page
+
+
+# ------------------------------------------------------------ what a field accepts (UX-018)
+
+
+def test_combine_and_batch_show_what_the_field_accepts(qtbot: QtBot, window: MainWindow, corpus_dir: Path,
+                                                       tmp_path: Path) -> None:
+    files = [copy_to(corpus_dir / "letter_portrait.pdf", tmp_path, f"plain_{i}.pdf") for i in range(2)]
+    open_several(qtbot, window, files)
+    fs = window.files_screen
+    for button, kind in ((fs.combine_button, CombineDialog), (fs.batch_button, BatchDialog)):
+        button.click()
+        d = wait_dialog(qtbot, window, kind)
+        accepts = d._rows["identifier"].accepts
+        assert accepts.isVisible() and accepts.text() == "Accepted: like 12-2026-345678; like SO261018-123456."
+        d.cancel_button.click()
+        qtbot.waitUntil(lambda: window.stack.currentWidget() is fs, timeout=WAIT_MS)
+
+
+# ------------------------------------------------------------ restricted wording (UX-044)
+
+
+def _restricted_notice(screen: PrepareScreen) -> QLabel:
+    assert screen.restriction_tick is not None
+    return screen.restriction_tick.parentWidget().findChildren(QLabel)[0]
+
+
+@pytest.mark.parametrize(
+    ("mode", "count", "text", "tick"),
+    [
+        ("batch", 1, "This PDF is set not to allow changes: r0.pdf. The original isn't touched. "
+                     "The stamped copy keeps the same setting.", "Stamp a copy"),
+        ("batch", 2, "These PDFs are set not to allow changes: r0.pdf, r1.pdf. The originals aren't touched. "
+                     "Each stamped copy keeps the same setting.", "Stamp copies"),
+        ("combine", 2, "These PDFs are set not to allow changes: r0.pdf, r1.pdf. The originals aren't touched. "
+                       "The combined file won't have this setting.", "Stamp copies"),
+        ("combine", 1, "This PDF is set not to allow changes: r0.pdf. The original isn't touched. "
+                       "The combined file won't have this setting.", "Stamp a copy"),
+    ],
+)
+def test_prepare_screen_restricted_wording(qtbot: QtBot, window: MainWindow, corpus_dir: Path, tmp_path: Path,
+                                           mode: str, count: int, text: str, tick: str) -> None:
+    files = [copy_to(corpus_dir / "owner_restrictions.pdf", tmp_path, f"r{i}.pdf") for i in range(count)]
+    files.append(copy_to(corpus_dir / "letter_portrait.pdf", tmp_path))
+    open_several(qtbot, window, files)
+    getattr(window.files_screen, f"{mode}_button").click()
+    screen = prepare(qtbot, window)
+    notice = _restricted_notice(screen)
+    assert notice.text() == text and notice.textFormat() == Qt.TextFormat.PlainText
+    assert screen.restriction_tick is not None and screen.restriction_tick.text() == tick
+    assert screen.blockers() == [f'Tick "{tick}" to continue.']

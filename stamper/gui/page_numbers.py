@@ -1,6 +1,6 @@
 """The stamp dialog's Page numbers option (O-004, D-065).
 
-"With the identifier" leaves the profile's stamps alone. "Bottom left /
+"In the main stamp" leaves the profile's stamps alone. "Bottom left /
 center / right" moves the page-number part of a stamp into a stamp of its own
 (D-013) by editing copies of the profile's stamps for this job only
 (``StampJob.stamps``, D-061). The config isn't changed.
@@ -60,9 +60,10 @@ __all__ = [
 WITH_IDENTIFIER = "with-identifier"
 PROFILE = "profile"  # page numbers are already their own stamp, not at the bottom
 BOTTOM_CHOICES = ("bottom-left", "bottom-center", "bottom-right")
+# Fixed wording, never a configured field label (UX-028). PROFILE has none here:
+# the stamp dialog names where that stamp is ("Top right, as set up").
 CHOICE_LABELS = {
-    WITH_IDENTIFIER: "With the identifier",
-    PROFILE: "As in the profile",
+    WITH_IDENTIFIER: "In the main stamp",
     "bottom-left": "Bottom left",
     "bottom-center": "Bottom center",
     "bottom-right": "Bottom right",

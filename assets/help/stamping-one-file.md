@@ -20,7 +20,7 @@ The fields come from the profile shown under the title ("Profile: …"). Each fi
 
 - *Text*: type the value. The identifier field is shown in a font where 0 and O, 1 and l look different.
 - *Choice*: pick from the list. A required choice starts at "Choose…"; an optional one at "(none)".
-- *Date*: type the date in the format shown in the empty box, for example MM-DD-YYYY.
+- *Date*: type the date in the order shown in the empty box, for example MM-DD-YYYY. `/`, `.` and `-` all work between the parts, and a one-digit month or day is fine (1/7/2026); the date is saved and stamped in the box's format. The year needs as many digits as the format shows.
 
 Next to a field's name, "(optional)" means you can leave it empty, and "(not stamped)" means the value isn't printed on the pages. It's still used in the file name or the document properties, if the profile puts it there.
 
@@ -28,7 +28,7 @@ Next to a field's name, "(optional)" means you can leave it empty, and "(not sta
 
 ### Checking as you type
 
-A message under each field says whether the value is acceptable. When the field has rules (for example, the format an identifier must follow), it names the rule the value matched: "Matches ##-YYYY-######." If the rule contains a date, the date is written out so you can check it.
+A message under each field says whether the value is acceptable. When the field has rules (for example, the format an identifier must follow), the empty box shows what it accepts, such as "like 12-2026-123456"; with several rules, a line under the box lists them. Once a value fits, the message names the rule it matched: "Matches ##-YYYY-######." If the rule contains a date, the date is written out so you can check it.
 
 ![A value that doesn't match](images/stamp-field-invalid.png)
 
@@ -63,10 +63,10 @@ Positions and directions are as you see the page. A page stored on its side (rot
 
 **Page numbers** chooses where "Page 1 of 3" goes:
 
-- **With the identifier**: as part of the main stamp, as the profile has it.
+- **In the main stamp**: as part of the main stamp, as the profile has it.
 - **Bottom left**, **Bottom center** or **Bottom right**: as a separate stamp at the bottom of each page, with the same size and color. The rest stays where it was.
 
-Some profiles can't offer every choice. A note under the list says why: the stamp has no page number, the page number can't be separated from the rest of the stamp, or another stamp already uses that position. When a profile already prints page numbers as a stamp of their own, **As in the profile** keeps them where the profile puts them.
+Some profiles can't offer every choice. A note under the list says why: the stamp has no page number, the page number can't be separated from the rest of the stamp, or another stamp already uses that position. When a profile already prints page numbers as a stamp of their own somewhere other than the bottom, the first choice names where that is, for example "Top right, as set up", and keeps them there.
 
 ### White box behind stamp
 

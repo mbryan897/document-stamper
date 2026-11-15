@@ -14,7 +14,7 @@ from datetime import date
 from pathlib import PureWindowsPath
 
 from .config import Config, FieldSpec, FormatSpec, Profile
-from .filenames import hidden_characters
+from .filenames import hidden_characters, visible
 from .patterns import PatternTest
 
 __all__ = [
@@ -23,12 +23,14 @@ __all__ = [
     "NORMALIZERS",
     "ValidationResult",
     "fold_dashes",
+    "format_hint",
     "hidden_character_message",
     "normalize",
     "prefill_fields",
     "usable_for_filename",
     "validate_field",
     "value_from_filename",
+    "wildcard_only",
 ]
 
 # Hyphen, non-breaking hyphen, figure dash, en dash, em dash, horizontal bar,
@@ -80,36 +82,82 @@ class ValidationResult:
     date: date | None = None
 
 
+MAX_HINT_LENGTH = 60  # characters of a rule's name shown in hints and errors
+
+
+def wildcard_only(fmt: FormatSpec) -> bool:
+    """True for a rule that is only ``*``: it takes any value, so there's nothing to say about it."""
+    return fmt.pattern is not None and set(fmt.pattern) == {"*"}
+
+
+def _rule_name(name: str) -> str:
+    """A rule's name from the config, hidden characters shown and length capped."""
+    name = visible(name, keep="")
+    return name if len(name) <= MAX_HINT_LENGTH else name[:MAX_HINT_LENGTH - 1] + "…"
+
+
+def format_hint(fmt: FormatSpec, today: date) -> str:
+    """A short description of what one rule accepts (UX-017, UX-018).
+
+    A rule that is only ``*``: nothing. A named rule: its name. An unnamed
+    simple pattern: an example, "like 12-2026-123456". An unnamed regular
+    expression: "the required format"; the expression itself is never shown.
+    """
+    if wildcard_only(fmt):
+        return ""
+    if fmt.name:
+        return _rule_name(fmt.name)
+    if fmt.compiled is not None:
+        return f"like {fmt.compiled.example(today)}"
+    return "the required format"
+
+
+def _hint_object(fmt: FormatSpec, today: date) -> str:
+    """``format_hint`` worded to follow "must match"."""
+    hint = format_hint(fmt, today)
+    return f"a value {hint}" if hint and not fmt.name and fmt.compiled is not None else hint
+
+
+def _matched_name(fmt: FormatSpec) -> str | None:
+    """What "Matches …" names; None for a ``*``-only rule (UX-043) and never a regex (UX-017)."""
+    if wildcard_only(fmt):
+        return None
+    if fmt.name:
+        return _rule_name(fmt.name)
+    return fmt.pattern or "the required format"
+
+
 def _format_test(fmt: FormatSpec, value: str) -> PatternTest:
     if fmt.compiled is not None:
         return fmt.compiled.test(value)
     assert fmt.compiled_regex is not None
     if fmt.compiled_regex.fullmatch(value):
-        return PatternTest(True, f"Matches {fmt.display_name}", len(value))
+        return PatternTest(True, "", len(value))
     return PatternTest(False, "", 0)
 
 
-def _validate_text(spec: FieldSpec, value: str) -> ValidationResult:
+def _validate_text(spec: FieldSpec, value: str, today: date) -> ValidationResult:
     if not spec.formats:
         return ValidationResult(True, value, "")
     tests = [(fmt, _format_test(fmt, value)) for fmt in spec.formats]
     for fmt, t in tests:
         if t.ok:
             encoded = fmt.compiled.date_of(value) if fmt.compiled is not None else None
-            return ValidationResult(
-                True, value, f"Matches {fmt.display_name}.", fmt.display_name, encoded
-            )
-    names = ", ".join(f.display_name for f in spec.formats)
-    lead = (
-        f"{spec.label} must match {names}."
-        if len(spec.formats) == 1
-        else f"{spec.label} must match one of: {names}."
-    )
+            name = _matched_name(fmt)
+            return ValidationResult(True, value, f"Matches {name}." if name else "", name, encoded)
+    names = [h for f in spec.formats if (h := _hint_object(f, today))]
+    if not names:
+        lead = f"{spec.label} isn't valid."
+    elif len(names) == 1:
+        lead = f"{spec.label} must match {names[0]}."
+    else:
+        lead = f"{spec.label} must match one of: {', '.join(names)}."
     # Hint from the format the value got furthest into.
     best_fmt, best = max(tests, key=lambda ft: ft[1].matched)
     hint = best.message
-    if hint and len(spec.formats) > 1:
-        hint = f"Closest is {best_fmt.display_name}: {hint[0].lower()}{hint[1:]}"
+    closest = _hint_object(best_fmt, today)
+    if hint and len(spec.formats) > 1 and closest:
+        hint = f"Closest is {closest}: {hint[0].lower()}{hint[1:]}"
     return ValidationResult(False, value, f"{lead} {hint}." if hint else lead)
 
 
@@ -142,8 +190,11 @@ def hidden_character_message(raw: str, value: str) -> str | None:
             "Retype the value.")
 
 
-def validate_field(config: Config, field_name: str, raw: str | None) -> ValidationResult:
+def validate_field(config: Config, field_name: str, raw: str | None, today: date | None = None) -> ValidationResult:
     """Normalize and validate one value for a field defined in ``config``.
+
+    ``today`` fills the date parts of the examples in error messages
+    (``format_hint``); it defaults to the real date.
 
     Raises KeyError for an unknown field name (a programming error, since
     config validation checks profile field lists).
@@ -185,7 +236,7 @@ def validate_field(config: Config, field_name: str, raw: str | None) -> Validati
             )
         return ValidationResult(True, fmt.format(parsed), "", fmt.source, parsed)
 
-    return _validate_text(spec, value)
+    return _validate_text(spec, value, today or date.today())
 
 
 _BOUNDARY_BEFORE = r"(?<![A-Za-z0-9])"

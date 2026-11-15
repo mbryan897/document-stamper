@@ -37,9 +37,11 @@ Letters in a rule are compared exactly, so `AB` doesn't match `ab`. Keep **Make 
 
 A field can have more than one rule; a value only has to match one. This is how a field accepts two numbering schemes, such as an older and a newer format. **Add a rule** adds one; **Remove rule** removes it. With no rules at all, any value is accepted.
 
-When a value matches, users see "Matches" and the rule (or its name). When it doesn't, the message names the rule it came closest to and where it went wrong, for example "Too short: expected a digit after character 13."
+When a value matches, users see "Matches" and the rule (or its name). A rule that is only `*` says nothing, because it takes any value. When a value doesn't match, the message says what the field accepts and, with several rules, which one it came closest to and where it went wrong, for example "Too short: expected a digit after character 13."
 
-**Name shown to users (optional)** replaces the rule in those messages with a name, such as "New format". Leave it empty to show the rule itself, which is usually clearer.
+What the field accepts is also shown before anything is typed: in the empty box when there is one rule, or on a line under it when there are several.
+
+**Name shown to users (optional)** is how users see the rule in those places, such as "New format". Without a name, a simple rule is shown as an example value ("like 12-2026-123456") and a regular expression as "the required format"; the expression itself is never shown to users.
 
 ## Dates in rules
 

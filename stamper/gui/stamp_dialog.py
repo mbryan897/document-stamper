@@ -34,8 +34,16 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..core.config import ANCHORS, Config, Profile, StampSpec
-from ..core.fields import MAX_VALUE_LENGTH, ValidationResult, prefill_fields, validate_field, value_from_filename
+from ..core.config import ANCHORS, Config, FieldSpec, Profile, StampSpec
+from ..core.fields import (
+    MAX_VALUE_LENGTH,
+    ValidationResult,
+    format_hint,
+    prefill_fields,
+    validate_field,
+    value_from_filename,
+    wildcard_only,
+)
 from ..core.filenames import first_free_name, suggest_filename, visible
 from ..core.locations import state_folder
 from ..core.paths import same_file, size_text
@@ -54,6 +62,7 @@ from .engine import ApplyRequest, EngineClient, EngineFailure
 from .help import help_button
 from .page_numbers import (
     CHOICE_LABELS,
+    PROFILE,
     WITH_IDENTIFIER,
     apply_page_numbers,
     main_stamp_index,
@@ -121,6 +130,28 @@ def group_warnings(warnings: Sequence[str], limit: int | None = MAX_LISTED_WARNI
     else:
         out.extend(other)
     return out
+
+
+def restricted_notice(names: Sequence[str] = (), *, combined: bool = False) -> str:
+    """The notice for PDFs set not to allow changes (UX-044), for the stamp and prepare screens.
+
+    ``names`` are the files' shown names; none on the one-file stamp screen.
+    A stamped copy keeps the setting (D-050); a combined file has none.
+    """
+    many = len(names) > 1
+    lead = ("These PDFs are" if many else "This PDF is") + " set not to allow changes"
+    lead += f": {', '.join(names)}." if names else "."
+    kept = "The originals aren't touched." if many else "The original isn't touched."
+    if combined:
+        after = "The combined file won't have this setting."
+    else:
+        after = "Each stamped copy keeps the same setting." if many else "The stamped copy keeps the same setting."
+    return f"{lead} {kept} {after}"
+
+
+def restricted_tick(count: int = 1) -> str:
+    """The tick that confirms stamping PDFs set not to allow changes (UX-044)."""
+    return "Stamp copies" if count > 1 else "Stamp a copy"
 
 
 def _notice(kind: str) -> tuple[QFrame, QVBoxLayout]:
@@ -241,12 +272,14 @@ class NotesView(QWidget):
 class _FieldRow:
     """One field's widgets and its latest validation."""
 
-    def __init__(self, name: str, label: QLabel, editor: QWidget, message: QLabel, note: QLabel) -> None:
+    def __init__(self, name: str, label: QLabel, editor: QWidget, message: QLabel, note: QLabel,
+                 accepts: QLabel) -> None:
         self.name = name
         self.label = label
         self.editor = editor
         self.message = message
         self.note = note  # future-date and missing-character notes
+        self.accepts = accepts  # what several rules accept, shown while the field is empty (UX-018)
         self.result: ValidationResult | None = None
         self.prefilled: str | None = None
 
@@ -520,6 +553,7 @@ class StampDialog(QWidget):
             extra.append("not stamped")
         label = QLabel(spec.label + (f"  ({', '.join(extra)})" if extra else ""))
         label.setObjectName("fieldLabel")
+        hints = self._accepts(spec)
 
         editor: QWidget
         if spec.type == "choice":
@@ -536,25 +570,37 @@ class StampDialog(QWidget):
             line.setClearButtonEnabled(False)
             if spec.type == "date":
                 line.setPlaceholderText(self.config.settings.date_format)
+            elif len(hints) == 1:
+                line.setPlaceholderText(hints[0])
             if name == "identifier" or spec.from_filename:
                 line.setObjectName("identifier")  # Mono font, 0/O and 1/l distinct
             line.textEdited.connect(lambda _t, n=name: self._field_edited(n))
             editor = line
         editor.setAccessibleName(spec.label)
         label.setBuddy(editor)
-        message = _wrap_label("", "msgNeutral")
-        note = _wrap_label("", "msgBad")
+        message = _plain_label("", "msgNeutral")  # shows rule names from the config
+        note = _plain_label("", "msgBad")
         note.hide()
+        accepts = _plain_label(f"Accepted: {'; '.join(hints)}." if len(hints) > 1 else "", "msgNeutral")
+        if len(hints) <= 1:
+            accepts.hide()  # never show() before it's in the layout: it would open as a window
         editor.setAccessibleDescription("")
 
         col = QVBoxLayout()
         col.setSpacing(6)
         col.addWidget(label)
         col.addWidget(editor)
+        col.addWidget(accepts)
         col.addWidget(message)
         col.addWidget(note)
-        self._rows[name] = _FieldRow(name, label, editor, message, note)
+        self._rows[name] = _FieldRow(name, label, editor, message, note, accepts)
         return col
+
+    def _accepts(self, spec: FieldSpec) -> list[str]:
+        """What a text field's rules accept, one line each; empty if any rule takes anything (UX-018)."""
+        if spec.type != "text" or any(wildcard_only(f) for f in spec.formats):
+            return []
+        return [h for f in spec.formats if (h := format_hint(f, self.today))]
 
     def _build_confirmations(self) -> QWidget:
         box = QWidget()
@@ -576,13 +622,11 @@ class StampDialog(QWidget):
             lay.addWidget(frame)
         if self.info.restricted:
             frame, fl = _notice("warning")
-            fl.addWidget(_wrap_label(
-                "This PDF's owner restrictions don't allow changes. The stamped copy "
-                "keeps the same restrictions."))
-            self.restriction_tick = QCheckBox("Stamp it anyway")
+            fl.addWidget(_plain_label(restricted_notice()))
+            self.restriction_tick = QCheckBox(restricted_tick())
             self.restriction_tick.toggled.connect(lambda _c: self._update_button())
             fl.addWidget(self.restriction_tick)
-            self.owner_button = QPushButton("Enter the owner password instead…")
+            self.owner_button = QPushButton("I have the permissions password (optional)…")
             self.owner_button.setObjectName("link")
             self.owner_button.setCursor(Qt.CursorShape.PointingHandCursor)
             self.owner_button.clicked.connect(self._ask_owner_password)
@@ -766,9 +810,10 @@ class StampDialog(QWidget):
     def _validate(self, row: _FieldRow) -> None:
         spec = self.config.fields[row.name]
         raw = row.raw()
-        result = validate_field(self.config, row.name, raw)
+        result = validate_field(self.config, row.name, raw, self.today)
         row.result = result
         empty = not raw.strip()
+        row.accepts.setVisible(empty and bool(row.accepts.text()))
         parts: list[str] = []
         if row.prefilled is not None and result.value == row.prefilled:
             parts.append("Taken from the file name.")
@@ -849,12 +894,18 @@ class StampDialog(QWidget):
         return stamps
 
     def _refresh_page_numbers(self) -> None:
-        option = page_number_option(self._placed_stamps())
+        stamps = self._placed_stamps()
+        option = page_number_option(stamps)
         combo = self.page_numbers_combo
         combo.blockSignals(True)
         combo.clear()
         for choice in option.choices:
-            combo.addItem(CHOICE_LABELS[choice], choice)
+            if choice == PROFILE:
+                assert option.stamp is not None
+                label = f"{_ANCHOR_NAMES[stamps[option.stamp].anchor]}, as set up"
+            else:
+                label = CHOICE_LABELS[choice]
+            combo.addItem(label, choice)
         model = combo.model()
         assert isinstance(model, QStandardItemModel)
         for i, ok in enumerate(option.enabled):
@@ -1088,7 +1139,7 @@ class StampDialog(QWidget):
         if self.signature_tick is not None and not self.signature_tick.isChecked():
             out.append("Tick \"Save a copy without a valid signature\" to continue.")
         if self.restriction_tick is not None and not self.restriction_tick.isChecked():
-            out.append("Tick \"Stamp it anyway\" to continue.")
+            out.append(f"Tick \"{restricted_tick()}\" to continue.")
         if self._plan_done_revision != self.revision:
             out.append("Checking all pages…")
         elif self._plan_error is not None:
@@ -1157,7 +1208,7 @@ class StampDialog(QWidget):
             self.info = info
             if self.restriction_tick is not None:
                 self.restriction_tick.setChecked(True)
-                self.restriction_tick.setText("Owner password given; restrictions lifted")
+                self.restriction_tick.setText("Permissions password given; changes allowed")
                 self.restriction_tick.setEnabled(False)
             if self.owner_button is not None:
                 self.owner_button.hide()

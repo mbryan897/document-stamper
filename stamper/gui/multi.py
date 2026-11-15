@@ -81,6 +81,8 @@ from .stamp_dialog import (
     _plain_label,
     _wrap_label,
     group_warnings,
+    restricted_notice,
+    restricted_tick,
     sort_notes,
 )
 
@@ -681,11 +683,8 @@ class PrepareScreen(QWidget):
             self.body_layout.addWidget(frame)
         if restricted:
             frame, fl = _notice("warning")
-            after = ("The combined file has no restrictions." if self.mode == COMBINE
-                     else "Each copy keeps the same restrictions.")
-            fl.addWidget(_wrap_label(
-                f"Owner restrictions don't allow changes to {_names(restricted)}. {after}"))
-            self.restriction_tick = QCheckBox("Stamp them anyway" if len(restricted) > 1 else "Stamp it anyway")
+            fl.addWidget(_plain_label(restricted_notice(restricted, combined=self.mode == COMBINE)))
+            self.restriction_tick = QCheckBox(restricted_tick(len(restricted)))
             self.restriction_tick.setChecked(old_res)
             self.restriction_tick.toggled.connect(lambda _c: self._update())
             fl.addWidget(self.restriction_tick)
