@@ -1964,6 +1964,9 @@ class ProfileSettings(QWidget):
         try:
             imported = load_config(path)
         except ConfigError as e:
+            if e.newer:
+                self.say(e.problems[0])
+                return
             shown = e.problems[:MAX_PROBLEMS]
             self.say(f"{_shown(path.name)} can't be imported:\n" + "\n".join(f"• {p}" for p in shown))
             return

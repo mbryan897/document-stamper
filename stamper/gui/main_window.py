@@ -824,7 +824,7 @@ class MainWindow(QMainWindow):
             more = len(e.problems) - len(problems)
             lines = "\n".join(f"• {p}" for p in problems)
             tail = f"\n…and {more} more." if more > 0 else ""
-            self.drop.show_message(f"{visible(path.name)} can't be used:\n{lines}{tail}")
+            self.drop.show_message(e.problems[0] if e.newer else f"{visible(path.name)} can't be used:\n{lines}{tail}")
             if self.config is None:
                 self.drop.profile_combo.clear()
                 self.drop.config_label.setText(

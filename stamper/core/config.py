@@ -38,6 +38,7 @@ from .template import BUILTIN_TOKENS, TemplateError, template_tokens
 __all__ = [
     "ANCHORS",
     "MAX_CONFIG_BYTES",
+    "NEWER_VERSION",
     "SCHEMA_VERSION",
     "Config",
     "ConfigError",
@@ -52,6 +53,9 @@ __all__ = [
 ]
 
 SCHEMA_VERSION = 1
+# Shown instead of the list of problems when a file's schema_version is a whole number above ours.
+NEWER_VERSION = ("This settings file was made by a newer version of Document Stamper. "
+                 "Update the program, or use a different settings file.")
 
 ANCHORS = (
     "top-left", "top-center", "top-right",
@@ -77,11 +81,16 @@ _COLOR = re.compile(r"#[0-9A-Fa-f]{6}", re.ASCII)
 
 
 class ConfigError(Exception):
-    """config.json can't be used. ``problems`` holds one sentence per problem."""
+    """config.json can't be used. ``problems`` holds one sentence per problem.
 
-    def __init__(self, problems: Sequence[str], source: str = "") -> None:
+    ``newer`` is True when the file comes from a newer version of the app;
+    ``problems`` then holds only ``NEWER_VERSION``, which the window shows alone.
+    """
+
+    def __init__(self, problems: Sequence[str], source: str = "", *, newer: bool = False) -> None:
         self.problems = list(problems)
         self.source = source
+        self.newer = newer
         head = f"{source} has {len(self.problems)} problem(s):" if source else "Config problems:"
         super().__init__("\n".join([head, *(f"  - {p}" for p in self.problems)]))
 
@@ -460,6 +469,9 @@ def _friendly(err: dict[str, Any], data: Any) -> list[str]:
 
 def parse_config(data: Any, source: str = "") -> Config:
     """Validate an already-parsed config dict; raises ConfigError."""
+    version = data.get("schema_version") if isinstance(data, dict) else None
+    if isinstance(version, int) and not isinstance(version, bool) and version > SCHEMA_VERSION:
+        raise ConfigError([NEWER_VERSION], source, newer=True)
     try:
         return Config.model_validate(data)
     except ValidationError as e:
