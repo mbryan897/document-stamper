@@ -304,6 +304,29 @@ def test_copy_details_shows_hidden_characters_in_the_path(tmp_path: Path) -> Non
 
 _PROBE = r"""
 import sys
+
+# Anything that tries to reach a network goes through these audit events, whoever asks.
+events = []
+NET_EVENTS = ("socket.", "urllib.", "webbrowser.", "http.", "ftplib.", "smtplib.", "imaplib.", "poplib.")
+sys.addaudithook(lambda name, _args: events.append(name) if name.startswith(NET_EVENTS) else None)
+
+# Who imports the socket module: allowed only from the standard library (see the test).
+importers = []
+
+
+class Watch:
+    @staticmethod
+    def find_spec(name, path=None, target=None):
+        if name == "socket":
+            f = sys._getframe(1)
+            while f is not None and str(f.f_globals.get("__name__", "")).startswith(("importlib", "_frozen")):
+                f = f.f_back
+            importers.append(str(f.f_globals.get("__name__", "?")) if f is not None else "?")
+        return None
+
+
+sys.meta_path.insert(0, Watch)
+
 from stamper.gui.app import make_app
 from stamper.gui.main_window import MainWindow
 app = make_app()
@@ -314,25 +337,48 @@ a = w.show_about(); a.copy(); a.show_license(); a.show_notices()
 w.show_whats_new(); w.show_help("about")
 app.processEvents()
 w.close()
-print("\n".join(sorted(sys.modules)))
+for m in sorted(sys.modules):
+    print("MOD", m)
+for m in importers:
+    print("SOCKET_IMPORTED_BY", m)
+for e in events:
+    print("NET_EVENT", e)
 """
 
-# _socket is the C half of socket; typing_extensions (through pydantic) imports it for a type,
-# without opening anything. The Python socket module, which any connection needs, is checked.
-NETWORK = ("socket", "ssl", "http", "urllib.request", "urllib3", "requests", "httpx", "ftplib",
+# Modules that exist to talk to a network. ``socket`` itself is handled apart: standard-library
+# modules import it without connecting (on Windows one does at start-up), so it may be loaded only
+# by the standard library, and the audit hook above proves nothing ever opens a socket.
+NETWORK = ("ssl", "http", "urllib.request", "urllib3", "requests", "httpx", "ftplib",
            "smtplib", "imaplib", "poplib", "xmlrpc", "webbrowser", "asyncio", "PySide6.QtNetwork",
            "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets")
 
 
-def test_starting_the_app_loads_no_network_module(tmp_path: Path) -> None:
+def _lines(out: str, tag: str) -> list[str]:
+    return [line.split(" ", 1)[1] for line in out.splitlines() if line.startswith(tag + " ")]
+
+
+def test_starting_the_app_loads_no_network_module_and_opens_no_socket(tmp_path: Path) -> None:
     env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
     run = subprocess.run([sys.executable, "-c", _PROBE], cwd=REPO, env=env, capture_output=True,
                          text=True, timeout=180, check=False)
     assert run.returncode == 0, run.stderr
-    loaded = set(run.stdout.split())
+    loaded = set(_lines(run.stdout, "MOD"))
     assert "stamper.gui.about" in loaded and "PySide6.QtWidgets" in loaded  # the probe really ran
     found = sorted(m for m in loaded if any(m == n or m.startswith(n + ".") for n in NETWORK))
     assert found == []
+    assert _lines(run.stdout, "NET_EVENT") == []  # no socket made, no address looked up, no page opened
+    for importer in _lines(run.stdout, "SOCKET_IMPORTED_BY"):
+        top = importer.split(".")[0]
+        assert top in sys.stdlib_module_names and top not in {n.split(".")[0] for n in NETWORK}, (
+            f"socket imported by {importer}")
+
+
+def test_the_probe_would_see_a_connection_attempt() -> None:
+    """The audit hook really catches a socket being made (so an empty list means something)."""
+    probe = "import sys\nev=[]\nsys.addaudithook(lambda n,a: ev.append(n) if n.startswith('socket.') else None)\n" \
+            "import socket\ns=socket.socket(); s.close()\nprint(ev)"
+    run = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, timeout=60, check=False)
+    assert "socket.__new__" in run.stdout, run.stdout + run.stderr
 
 
 def test_no_stamper_code_imports_a_network_module() -> None:
@@ -345,5 +391,5 @@ def test_no_stamper_code_imports_a_network_module() -> None:
             elif isinstance(node, ast.ImportFrom) and node.module:
                 names = [node.module] + [f"{node.module}.{a.name}" for a in node.names]
             found += [f"{path.name}: {n}" for n in names
-                      if any(n == m or n.startswith(m + ".") for m in NETWORK)]
+                      if any(n == m or n.startswith(m + ".") for m in (*NETWORK, "socket"))]
     assert found == []
