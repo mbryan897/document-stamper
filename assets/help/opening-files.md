@@ -39,6 +39,18 @@ Under it, the "Settings file:" line shows which settings file (`config.json`) is
 - **Edit profiles and fields…** opens Profile settings, where the profiles, fields, lists and date format are changed; see [Profiles and stamps](profiles-and-stamps.md). It's greyed out while no settings file is loaded.
 - **Use a different settings file…** loads a different `config.json` for this session only, for example to try out one someone sent you. It isn't remembered: next time the app starts, it uses the usual settings file again. Problems in the file are listed on the drop screen and nothing changes.
 
+## Help
+
+**Help**, beside **Organization setup…**, opens a menu:
+
+- **Help** opens this help at the topic for the first screen; F1 does the same on any screen.
+- **Keyboard shortcuts** opens [Keyboard shortcuts](keyboard.md).
+- **What's new** lists the changes in each version of the program.
+- **Open settings folder** shows the settings file in use in Explorer. It's greyed out while the built-in default is in use, because there's no file there for anyone to edit.
+- **About Document Stamper** shows the version numbers, the license and what the program writes to the computer; see [About Document Stamper](about.md).
+
+Every other screen has a **Help** link that opens the topic for that screen.
+
 ## Files that need a password
 
 If a PDF needs a password to open, you're asked for it.

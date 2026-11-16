@@ -8,6 +8,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
 
+from .crash import install as install_crash_handler
 from .fonts import load_fonts
 from .icon import app_icon, use_own_taskbar_id
 from .main_window import MainWindow
@@ -39,7 +40,9 @@ def run_window(files: Sequence[Path] = ()) -> int:
     screen, to order them and choose Combine or Batch (D-100).
     """
     app = make_app()
+    reporter = install_crash_handler()  # before the window, so an error building it is reported too
     window = MainWindow()
+    reporter.cleanup = window.release
     window.show_fitted()  # normal and centred when it fits the screen, else maximized (D-093)
     if files:
         window.open_files([Path(f) for f in files])

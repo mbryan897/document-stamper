@@ -39,7 +39,7 @@ dev = [
 ]
 
 [project.urls]
-Repository = "https://github.com/MBryan897/document-stamper"
+Repository = "https://github.com/mbryan897/document-stamper"
 
 [project.scripts]
 stamper = "stamper.__main__:main"

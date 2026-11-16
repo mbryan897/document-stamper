@@ -134,7 +134,7 @@ def test_top_level_must_be_object(tmp_path: Path) -> None:
         load_config(p)
 
 
-@pytest.mark.parametrize("version", [0, 2, 99])
+@pytest.mark.parametrize("version", [0, -1])
 def test_unknown_schema_version(version: int) -> None:
     data = minimal()
     data["schema_version"] = version

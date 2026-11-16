@@ -62,8 +62,10 @@ from ..core.fields import MAX_VALUE_LENGTH, usable_for_filename, validate_field,
 from ..core.filenames import MAX_FILENAME_LENGTH, hidden_characters, suggest_filename, visible
 from ..core.locations import ConfigSource, Locations, SourceKind, describe, save_config, save_target
 from ..core.paths import same_file
+from ..core import traces
 from ..core.patterns import PatternError, explain, parse_date_format, regex_risk
 from ..core.template import BUILTIN_TOKENS, TemplateError, builtin_values, render
+from ..handlers import combine
 from ..handlers.base import StampJob
 from ..handlers.pdf import write_sample_page
 from .color_picker import ColorButton, light_color_note
@@ -93,6 +95,7 @@ PROBLEM_LINES = 6  # footer lines before the problem list scrolls (D-093)
 STATUS_LINES = 4
 SAMPLE_ORIGINAL = "provider_return.pdf"
 MAX_NAME_SHOWN = 80  # a name from config in a footer message
+MAX_PATH_SHOWN = 300  # characters of a path in a message
 MAX_SUMMARY_LINES = 20  # lines of a change summary in a confirm box
 MAX_SUMMARY_LINE = 300  # characters of one summary line
 MAX_PASTE_LINES = 500  # clipboard lines read by "Paste choices" (UX-033)
@@ -182,6 +185,12 @@ def _shown(name: str) -> str:
     """A name from config for a footer message: hidden characters shown, length capped."""
     name = visible(name)
     return name if len(name) <= MAX_NAME_SHOWN else name[:MAX_NAME_SHOWN - 1] + "…"
+
+
+def _path_shown(path: Path) -> str:
+    """A path for a message: hidden characters shown, length capped."""
+    text = visible(str(path), keep="")
+    return text if len(text) <= MAX_PATH_SHOWN else text[:MAX_PATH_SHOWN - 1] + "…"
 
 
 def _summary(lines: Sequence[str]) -> str:
@@ -1582,6 +1591,18 @@ class GeneralPage(_Page):
         row.addWidget(self.sendto_remove)
         row.addStretch(1)
         self.form.addLayout(row)
+
+        self.form.addWidget(_section("This computer"))
+        self.form.addWidget(_label(
+            "Removes what Document Stamper keeps about you on this computer: the last profile and "
+            "folders used, and the Send to shortcut if it opens this copy. Settings files are never "
+            "removed. You're shown the list first.", "help"))
+        row = QHBoxLayout()
+        self.forget_button = _small("Remove my settings from this computer…")
+        self.forget_button.clicked.connect(self.owner.remove_my_settings)
+        row.addWidget(self.forget_button)
+        row.addStretch(1)
+        self.form.addLayout(row)
         self.form.addStretch(1)
         self.refresh_live()
         self._sendto_refresh()
@@ -1640,6 +1661,7 @@ class ProfileSettings(QWidget):
 
     saved = Signal(object)  # the ConfigSource now holding the config
     closed = Signal()
+    forgotten = Signal()  # "Remove my settings…" removed state.json: the window forgets it too
     help_requested = Signal(str)  # a help topic, from a link inside a section
 
     def __init__(
@@ -1964,6 +1986,9 @@ class ProfileSettings(QWidget):
         try:
             imported = load_config(path)
         except ConfigError as e:
+            if e.newer:
+                self.say(e.problems[0])
+                return
             shown = e.problems[:MAX_PROBLEMS]
             self.say(f"{_shown(path.name)} can't be imported:\n" + "\n".join(f"• {p}" for p in shown))
             return
@@ -2023,6 +2048,41 @@ class ProfileSettings(QWidget):
     def sendto_remove(self) -> None:
         """Remove the Send to shortcut."""
         sendto.remove(self._sendto_shortcut)
+
+    # ------------------------------------------------------------ This computer
+
+    def remove_my_settings(self) -> traces.Outcome | None:
+        """List what "Remove my settings from this computer…" removes, ask, then remove it."""
+        st = self.sendto_status()
+        removal = traces.plan_removal(
+            self.locs,
+            settings_files=(self.source.path, self.locs.app_config, self.locs.user_config),
+            shortcut=st.shortcut if st.state is not sendto.SendToState.MISSING else None,
+            shortcut_is_ours=st.state is sendto.SendToState.CURRENT,
+            shortcut_kept=("it couldn't be read, so which copy it opens isn't known"
+                           if st.state is sendto.SendToState.UNREADABLE else "it opens another copy of Document Stamper"),
+            combine_running=combine.in_progress())
+        gone = [f"• {_path_shown(p)}" for p in removal.files]
+        gone += [f"• {_path_shown(p)} (the folder, if nothing else is left in it)" for p in removal.folders]
+        kept = [f"• {_path_shown(p)}: {why}" for p, why in removal.kept]
+        if not gone:
+            self.say("Nothing of Document Stamper's is stored on this computer to remove."
+                     + ("\nKept:\n" + "\n".join(kept) if kept else ""))
+            return None
+        text = ("This removes:\n" + "\n".join(gone)
+                + ("\n\nThese are kept:\n" + "\n".join(kept) if kept else "")
+                + "\n\nSettings files (config.json) and their backups are never removed. "
+                  "If you go on using Document Stamper, it starts remembering again.")
+        if not self.services.confirm(self, "Remove my settings from this computer?", text, "Remove"):
+            return None
+        outcome = traces.carry_out(removal)
+        self.forgotten.emit()
+        lines = [f"Removed {len(outcome.removed)} item(s)."]
+        lines += [f"Left {_path_shown(p)}: {why}." for p, why in outcome.left]
+        self.say("\n".join(lines))
+        if hasattr(self.general_page, "sendto_status"):
+            self.general_page._sendto_refresh()
+        return outcome
 
     # ------------------------------------------------------------ closing
 

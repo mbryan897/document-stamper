@@ -13,7 +13,8 @@ Stops (exit 1) on the first group of problems it finds, after listing them:
    missing. (Explorer may still show an old icon from its cache.)
 3. Its version resource names the product and the version being built.
 4. It is the single-file build: the bundle carries the help, the icon PNGs,
-   the fonts, ``config/default.json`` and ``LICENSE``, each identical to the
+   the fonts and their license texts, ``config/default.json``, ``LICENSE``,
+   ``THIRD-PARTY-NOTICES`` and ``CHANGELOG.md``, each identical to the
    repo copy, and none of the Qt parts or tools that are left out on purpose
    (``spec_common.UNUSED``, tkinter, test code, a user's ``config.json``).
 
@@ -42,6 +43,8 @@ BUNDLED = [
     ("assets/fonts", "*.txt"),
     ("config", "default.json"),
     (".", "LICENSE"),
+    (".", "THIRD-PARTY-NOTICES"),  # About › Third-party notices…
+    (".", "CHANGELOG.md"),  # Help › What's new
 ]
 # Must not be in the bundle (lower case, matched anywhere in the bundled name).
 FORBIDDEN = (
