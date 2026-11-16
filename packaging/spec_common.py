@@ -30,6 +30,8 @@ DATAS = [
     (str(ROOT / "assets" / "help"), "assets/help"),  # the Help window's topics and pictures (D-133)
     (str(ROOT / "assets" / "icon" / "png" / "*.png"), "assets/icon/png"),  # window and taskbar icon
     (str(ROOT / "LICENSE"), "."),
+    (str(ROOT / "THIRD-PARTY-NOTICES"), "."),  # About › Third-party notices…
+    (str(ROOT / "CHANGELOG.md"), "."),  # Help › What's new
     *copy_metadata("document-stamper"),  # so --version reports the real version
 ]
 
