@@ -299,6 +299,24 @@ def test_copy_details_shows_hidden_characters_in_the_path(tmp_path: Path) -> Non
     assert "Settings file: opened for this session" in text
 
 
+def test_copy_details_never_reads_the_computer_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """platform.uname() reads the host name on Windows (socket.gethostname); Copy details must not use it."""
+    import platform
+    import types
+
+    def refuse(*_a: object) -> None:
+        raise AssertionError("the computer's name was read")
+
+    monkeypatch.setattr(platform, "uname", refuse)
+    monkeypatch.setattr(platform, "node", refuse)
+    monkeypatch.setattr(sys, "getwindowsversion",
+                        lambda: types.SimpleNamespace(major=10, minor=0, build=26100), raising=False)
+    assert "System: Windows 11 (version 10.0.26100)" in copy_details(None)
+    monkeypatch.setattr(sys, "getwindowsversion",
+                        lambda: types.SimpleNamespace(major=10, minor=0, build=19045), raising=False)
+    assert "System: Windows 10 (version 10.0.19045)" in copy_details(None)
+
+
 # ------------------------------------------------------------------ no network
 
 

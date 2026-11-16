@@ -16,6 +16,7 @@ field or anything from ``state.json``.
 from __future__ import annotations
 
 import platform
+import sys
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QGuiApplication
@@ -82,7 +83,18 @@ def library_versions() -> list[tuple[str, str]]:
 
 
 def _windows() -> str:
-    return f"{platform.system()} {platform.release()} ({platform.version()})"
+    """The Windows version from the running system.
+
+    Not ``platform.system()``/``release()``/``version()``: on Windows they go
+    through ``platform.uname()``, which also reads the computer's name with
+    ``socket.gethostname()``. Nothing here needs it.
+    """
+    get = getattr(sys, "getwindowsversion", None)
+    if get is None:
+        return sys.platform
+    v = get()
+    name = "Windows 11" if v.major == 10 and v.build >= 22000 else f"Windows {v.major}"
+    return f"{name} (version {v.major}.{v.minor}.{v.build})"
 
 
 def copy_details(source: ConfigSource | None) -> str:
