@@ -58,7 +58,9 @@
         "include_original_name": true
       },
       "metadata": {
-        "Identifier": "{identifier}"
+        "Identifier": "{identifier}",
+        "Source": "{original_name}",
+        "StampedOn": "{date}"
       }
     }
   ]

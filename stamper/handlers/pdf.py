@@ -14,7 +14,8 @@ Evidentiary-integrity notes (for manual review)
   the caller asks to remove them (D-050).
 - Document properties: existing Info entries are kept; configured keys are
   added (or replaced, with a warning naming old and new values); ``ModDate``
-  is set to the stamping time. XMP is never touched (D-051).
+  is set to the stamping time. XMP is never touched (D-051); when the original
+  has XMP, a note says some programs may show its title and dates for the copy.
 """
 
 from __future__ import annotations
@@ -264,6 +265,9 @@ _PDF_DATE_RE = re.compile(r"D:(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)(\d\d)(?:(Z)|([+-])
 SIGNATURE_LOST_NOTE = "The original is digitally signed; the stamped copy's signature won't validate."
 UNPROTECTED_NOTE = "The copy isn't password-protected, unlike the original."
 COMBINED_UNPROTECTED_NOTE = "The combined file is saved without a password or restrictions."
+# Information, not "Check the copy" (UX-030): what a receiver may see, since XMP is never touched (D-051).
+XMP_NOTE = ("The original has a second set of properties (XMP) that this copy keeps unchanged. "
+            "Some programs may show the original's title and dates for this copy.")
 _REPAIRED_NOTE_END = " was damaged and was repaired when opened. Check the stamped copy carefully."
 _REPLACED_NOTE_START = "Document property "
 # The page list comes first ("On pages 3, 7"), so the fixed part is matched at the end:
@@ -348,7 +352,8 @@ def properties_note(values: Mapping[str, str | None], sources: str, has_xmp: boo
                 named.append(item(k))
         more = len(custom) - len(named)
         parts.append(f"Custom properties: {', '.join(named)}" + (f" and {more} more." if more else "."))
-    parts.append("XMP metadata: yes, carried over unchanged." if has_xmp else "XMP metadata: none.")
+    parts.append("XMP metadata: the original's, kept unchanged; some programs may show its title and dates "
+                 "for this copy." if has_xmp else "XMP metadata: none.")
     return " ".join(parts)
 
 
@@ -712,7 +717,7 @@ class PdfHandler(Handler):
         if info.repaired:
             notes.append(f"{info.path.name}{_REPAIRED_NOTE_END}")
         if info.has_xmp:
-            notes.append("The original has XMP metadata, which wasn't updated; only the document properties were.")
+            notes.append(XMP_NOTE)
         notes.extend(size_notes(info))
         notes.extend(active_content_notes(info))
         return notes
