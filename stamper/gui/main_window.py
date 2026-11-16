@@ -1477,15 +1477,25 @@ class MainWindow(QMainWindow):
         if self.dialog is not None and not self.dialog.may_leave():
             event.ignore()  # values entered on the stamp screen: the user chose to keep them
             return
+        self.release()
+        super().closeEvent(event)
+
+    def release(self) -> None:
+        """Close everything and clean up, without asking: on close, and after an unexpected error.
+
+        A save in progress is cancelled and its temporary file removed (D-055); the
+        engine thread stops; the combined working copy and the sample page are removed.
+        """
         self._close_dialog()
         self._close_settings()
         self._close_prepare()
         combined, self._combined = self._combined, None
-        if self.help is not None:
-            self.help.close()  # it's a window of its own; it mustn't keep the app running
-            self.help.deleteLater()
-            self.help = None
+        for window in (self.help, self.about):
+            if window is not None:
+                window.close()  # windows of their own; they mustn't keep the app running
+                window.deleteLater()
+        self.help = None
+        self.about = None
         self.engine.shutdown()
         if combined is not None:
             combined.cleanup()  # the engine has stopped, so nothing holds the file open
-        super().closeEvent(event)
