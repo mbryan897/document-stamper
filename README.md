@@ -11,7 +11,7 @@ Version 1 handles PDF only. Images, Word and text files are planned through the 
 Requires Python 3.14 and Git.
 
 ```powershell
-git clone https://github.com/MBryan897/document-stamper.git
+git clone https://github.com/mbryan897/document-stamper.git
 Set-Location document-stamper
 py -3.14 -m venv .venv
 .\.venv\Scripts\Activate.ps1

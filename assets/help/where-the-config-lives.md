@@ -68,6 +68,8 @@ A file with problems can't be imported or restored; the problems are listed.
 
 Apart from these, the app writes only the copies you save (and, when combining can't use the work folder, a hidden working folder next to your files; see [Stamping the combined file](several-files.md#stamping-the-combined-file)).
 
+The full list, including short-lived temporary files, is under [Privacy](about.md#privacy).
+
 ## Removing your settings from this computer
 
 **Remove my settings from this computer…**, under **This computer** in **General**, removes what Document Stamper keeps about you on this computer. It first lists exactly what it will remove and what it will keep, and asks:

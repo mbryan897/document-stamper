@@ -49,6 +49,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QComboBox,
+    QDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -95,6 +96,7 @@ from ..handlers.combine import CombinedFile, remove_stale_temp
 from ..handlers.pdf import PdfHandler, xfa_refusal
 from .engine import EngineClient, EngineFailure, TaskContext
 from .fonts import MONO_FAMILY
+from .about import AboutDialog, TextDialog, whats_new
 from .help import HELP_SHORTCUT, HelpWindow, help_button
 from .multi import (
     BATCH,
@@ -305,11 +307,25 @@ class DropScreen(QWidget):
         self.settings_action = setup_menu.addAction("Edit profiles and fields…")
         self.file_action = setup_menu.addAction("Use a different settings file…")
         self.setup_button.setMenu(setup_menu)
-        self.help_button = help_button()
+        # Help is a menu here, built like Organization setup… (step 13); other screens keep the link.
+        self.help_menu_button = QPushButton("Help")
+        self.help_menu_button.setObjectName("link")
+        self.help_menu_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.help_menu_button.setAccessibleName("Help")
+        help_menu = QMenu(self.help_menu_button)
+        self.help_action = help_menu.addAction("Help\tF1")  # the text shows the key; F1 itself is the window's
+        self.keys_action = help_menu.addAction("Keyboard shortcuts")
+        self.whats_new_action = help_menu.addAction("What's new")
+        help_menu.addSeparator()
+        self.folder_action = help_menu.addAction("Open settings folder")
+        self.folder_action.setEnabled(False)  # until a settings file other than the built-in one is loaded
+        help_menu.addSeparator()
+        self.about_action = help_menu.addAction("About Document Stamper")
+        self.help_menu_button.setMenu(help_menu)
         row.addWidget(with_label)
         row.addWidget(self.profile_combo)
         row.addWidget(self.setup_button)
-        row.addWidget(self.help_button)
+        row.addWidget(self.help_menu_button)
         row.addStretch(1)
         below.addLayout(row)
         self.config_label = QLabel("")
@@ -634,6 +650,7 @@ class MainWindow(QMainWindow):
         self.prepare: PrepareScreen | None = None
         self._combined: CombinedFile | None = None
         self.help: HelpWindow | None = None
+        self.about: QDialog | None = None  # About, or What's new: one at a time
         self._task: tuple[str, int] | None = None  # ("screen" | "add" | "combine", request)
         self._mode = ""
         self._opening: tuple[int, Path, str | None] | None = None
@@ -663,6 +680,11 @@ class MainWindow(QMainWindow):
         self.drop.file_action.triggered.connect(self.choose_config)
         self.drop.settings_action.triggered.connect(self.open_settings)
         self.drop.sendto_link.clicked.connect(self.add_sendto)
+        self.drop.help_action.triggered.connect(self.help_for_screen)
+        self.drop.keys_action.triggered.connect(lambda: self.show_help("keyboard"))
+        self.drop.whats_new_action.triggered.connect(self.show_whats_new)
+        self.drop.folder_action.triggered.connect(self.open_settings_folder)
+        self.drop.about_action.triggered.connect(self.show_about)
         self.drop.profile_combo.activated.connect(self._profile_picked)
         self.saved.open_button.clicked.connect(self._open_saved)
         self.saved.folder_button.clicked.connect(self._show_saved)
@@ -742,6 +764,28 @@ class MainWindow(QMainWindow):
             self.help = HelpWindow()
         self.help.show_topic(link)
         return self.help
+
+    def show_about(self) -> AboutDialog:
+        """Help › About Document Stamper."""
+        dialog = AboutDialog(self.source, book=self.help.book if self.help else None, parent=self)
+        return self._show_dialog(dialog)
+
+    def show_whats_new(self) -> TextDialog:
+        """Help › What's new: the changelog in the help viewer."""
+        return self._show_dialog(whats_new(self))
+
+    def _show_dialog(self, dialog: QDialog) -> QDialog:
+        if self.about is not None:
+            self.about.close()
+            self.about.deleteLater()
+        self.about = dialog
+        dialog.open()
+        return dialog
+
+    def open_settings_folder(self) -> None:
+        """Help › Open settings folder: the settings file in use, selected in Explorer."""
+        if self.config_path is not None and self.source is not None and self.source.kind is not SourceKind.BUILTIN:
+            self.services.show_in_folder(self.config_path)
 
     # ------------------------------------------------------------ partial copies (D-124)
 
@@ -831,6 +875,7 @@ class MainWindow(QMainWindow):
                 self.drop.config_label.setText(
                     "No settings file loaded. Open Organization setup… and choose Use a different settings file…")
                 self.drop.settings_action.setEnabled(False)
+                self.drop.folder_action.setEnabled(False)
             return False
         keep = self.profile.name if self.profile and self.config else self.state.last_profile
         self.config, self.config_path = config, path
@@ -848,6 +893,8 @@ class MainWindow(QMainWindow):
         self.drop.config_label.setText(
             f"Settings file: {visible(str(self.config_path))} ({self.source.kind.description})")
         self.drop.settings_action.setEnabled(True)
+        # The built-in default has no folder anyone should edit.
+        self.drop.folder_action.setEnabled(self.source.kind is not SourceKind.BUILTIN)
         self.drop.show_message("")
         return True
 

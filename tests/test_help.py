@@ -245,7 +245,10 @@ def _check(window: MainWindow, expected: str) -> None:
     assert (help_window.topic, help_window.anchor) == want
     help_window.open("about")
     screen = window.stack.currentWidget()
-    screen.help_button.click()
+    if screen is window.drop:  # a Help menu there (step 13): its first entry is this screen's help
+        screen.help_action.trigger()
+    else:
+        screen.help_button.click()
     assert (help_window.topic, help_window.anchor) == want
 
 
