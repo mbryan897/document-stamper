@@ -18,6 +18,8 @@ If the app finds a different file from the one it found last time, it says so in
 
 A config file larger than 1 MB is refused without being read.
 
+A settings file made by a newer version of Document Stamper isn't read. The app says so in one sentence instead of listing problems: update the program, or use a different settings file. The same goes for **Import…** and **Restore a previous version…**.
+
 ## Saving
 
 **Save changes** in Profile settings writes back to the file that was loaded:
@@ -58,10 +60,22 @@ A file with problems can't be imported or restored; the problems are listed.
 
 | What | Where | Why |
 | --- | --- | --- |
-| The last profile, the last folder a file came from, and which config was found | `%APPDATA%\DocumentStamper\state.json` | So the app opens where you left off. Never field values. |
+| The last profile, the last folders used (opening, saving and batches), and which config was found | `%APPDATA%\DocumentStamper\state.json` | So the app opens where you left off. Never field values. |
 | Combined files while you stamp them | `%LOCALAPPDATA%\DocumentStamper\work\` | Deleted when you save, cancel or close. |
 | A list of copies being written | `%LOCALAPPDATA%\DocumentStamper\pending\` | So partial copies can be found after a crash. Each entry is removed once its copy is saved. |
 | A blank sample page for the Profile settings preview | Windows' temporary folder | Removed when you close Profile settings. |
 | The Send to shortcut, if you add it | `%APPDATA%\Microsoft\Windows\SendTo\` | See [Send to menu and running from a USB drive](send-to-and-portable.md). |
 
 Apart from these, the app writes only the copies you save (and, when combining can't use the work folder, a hidden working folder next to your files; see [Stamping the combined file](several-files.md#stamping-the-combined-file)).
+
+## Removing your settings from this computer
+
+**Remove my settings from this computer…**, under **This computer** in **General**, removes what Document Stamper keeps about you on this computer. It first lists exactly what it will remove and what it will keep, and asks:
+
+- `state.json` (the last profile and folders used) is removed.
+- The list of copies being written (`pending`) is removed only when it's empty. If it lists a copy that wasn't finished, deal with that on the first screen first.
+- The Send to shortcut is removed only when it opens this copy of the program; a shortcut to another copy is left.
+- The folders `%APPDATA%\DocumentStamper`, `%LOCALAPPDATA%\DocumentStamper` and its `work` folder are removed only if nothing else is left in them, and the `work` folder never while files are being combined.
+- A settings file (`config.json`) and its backups are never removed. Delete one yourself if you mean to.
+
+Nothing else is touched: only those exact files and folders, never anything found by searching. Afterwards it says what was removed and what was left, and why. If you go on using the app, it starts remembering again.

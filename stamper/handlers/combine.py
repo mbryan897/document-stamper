@@ -99,6 +99,11 @@ def _cleanup_at_exit() -> None:
 atexit.register(_cleanup_at_exit)
 
 
+def in_progress() -> bool:
+    """True while this process has a combined working copy in use."""
+    return bool(_LIVE)
+
+
 # ------------------------------------------------------------------ data
 
 

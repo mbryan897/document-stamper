@@ -68,6 +68,7 @@ from ..core import pending
 from ..core.config import Config, ConfigError, Profile, load_config
 from ..core.filenames import visible
 from ..core.locations import (
+    AppState,
     ConfigSource,
     Locations,
     SourceKind,
@@ -989,6 +990,7 @@ class MainWindow(QMainWindow):
             config=self.config, source=self.source, locs=self.locs, engine=self.engine,
             services=self.services, today=self.today, sendto_shortcut=self._sendto_shortcut)
         settings.saved.connect(self._settings_saved)
+        settings.forgotten.connect(self._forget_state)
         settings.closed.connect(lambda: self.show_drop())
         self._wire_help(settings)
         self.settings = settings
@@ -996,6 +998,11 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentWidget(settings)
         settings.nav.setFocus()
         return settings
+
+    def _forget_state(self) -> None:
+        """state.json was removed: drop the copy in memory too, so the next save doesn't write it back."""
+        self.state = AppState()
+        self._last_folder = None
 
     def _settings_saved(self, source: ConfigSource) -> None:
         if self.load_config(source.path, source):
