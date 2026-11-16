@@ -19,7 +19,10 @@ setup… › Use a different settings file…" is a per-session override on top 
 (D-072). "Organization setup… › Edit profiles and fields…" opens Profile
 settings, which edits whichever config is loaded and saves it back (D-082). The
 last profile and the last folder a file came from are remembered in
-``state.json`` (D-081); field values never are.
+``state.json`` (D-081), with the last save and batch folders (UX-037, UX-039);
+field values never are. "Stamp another with the same values" (UX-032, UX-038)
+and the "Stamped this session" list (UX-035) live in memory only and are gone
+when the app closes.
 """
 
 from __future__ import annotations
@@ -28,7 +31,7 @@ import gc
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from PySide6.QtCore import QRect, QSize, Qt
@@ -86,6 +89,7 @@ from ..handlers.base import (
     StampJob,
     WrongPassword,
 )
+from ..handlers.batch import BatchOutcome, Status
 from ..handlers.combine import CombinedFile, remove_stale_temp
 from ..handlers.pdf import PdfHandler, xfa_refusal
 from .engine import EngineClient, EngineFailure, TaskContext
@@ -110,7 +114,8 @@ from .multi import (
 )
 from .profiles import ProfileSettings
 from .services import Services, native_services
-from .stamp_dialog import NotesView, StampDialog
+from .stamp_dialog import NotesView, StampDialog, StartFrom
+from .wrap_label import WrapAnywhereLabel
 
 __all__ = [
     "FRAME_ALLOWANCE",
@@ -119,6 +124,7 @@ __all__ = [
     "DropScreen",
     "MainWindow",
     "SavedScreen",
+    "SessionEntry",
     "WindowFit",
     "fit_to_screen",
 ]
@@ -127,10 +133,22 @@ MAX_CONFIG_PROBLEMS = 6
 APP_TITLE = "Document Stamper"
 MAX_TITLE_NAME = 80  # characters of a file name in the title bar
 THUMB_W, THUMB_H = 200, 260
+SESSION_SHOWN = 5  # saved copies listed under "Stamped this session" (UX-035)
+MAX_SESSION_NAME = 120  # characters of a name in that list
+CARRY_PENDING = "The next file you open starts with the last file's values and placement."
 
 PREFERRED_SIZE = QSize(1200, 780)  # the mockup's working area
 MINIMUM_SIZE = QSize(880, 560)  # every screen's buttons fit in this
 FRAME_ALLOWANCE = QSize(16, 40)  # Windows title bar and borders, in logical pixels
+
+
+@dataclass(frozen=True)
+class SessionEntry:
+    """A copy saved this session (UX-035). Kept in memory only, never in state.json (D-081)."""
+
+    original: str  # the original's name, or what was combined
+    output: Path
+    when: datetime
 
 
 @dataclass(frozen=True)
@@ -193,8 +211,8 @@ class DropScreen(QWidget):
         self.target = QFrame()
         self.target.setObjectName("dropTarget")
         self.target.setProperty("dragging", False)
-        # 320 tall when there's room; shrinks to 220 so a short window still shows everything.
-        self.target.setMinimumSize(560, 220)
+        # 320 tall when there's room; shrinks to 210 so a short window still shows everything.
+        self.target.setMinimumSize(560, 210)
         self.target.setMaximumSize(720, 320)
         self.target.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         tl = QVBoxLayout(self.target)
@@ -228,6 +246,12 @@ class DropScreen(QWidget):
         self.message_frame.setMaximumWidth(720)
         outer.addWidget(self.message_frame, 0, Qt.AlignmentFlag.AlignHCenter)
 
+        # The lines under the drop target sit closer together, so the screen still fits at
+        # 880 x 560 with the partial-copy notice, the Send to link and the session list (D-093).
+        below = QVBoxLayout()
+        below.setSpacing(8)
+        outer.addLayout(below)
+
         # Partial copies left by a run that stopped (D-124): offered for deletion, never deleted silently.
         self.leftover_frame = QFrame()
         self.leftover_frame.setObjectName("warning")
@@ -247,6 +271,7 @@ class DropScreen(QWidget):
         self.leftover_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.leftover_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.leftover_scroll.setMaximumHeight(84)
+        self.leftover_scroll.setMinimumHeight(30)  # one line, scrolling, when the window is short
         self.leftover_scroll.setStyleSheet("QScrollArea, QScrollArea > QWidget > QWidget {background: transparent;}")
         lf.addWidget(self.leftover_scroll)
         buttons = QHBoxLayout()
@@ -260,7 +285,7 @@ class DropScreen(QWidget):
         buttons.addStretch(1)
         lf.addLayout(buttons)
         self.leftover_frame.hide()
-        outer.addWidget(self.leftover_frame, 0, Qt.AlignmentFlag.AlignHCenter)
+        below.addWidget(self.leftover_frame, 0, Qt.AlignmentFlag.AlignHCenter)
 
         row = QHBoxLayout()
         row.setSpacing(12)
@@ -285,18 +310,49 @@ class DropScreen(QWidget):
         row.addWidget(self.setup_button)
         row.addWidget(self.help_button)
         row.addStretch(1)
-        outer.addLayout(row)
+        below.addLayout(row)
         self.config_label = QLabel("")
         self.config_label.setObjectName("muted")
         self.config_label.setTextFormat(Qt.TextFormat.PlainText)  # shows a path
         self.config_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        outer.addWidget(self.config_label)
+        below.addWidget(self.config_label)
         # Offered only while the Send to shortcut is missing or points at another copy (UX-011).
         self.sendto_link = QPushButton("Add Document Stamper to Explorer's Send to menu")
         self.sendto_link.setObjectName("mutedLink")
         self.sendto_link.setCursor(Qt.CursorShape.PointingHandCursor)
         self.sendto_link.hide()
-        outer.addWidget(self.sendto_link, 0, Qt.AlignmentFlag.AlignHCenter)
+        below.addWidget(self.sendto_link, 0, Qt.AlignmentFlag.AlignHCenter)
+
+        # Copies saved since the app started (UX-035); memory only, newest first.
+        self.session_frame = QFrame()
+        self.session_frame.setMinimumWidth(560)
+        self.session_frame.setMaximumWidth(720)
+        sl = QHBoxLayout(self.session_frame)  # the heading beside the list saves a line
+        sl.setContentsMargins(0, 0, 0, 0)
+        sl.setSpacing(12)
+        heading = QLabel("Stamped this session")
+        heading.setObjectName("muted")
+        heading.setMinimumHeight(30)
+        heading.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        sl.addWidget(heading, 0, Qt.AlignmentFlag.AlignTop)
+        rows = QWidget()
+        self.session_rows = QVBoxLayout(rows)
+        self.session_rows.setContentsMargins(0, 0, 0, 0)
+        self.session_rows.setSpacing(2)
+        # As tall as its lines; in a short window it scrolls, like the partial-copy notice.
+        self.session_scroll = _NotesScroll()
+        self.session_scroll.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        self.session_scroll.setWidget(rows)
+        self.session_scroll.setWidgetResizable(True)
+        self.session_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.session_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.session_scroll.setMinimumHeight(32)
+        self.session_scroll.setStyleSheet("QScrollArea, QScrollArea > QWidget > QWidget {background: transparent;}")
+        sl.addWidget(self.session_scroll, 1)
+        self.session_frame.hide()
+        below.addWidget(self.session_frame, 0, Qt.AlignmentFlag.AlignHCenter)
+        self.session_labels: list[QLabel] = []
+        self.session_buttons: list[QPushButton] = []
         outer.addStretch(1)
 
     def help_topic(self) -> str:
@@ -322,6 +378,36 @@ class DropScreen(QWidget):
         self.leftover_keep.setText("Keep" if count == 1 else "Keep all")
         self.leftover_show.setVisible(count == 1)
         self.leftover_frame.setVisible(count > 0)
+
+    def show_session(self, entries: Sequence[SessionEntry], show_in_folder: object) -> None:
+        """List the newest saved copies, each with Show in folder; none hides the list (UX-035)."""
+        while self.session_rows.count():
+            item = self.session_rows.takeAt(0)
+            if item.widget() is not None:
+                item.widget().deleteLater()
+        self.session_labels, self.session_buttons = [], []
+        for e in entries[:SESSION_SHOWN]:
+            row = QWidget()
+            rl = QHBoxLayout(row)
+            rl.setContentsMargins(0, 0, 0, 0)
+            rl.setSpacing(10)
+            name = visible(e.original)
+            if len(name) > MAX_SESSION_NAME:
+                name = name[: MAX_SESSION_NAME - 1] + "…"
+            label = WrapAnywhereLabel()  # a long name wraps instead of widening the screen
+            label.setText(f"{e.when:%H:%M}  {name}")
+            label.setToolTip(visible(str(e.output)))
+            button = QPushButton("Show in folder")
+            button.setObjectName("small")
+            button.setAccessibleName(f"Show the copy of {name} in its folder")
+            button.clicked.connect(lambda _c=False, p=e.output: show_in_folder(p))  # type: ignore[operator]
+            rl.addWidget(label, 1)
+            rl.addWidget(button, 0, Qt.AlignmentFlag.AlignTop)
+            self.session_rows.addWidget(row)
+            self.session_labels.append(label)
+            self.session_buttons.append(button)
+        self.session_frame.setVisible(bool(entries))
+        self.session_scroll.updateGeometry()
 
     def set_dragging(self, on: bool) -> None:
         """Highlight the drop target while a file is dragged over the window."""
@@ -418,13 +504,21 @@ class SavedScreen(QWidget):
         self.folder_button = QPushButton("Show in folder")
         self.another_button = QPushButton("Stamp another file")
         self.another_button.setObjectName("link")
+        self.same_button = QPushButton("Stamp another with the same values")  # UX-032, UX-038
+        self.same_button.setObjectName("link")
         self.help_button = help_button()
         buttons.addWidget(self.open_button)
         buttons.addWidget(self.folder_button)
-        buttons.addWidget(self.another_button)
         buttons.addStretch(1)
         buttons.addWidget(self.help_button)
         right.addLayout(buttons)
+        # A row of their own, so all of them show at 880 x 560 (D-093).
+        links = QHBoxLayout()
+        links.setSpacing(10)
+        links.addWidget(self.another_button)
+        links.addWidget(self.same_button)
+        links.addStretch(1)
+        right.addLayout(links)
         cl.addLayout(right, 1)
         outer.addWidget(card, 0, Qt.AlignmentFlag.AlignHCenter)
         outer.addStretch(1)
@@ -544,6 +638,11 @@ class MainWindow(QMainWindow):
         self._opening: tuple[int, Path, str | None] | None = None
         self._thumb_req = 0
         self._last_folder: Path | None = state_folder(self.state.last_folder)
+        # Memory only, never state.json (D-081): what the next stamp screen starts from (UX-032),
+        # the last saved screen's values for its button, and this session's saved copies (UX-035).
+        self._carry: StartFrom | None = None
+        self._last_start: StartFrom | None = None
+        self.session: list[SessionEntry] = []
 
         self.stack = QStackedWidget()
         self.drop = DropScreen()
@@ -566,7 +665,8 @@ class MainWindow(QMainWindow):
         self.drop.profile_combo.activated.connect(self._profile_picked)
         self.saved.open_button.clicked.connect(self._open_saved)
         self.saved.folder_button.clicked.connect(self._show_saved)
-        self.saved.another_button.clicked.connect(lambda: self.show_drop())
+        self.saved.another_button.clicked.connect(self.stamp_another)
+        self.saved.same_button.clicked.connect(self.stamp_same)
         self.engine.inspected.connect(self._on_inspected)
         self.engine.inspect_failed.connect(self._on_inspect_failed)
         self.engine.previewed.connect(self._on_thumbnail)
@@ -579,7 +679,7 @@ class MainWindow(QMainWindow):
         self.files_screen.combine_chosen.connect(lambda: self.choose_mode(COMBINE))
         self.files_screen.batch_chosen.connect(lambda: self.choose_mode(BATCH))
         self.busy.cancel.connect(self.engine.cancel)
-        self.batch_saved.another_button.clicked.connect(lambda: self.show_drop())
+        self.batch_saved.another_button.clicked.connect(self.stamp_another)
 
         for screen in (self.drop, self.saved, self.files_screen, self.busy, self.batch_saved):
             self._wire_help(screen)
@@ -757,10 +857,68 @@ class MainWindow(QMainWindow):
             self.load_config(path)
 
     def _profile_picked(self, index: int) -> None:
+        self._use_profile(self.drop.profile_combo.itemData(index))
+
+    def _use_profile(self, name: str) -> None:
+        """Use a profile from now on and remember it, from the drop screen or the stamp screen (UX-036)."""
         if self.config is not None:
-            self.profile = self.config.profile(self.drop.profile_combo.itemData(index))
+            self.profile = self.config.profile(name)
             self.state.last_profile = self.profile.name
             save_state(self.state, self.locs)
+            combo = self.drop.profile_combo
+            combo.setCurrentIndex(combo.findData(self.profile.name))
+
+    def switch_profile(self, name: str) -> StampDialog | None:
+        """Another profile picked on the stamp screen: rebuild it for the same file (UX-036).
+
+        Values for fields both profiles have are kept; the confirmations and
+        password already given for the file stay given. What can't be kept is
+        named on the new screen.
+        """
+        dialog = self.dialog
+        if dialog is None or self.config is None or dialog.saving:
+            return None
+        try:
+            new = self.config.profile(name)
+        except KeyError:
+            return None
+        fields = self.config.fields
+        lost = [visible(fields[n].label) for n in dialog.profile.fields
+                if n not in new.fields and dialog.raw(n).strip()]
+        kept = []
+        if dialog.signature_tick is not None and dialog.signature_tick.isChecked():
+            kept.append("the signature confirmation")
+        if dialog.owner_password_given:
+            kept.append("the permissions password")
+        elif dialog.restriction_tick is not None and dialog.restriction_tick.isChecked():
+            kept.append("the confirmation to stamp a protected file")
+        notice = []
+        if lost:
+            these = "this field" if len(lost) == 1 else "these fields"
+            notice.append(f"Not kept: what was entered in {', '.join(lost)}. "
+                          f"The {visible(new.name)} profile doesn't have {these}.")
+        if kept:
+            notice.append(f"Still given for this file: {' and '.join(kept)}.")
+        start = dialog.start_from(notice=" ".join(notice))
+        self._use_profile(new.name)
+        rebuilt: StampDialog
+        if isinstance(dialog, BatchDialog):
+            folder = dialog.out_folder
+            sig, res = dialog._accept_flags()
+            batch = self._show_batch(dialog.files, sig, res, start=start)
+            if folder is not None:
+                batch._set_folder(folder)
+            else:
+                batch.next_to_radio.setChecked(True)
+            rebuilt = batch
+        elif isinstance(dialog, CombineDialog):
+            rebuilt = self._show_combine(dialog.combined, dialog.info, start=start)
+        else:
+            rebuilt = self.show_dialog(dialog.path, dialog.info, dialog.password, start=start)
+        self.update_title()
+        if rebuilt.profile_combo is not None:
+            rebuilt.profile_combo.setFocus()
+        return rebuilt
 
     # ------------------------------------------------------------ screens
 
@@ -771,7 +929,10 @@ class MainWindow(QMainWindow):
         self._close_prepare()
         self._drop_combined()
         self.stack.setCurrentWidget(self.drop)
+        if self._carry is not None:  # say so while the next file will start from the last one's values
+            message = f"{message}\n\n{CARRY_PENDING}" if message else CARRY_PENDING
         self.drop.show_message(message)
+        self.drop.show_session(self.session, self.services.show_in_folder)
         self._offer_sendto()
         self.drop.choose_button.setFocus()
 
@@ -874,7 +1035,25 @@ class MainWindow(QMainWindow):
     def _open_shortcut(self) -> None:
         """Ctrl+O: "Choose files…", only where a file can be dropped (UX-014)."""
         if self.stack.currentWidget() in (self.drop, self.saved, self.batch_saved):
+            if self.stack.currentWidget() is not self.drop:
+                self._carry = None  # only "Stamp another with the same values" carries them
             self.choose_file()
+
+    def stamp_another(self) -> None:
+        """"Stamp another file": back to the drop screen, starting blank."""
+        self._carry = None
+        self.show_drop()
+
+    def stamp_same(self) -> None:
+        """"Stamp another with the same values": the next file starts from the last one's (UX-032, UX-038)."""
+        self._carry = self._last_start
+        self.show_drop()
+        self.choose_file()
+
+    def _take_carry(self, start: StartFrom | None) -> StartFrom | None:
+        """``start`` if given, else the carried values, which are used once."""
+        carry, self._carry = self._carry, None
+        return start if start is not None else carry
 
     def open_files(self, paths: Sequence[Path]) -> None:
         """Open what was dropped or passed on the command line: one file, or several (D-100)."""
@@ -929,7 +1108,8 @@ class MainWindow(QMainWindow):
             return
         self.show_drop(failure.message)
 
-    def show_dialog(self, path: Path, info: DocumentInfo, password: str | None) -> StampDialog:
+    def show_dialog(self, path: Path, info: DocumentInfo, password: str | None,
+                    start: StartFrom | None = None) -> StampDialog:
         """Show the stamp dialog for a file that has been inspected."""
         assert self.config is not None and self.profile is not None
         self._close_dialog()
@@ -937,11 +1117,13 @@ class MainWindow(QMainWindow):
         dialog = StampDialog(
             config=self.config, profile=self.profile, path=path, info=info,
             password=password, engine=self.engine, services=self.services, today=self.today,
+            start=self._take_carry(start),
         )
         dialog.last_save_folder = self.state.last_save_folder
         dialog.cancelled.connect(lambda: self.show_drop())
         dialog.saved.connect(self._on_saved)
         dialog.edited.connect(self.update_title)
+        dialog.profile_chosen.connect(self.switch_profile)
         self._wire_help(dialog)
         self.dialog = dialog
         self.stack.addWidget(dialog)
@@ -1075,16 +1257,19 @@ class MainWindow(QMainWindow):
             self._back_to_files("Combining was cancelled. Nothing was saved." if isinstance(failure.error, Cancelled)
                                 else failure.message)
 
-    def _show_combine(self, combined: CombinedFile, info: DocumentInfo) -> CombineDialog:
+    def _show_combine(self, combined: CombinedFile, info: DocumentInfo,
+                      start: StartFrom | None = None) -> CombineDialog:
         assert self.config is not None and self.profile is not None
         self._close_dialog()
         self._close_prepare()
         dialog = CombineDialog(config=self.config, profile=self.profile, combined=combined, info=info,
-                               engine=self.engine, services=self.services, today=self.today)
+                               engine=self.engine, services=self.services, today=self.today,
+                               start=self._take_carry(start))
         dialog.last_save_folder = self.state.last_save_folder
         dialog.cancelled.connect(lambda: self._back_to_files())
         dialog.saved.connect(self._on_saved)
         dialog.edited.connect(self.update_title)
+        dialog.profile_chosen.connect(self.switch_profile)
         self._wire_help(dialog)
         self.dialog = dialog
         self.stack.addWidget(dialog)
@@ -1092,17 +1277,20 @@ class MainWindow(QMainWindow):
         dialog.focus_first()
         return dialog
 
-    def _show_batch(self, files: list[ScreenedFile], accept_signature: bool, accept_restrictions: bool) -> BatchDialog:
+    def _show_batch(self, files: list[ScreenedFile], accept_signature: bool, accept_restrictions: bool,
+                    start: StartFrom | None = None) -> BatchDialog:
         assert self.config is not None and self.profile is not None
         self._close_dialog()
         self._close_prepare()
         dialog = BatchDialog(config=self.config, profile=self.profile, files=files,
                              accept_signature_loss=accept_signature, accept_restrictions=accept_restrictions,
-                             engine=self.engine, handler=self.handler, services=self.services, today=self.today)
+                             engine=self.engine, handler=self.handler, services=self.services, today=self.today,
+                             start=self._take_carry(start))
         dialog.preselect(self.state.batch_folder, self.state.batch_in_one_folder)
         dialog.cancelled.connect(lambda: self._back_to_files())
         dialog.batch_saved.connect(self._on_batch_saved)
         dialog.edited.connect(self.update_title)
+        dialog.profile_chosen.connect(self.switch_profile)
         self._wire_help(dialog)
         self.dialog = dialog
         self.stack.addWidget(dialog)
@@ -1117,6 +1305,10 @@ class MainWindow(QMainWindow):
             if dialog.out_folder is not None:
                 self.state.batch_folder = str(dialog.out_folder)
             save_state(self.state, self.locs)
+        self._last_start = None  # the results list has no "same values" button
+        for o in outcomes:
+            if isinstance(o, BatchOutcome) and o.status == Status.SAVED and o.result is not None:
+                self._add_to_session(o.item.path.name, o.result.output_path)
         self._close_dialog()
         self.batch_saved.show_outcomes(outcomes)  # type: ignore[arg-type]
         self.stack.setCurrentWidget(self.batch_saved)
@@ -1157,6 +1349,12 @@ class MainWindow(QMainWindow):
             original = (f"All {n} files unchanged" + (", signed files still signed" if dialog.combined.signed else ""))
         self.state.last_save_folder = str(result.output_path.parent)  # Save As starts here next time (UX-037)
         save_state(self.state, self.locs)
+        self._last_start = dialog.start_from(from_last_file=True)  # memory only (D-081)
+        if isinstance(dialog, CombineDialog):
+            first, more = dialog.originals[0].name, len(dialog.originals) - 1
+            self._add_to_session(f"{first} and {more} more, combined", result.output_path)
+        else:
+            self._add_to_session(dialog.path.name, result.output_path)
         self._close_dialog()
         self._drop_combined()
         self.saved.show_result(result, label=label, identifier=ident, signed=signed,
@@ -1164,6 +1362,11 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentWidget(self.saved)
         self._thumb_req = self.engine.preview(
             result.output_path, 1, StampJob(stamps=(), values={}), password, max(24, thumb_dpi))
+
+    def _add_to_session(self, original: str, output: Path) -> None:
+        """Note a saved copy for "Stamped this session" (UX-035); only the newest few are kept."""
+        self.session.insert(0, SessionEntry(original, Path(output), datetime.now()))
+        del self.session[SESSION_SHOWN:]
 
     def _on_thumbnail(self, req: int, png: bytes) -> None:
         if req == self._thumb_req and self.stack.currentWidget() is self.saved:
@@ -1206,6 +1409,8 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         event.acceptProposedAction()
+        if self.stack.currentWidget() is not self.drop:
+            self._carry = None  # only "Stamp another with the same values" carries them
         self.open_files(paths)
 
     # ------------------------------------------------------------ closing

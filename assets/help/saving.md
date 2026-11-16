@@ -44,6 +44,9 @@ Then:
 
 - **Open file** opens the copy in your PDF viewer. Look through it before sending it anywhere.
 - **Show in folder** opens its folder in Explorer, with the copy selected.
-- **Stamp another file** goes back to the drop screen. You can also drop the next file straight onto this screen.
+- **Stamp another file** goes back to the drop screen, and the next file starts blank. You can also drop the next file straight onto this screen, or press Ctrl+O; it starts blank too.
+- **Stamp another with the same values** is for the next file of the same case. It opens the file picker, and the next file's stamp screen starts with this one's values, placement, page numbers, **White box behind stamp** and file-name ticks. See [Filled in from the last file](stamping-one-file.md#filled-in-from-the-last-file).
+
+The copy is also listed under "Stamped this session" on the drop screen; see [Copies stamped this session](opening-files.md#copies-stamped-this-session).
 
 After stamping several files separately, a results list is shown instead; see [The results](several-files.md#the-results).
