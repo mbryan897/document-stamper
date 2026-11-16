@@ -36,7 +36,7 @@ Document properties are the information a PDF carries about itself, such as Titl
 - The original's properties are all kept.
 - The properties set in the profile are added. The built-in profile adds `Identifier` (the stamped identifier), `Source` (the original's file name, without `.pdf`) and `StampedOn` (the stamping date), so the copy records which original it came from and when it was stamped. If the original already had a property of that name with a different value, it's replaced, and a note gives the old and new values.
 - The modification date (`ModDate`) is set to the time of stamping.
-- XMP metadata, a second, separate set of properties some PDFs carry, is left exactly as it was. It isn't updated, so it may still show the original's details; a note says when the original has XMP.
+- XMP metadata, a second, separate set of properties some PDFs carry, is left exactly as it was. It isn't updated, so some programs may show the original's title and dates for this copy instead of the updated properties. A note says when the original has XMP.
 
 The saved screen lists the properties the copy carries, with their values: the standard ones present (Title, Author, Subject, Keywords, Created, Last changed, Made with, PDF made by), any custom ones, and whether there's XMP. Properties such as Author or Creator, and any custom ones, go wherever the copy goes. If they must be removed before the copy is disclosed, that's a separate step with another tool.
 

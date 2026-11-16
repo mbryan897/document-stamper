@@ -73,7 +73,8 @@ def test_check_the_copy_notes(note: str) -> None:
 
 @pytest.mark.parametrize("note", [
     SHRINK[0], PROPS, "This file has 2,500 pages; checking and saving take longer.",
-    "The original has XMP metadata, which wasn't updated; only the document properties were.",
+    "The original has a second set of properties (XMP) that this copy keeps unchanged. "
+    "Some programs may show the original's title and dates for this copy.",
     "On page 1 a form field covers part of the stamp and is drawn on top of it. "
     "Choose another position under Placement to avoid it.",  # grouped in the GUI; starts "On page" too
 ])
