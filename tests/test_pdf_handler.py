@@ -29,7 +29,7 @@ from stamper.handlers.base import (
     UnsupportedDocument,
     WrongPassword,
 )
-from stamper.handlers.pdf import FONT_FILE, PdfHandler, font_path
+from stamper.handlers.pdf import FONT_FILE, PROPERTIES_NOTE_PREFIX, PdfHandler, font_path
 from tests.stamping import (
     DEFAULT_VALUES,
     FAKE_ID,
@@ -545,7 +545,8 @@ def test_owner_password_opens_without_restriction_prompt(corpus_dir: Path, tmp_p
     r = H.apply(corpus_dir / "owner_restrictions.pdf", default_job(), tmp_path / "out.pdf",
                 password=make_corpus.OWNER_PASSWORD)
     assert r.encryption_kept
-    assert not any("restrictions" in w for w in r.warnings)
+    # the properties note names the file (Source: "owner_restrictions"), so it's left out here
+    assert not any("restrictions" in w for w in r.warnings if not w.startswith(PROPERTIES_NOTE_PREFIX))
     with pymupdf.open(tmp_path / "out.pdf") as d:
         assert not d.permissions & pymupdf.PDF_PERM_MODIFY  # copy keeps the restrictions
         assert FAKE_ID in d[0].get_text()

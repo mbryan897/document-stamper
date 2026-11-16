@@ -34,7 +34,7 @@ The white box behind the stamp is a white rectangle drawn over that part of the 
 Document properties are the information a PDF carries about itself, such as Title and Author, shown under File › Properties in most viewers.
 
 - The original's properties are all kept.
-- The properties set in the profile are added, for example `Identifier` with the stamped identifier. If the original already had a property of that name with a different value, it's replaced, and a note gives the old and new values.
+- The properties set in the profile are added. The built-in profile adds `Identifier` (the stamped identifier), `Source` (the original's file name, without `.pdf`) and `StampedOn` (the stamping date), so the copy records which original it came from and when it was stamped. If the original already had a property of that name with a different value, it's replaced, and a note gives the old and new values.
 - The modification date (`ModDate`) is set to the time of stamping.
 - XMP metadata, a second, separate set of properties some PDFs carry, is left exactly as it was. It isn't updated, so it may still show the original's details; a note says when the original has XMP.
 
@@ -50,5 +50,6 @@ A combined file is a new document built from the originals' pages, then stamped 
 - Not kept: page labels (such as "i, ii, iii"), accessibility tags, the originals' document properties, their XMP metadata, their earlier versions and unused objects.
 - The combined file has *no password or restrictions*, whatever the originals had.
 - A `StamperSources` property records the original file names (names only, never folders) and the pages each one became, for example `report_part1.pdf|1-3`. Viewers show it with the custom properties.
+- A property that uses `{original_name}`, such as `Source`, names only the first original file; `StamperSources` lists them all.
 
 The temporary combined file is made in a private folder in your user profile and deleted when you save, cancel or close the window. See [Stamping the combined file](several-files.md#stamping-the-combined-file).
