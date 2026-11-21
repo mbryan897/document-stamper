@@ -17,43 +17,68 @@
       "label": "Identifier",
       "type": "text",
       "required": true,
-      "normalize": ["trim", "upper", "dashes"],
-      "formats": [
-        { "name": "Any value", "pattern": "*" }
+      "normalize": [
+        "trim",
+        "upper",
+        "dashes"
       ],
+      "formats": [
+        {
+          "name": "Any value",
+          "pattern": "*",
+          "regex": null
+        }
+      ],
+      "taxonomy": null,
       "from_filename": true
     },
     "doc_type": {
       "label": "Document type",
       "type": "choice",
+      "required": false,
+      "normalize": [
+        "trim"
+      ],
+      "formats": [],
       "taxonomy": "doc_types",
-      "required": true
+      "from_filename": false
     },
     "doc_title": {
       "label": "Document title",
       "type": "text",
-      "required": false
+      "required": false,
+      "normalize": [
+        "trim"
+      ],
+      "formats": [],
+      "taxonomy": null,
+      "from_filename": false
     }
   },
   "profiles": [
     {
       "name": "Standard",
       "default": true,
-      "fields": ["identifier", "doc_type", "doc_title"],
+      "fields": [
+        "identifier",
+        "doc_title"
+      ],
       "stamps": [
         {
-          "text": "{identifier}  |  {doc_type}  |  Page {page} of {total}",
+          "text": "{identifier}  |  Page {page} of {total}",
           "anchor": "top-right",
           "direction": "along-top",
           "margin_in": 0.25,
-          "font_size_pt": 9,
+          "font_size_pt": 9.0,
           "color": "#2B3A8F",
           "background_box": true,
           "pages": "all"
         }
       ],
       "output_name": {
-        "fields": ["identifier", "doc_type"],
+        "fields": [
+          "identifier"
+        ],
         "separator": "_",
         "include_original_name": true
       },

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import os
 import shutil
 import subprocess
 import sys
@@ -13,7 +14,7 @@ import pymupdf
 import pytest
 
 from stamper.cli import ExitCode, main
-from tests.stamping import DEFAULT_CONFIG, FAKE_ID, RECORDS_CONFIG, REPO
+from tests.stamping import BUILTIN_CONFIG, DEFAULT_CONFIG, FAKE_ID, RECORDS_CONFIG, REPO
 from tools import make_corpus
 
 
@@ -30,6 +31,12 @@ def _copy(corpus_dir: Path, name: str, tmp_path: Path) -> Path:
     dst = tmp_path / name
     shutil.copyfile(corpus_dir / name, dst)
     return dst
+
+
+@pytest.fixture(autouse=True)
+def _three_field_config_next_to_the_app() -> None:
+    """Runs without ``--config`` use the tests' three-field config, found next to the app (D-080)."""
+    shutil.copyfile(DEFAULT_CONFIG, Path(os.environ["STAMPER_APP_DIR"]) / "config.json")
 
 
 def test_success_with_out(corpus_dir: Path, tmp_path: Path) -> None:
@@ -206,7 +213,7 @@ def test_name_fields_including_date(corpus_dir: Path, tmp_path: Path) -> None:
 def test_default_config_is_the_shipped_one() -> None:
     from stamper.core.locations import builtin_config_path
 
-    assert builtin_config_path() == DEFAULT_CONFIG
+    assert builtin_config_path() == BUILTIN_CONFIG
 
 
 def _module(*args: str) -> subprocess.CompletedProcess[str]:

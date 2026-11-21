@@ -14,7 +14,11 @@ from stamper.handlers.base import StampJob
 from tools import make_corpus
 
 REPO = Path(__file__).resolve().parents[1]
-DEFAULT_CONFIG = REPO / "config" / "default.json"
+BUILTIN_CONFIG = REPO / "config" / "default.json"  # what the program ships with
+# The tests' generic config: three fields (identifier, document type, title), the
+# document type required and in the stamp. It was the shipped default until 1.1.0;
+# kept as a fixture so the tests don't depend on what the shipped default says.
+DEFAULT_CONFIG = REPO / "tests" / "fixtures" / "standard_sample.json"
 RECORDS_CONFIG = REPO / "tests" / "fixtures" / "records_sample.json"
 MANUAL_DIR = REPO / "tests" / "corpus" / "manual"
 
@@ -27,7 +31,7 @@ INK = (0x2B, 0x3A, 0x8F)
 
 
 def default_config() -> Config:
-    """The shipped generic config."""
+    """The tests' generic three-field config."""
     return load_config(DEFAULT_CONFIG)
 
 

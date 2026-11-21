@@ -62,6 +62,12 @@ def test_default_json_loads() -> None:
     assert cfg.fields["identifier"].formats[0].pattern == "*"
     assert cfg.settings.date_format == "MM-DD-YYYY"
     assert prof.output_name.fields[0] == "identifier"
+    # 1.1.0: the shipped profile stamps the identifier and page number only; the
+    # document type field and its list stay defined, for a profile to pick up.
+    assert prof.fields == ["identifier", "doc_title"]
+    assert [s.text for s in prof.stamps] == ["{identifier}  |  Page {page} of {total}"]
+    assert prof.output_name.fields == ["identifier"]
+    assert "doc_type" in cfg.fields and not cfg.fields["doc_type"].required
 
 
 def test_default_json_has_no_agency_formats() -> None:

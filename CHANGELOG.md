@@ -28,6 +28,7 @@ Usability fixes from a review of the whole program, and the things a released pr
 - "Paste choices" adds a list's choices from the clipboard.
 - A settings file made by a newer version of the program says so in one sentence instead of a list of problems.
 - "Remove my settings from this computer…" removes what the program keeps about you (never a settings file).
+- The built-in settings are simpler: the stamp is the identifier and the page number, and the file name starts with the identifier. Document type is still defined, not required, and can be added to a profile.
 
 ### Getting around
 
