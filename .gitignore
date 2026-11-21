@@ -45,6 +45,8 @@ config/local*.json
 # config.json next to the app: from source that is the repo root (D-080)
 /config.json
 /config.json.bak
+# dated backups kept by Profile settings (config.json.20261115-011538.bak)
+/config.json.*.bak
 
 # Local screenshots and notes from GUI work (never committed)
 docs-local/
