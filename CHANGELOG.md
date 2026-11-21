@@ -2,7 +2,7 @@
 
 The newest changes are first. Each released version lists what changed since the one before.
 
-## Unreleased
+## 1.1.0
 
 Usability fixes from a review of the whole program, and the things a released program is expected to have.
 
