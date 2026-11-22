@@ -16,9 +16,11 @@ Export instead. Saving the shipped default goes to the first place that can
 take it: next to the app, else the user folder.
 
 Last-used values (D-081) go in ``state.json`` in the user folder, never next
-to the app, so a read-only shared copy still remembers them. Only the last
-profile and the last folder a file was opened from are kept. Field values
-are never remembered.
+to the app, so a read-only shared copy still remembers them: the last
+profile, the config found at start-up, and the folders files were opened
+from and saved to. The folders are left out when the config's
+``settings.remember_folders`` is false (F-03). Field values are never
+remembered.
 
 Packaged builds (O-010, D-087)
 ------------------------------
@@ -405,6 +407,8 @@ class AppState:
     batch_folder: str | None = None  # the last batch's "In one folder" folder (UX-039)
     batch_in_one_folder: bool = False  # the last batch saved in one folder (UX-039)
     extra: dict[str, object] = field(default_factory=dict)  # keys from newer versions, kept as-is
+    # The config's settings.remember_folders; not saved. False: the folder keys are left out (F-03).
+    remember_folders: bool = True
 
     def to_json(self) -> str:
         """Serialize, keeping unknown keys."""
@@ -415,6 +419,9 @@ class AppState:
         data["last_save_folder"] = self.last_save_folder
         data["batch_folder"] = self.batch_folder
         data["batch_in_one_folder"] = self.batch_in_one_folder
+        if not self.remember_folders:
+            for key in ("last_folder", "last_save_folder", "batch_folder", "batch_in_one_folder"):
+                del data[key]
         return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
 

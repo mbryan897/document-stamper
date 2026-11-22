@@ -879,6 +879,7 @@ class MainWindow(QMainWindow):
             return False
         keep = self.profile.name if self.profile and self.config else self.state.last_profile
         self.config, self.config_path = config, path
+        self._apply_remember_folders(config.settings.remember_folders)
         self.source = source or describe(path, SourceKind.OTHER)
         try:
             self.profile = config.profile(keep) if keep else config.default_profile
@@ -1051,8 +1052,26 @@ class MainWindow(QMainWindow):
 
     def _forget_state(self) -> None:
         """state.json was removed: drop the copy in memory too, so the next save doesn't write it back."""
-        self.state = AppState()
+        self.state = AppState(remember_folders=self.state.remember_folders)
         self._last_folder = None
+
+    def _apply_remember_folders(self, remember: bool) -> None:
+        """Follow the config's remember_folders (F-03).
+
+        Off: no remembered folder is used, none is kept, and any already in
+        state.json are removed from it now. state.json is still written when
+        it was before, without the folders. Unknown keys stay.
+        """
+        self.state.remember_folders = remember
+        if remember:
+            return
+        held = (self.state.last_folder, self.state.last_save_folder, self.state.batch_folder,
+                self.state.batch_in_one_folder)
+        self.state.last_folder = self.state.last_save_folder = self.state.batch_folder = None
+        self.state.batch_in_one_folder = False
+        self._last_folder = None
+        if any(held):
+            save_state(self.state, self.locs)
 
     def _settings_saved(self, source: ConfigSource) -> None:
         if self.load_config(source.path, source):
@@ -1134,8 +1153,9 @@ class MainWindow(QMainWindow):
         if not self.handler.can_open(path):
             self.show_drop(f"{visible(path.name)} isn't a PDF file. Choose a PDF to stamp.")
             return
-        self._last_folder = path.parent
-        self.state.last_folder = str(path.parent)
+        if self.state.remember_folders:
+            self._last_folder = path.parent
+            self.state.last_folder = str(path.parent)
         save_state(self.state, self.locs)
         self.show_drop(f"Opening {visible(path.name)}…")
         self._opening = (self.engine.inspect(path), path, None)
@@ -1199,8 +1219,9 @@ class MainWindow(QMainWindow):
         self.show_drop()
         folder = next((p.parent for p in paths if p.is_file()), None)
         if folder is not None:
-            self._last_folder = folder
-            self.state.last_folder = str(folder)
+            if self.state.remember_folders:
+                self._last_folder = folder
+                self.state.last_folder = str(folder)
             save_state(self.state, self.locs)
         self.busy.start(f"Checking {len(paths)} files…")
         self.stack.setCurrentWidget(self.busy)
@@ -1366,9 +1387,10 @@ class MainWindow(QMainWindow):
     def _on_batch_saved(self, outcomes: list[object]) -> None:
         dialog = self.dialog
         if isinstance(dialog, BatchDialog):  # remember where the copies went (UX-039); never field values
-            self.state.batch_in_one_folder = dialog.out_folder is not None
-            if dialog.out_folder is not None:
-                self.state.batch_folder = str(dialog.out_folder)
+            if self.state.remember_folders:
+                self.state.batch_in_one_folder = dialog.out_folder is not None
+                if dialog.out_folder is not None:
+                    self.state.batch_folder = str(dialog.out_folder)
             save_state(self.state, self.locs)
         self._last_start = None  # the results list has no "same values" button
         for o in outcomes:
@@ -1414,7 +1436,8 @@ class MainWindow(QMainWindow):
             extra = dialog.saved_notes()
             n = len(dialog.originals)
             original = (f"All {n} files unchanged" + (", signed files still signed" if dialog.combined.signed else ""))
-        self.state.last_save_folder = str(result.output_path.parent)  # Save As starts here next time (UX-037)
+        if self.state.remember_folders:
+            self.state.last_save_folder = str(result.output_path.parent)  # Save As starts here next time (UX-037)
         save_state(self.state, self.locs)
         self._last_start = dialog.start_from(from_last_file=True)  # memory only (D-081)
         if isinstance(dialog, CombineDialog):
