@@ -45,7 +45,6 @@ These appear under "Before you save" in the stamp dialog, and again as "Note:" l
 | Note | What it means |
 | --- | --- |
 | "The combined file is saved without a password or restrictions. Protected files in it: …" | The combined file has no protection, even though some originals did. Store it accordingly. |
-| "Your private work folder couldn't be used (…), so the combined working copy is in … until you close this window." | The temporary combined file had to go next to your files instead of your private work folder; it's deleted when you save, cancel or close. If any originals had a password, that working copy has none until then. |
 | "Bookmarks: one for each of the N files, with each file's own bookmarks under it." | How the combined file's bookmarks are arranged. |
 | "Form fields in … were renamed so they stay separate: …" | Two files had form fields with the same name. |
 | "Form-field scripts in … may still refer to the old field names; check calculated fields in the combined file." | Calculated fields may show wrong values in the combined file. |
@@ -64,6 +63,7 @@ These appear under "Before you save" in the stamp dialog, and again as "Note:" l
 | "Page 2 (…): stamps 1 and 2 overlap. Move one to another position." | Two stamps would print on top of each other. |
 | "The original, …, changed after you opened it. Open it again so the copy matches what you checked." | Someone or something changed the file while it was open. Open it again and check it. |
 | "Stamping was cancelled. Nothing was saved." | You cancelled. |
+| "Document Stamper can't use its working folder (…). Nothing was combined and your files are unchanged." | Combining builds its working copy only in `%LOCALAPPDATA%\DocumentStamper\work`, and that folder can't be written, is full, or is on a network drive. The working copy is never put next to your files instead. Ask whoever looks after the computer to fix that folder, or free some space, then try again. |
 | "Couldn't …" or "Something went wrong (…)" | The message names the problem, for example a folder you can't write to. Nothing was saved. |
 
 ## The window stops responding
