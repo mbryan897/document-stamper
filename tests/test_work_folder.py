@@ -1,7 +1,8 @@
-"""Combining works in a private folder (D-115); cleanup deletes only what the app made (D-120)."""
+"""Combining works only in a private folder (D-115); cleanup deletes only what the app made (D-120)."""
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import subprocess
@@ -14,13 +15,15 @@ import pytest
 from pytestqt.qtbot import QtBot
 
 import stamper.handlers.combine as combine
+from stamper.cli import ExitCode
+from stamper.cli import main as cli_main
 from stamper.core.locations import work_dir
 from stamper.gui.main_window import MainWindow
 from stamper.handlers.base import StampError
 from stamper.handlers.combine import MARKER_NAME, TEMP_PREFIX, CombineInput, combine_pdfs, remove_stale_temp
 from stamper.handlers.pdf import PdfHandler
 from tests.gui_support import FakeServices, copy_to, fake  # noqa: F401 - fixtures
-from tests.stamping import DEFAULT_CONFIG, default_job, sha256
+from tests.stamping import DEFAULT_CONFIG, FAKE_ID, default_job, sha256
 from tools import make_corpus
 
 PW = make_corpus.USER_PASSWORD
@@ -51,8 +54,7 @@ def test_combine_works_in_the_private_folder(corpus_dir: Path, evidence: Path) -
     inputs = _two_protected(corpus_dir, evidence)
     before = _listing(evidence)
     digests = {i.path: sha256(i.path) for i in inputs}
-    with combine_pdfs(inputs, fallback=evidence) as combined:
-        assert combined.fallback_reason == "" and combined.location_warning() == ""
+    with combine_pdfs(inputs, sweep=evidence) as combined:
         assert combined.folder.parent == work_dir()
         assert (combined.folder / MARKER_NAME).is_file()
         marker = json.loads((combined.folder / MARKER_NAME).read_text(encoding="utf-8"))
@@ -67,42 +69,79 @@ def test_combine_works_in_the_private_folder(corpus_dir: Path, evidence: Path) -
         assert sha256(path) == digest
 
 
-@pytest.mark.parametrize("why", ["unwritable", "network", "space"])
-def test_fallback_to_the_output_folder_says_why(corpus_dir: Path, evidence: Path, tmp_path: Path, why: str,
-                                                monkeypatch: pytest.MonkeyPatch) -> None:
-    if why == "unwritable":
-        blocker = tmp_path / "not-a-folder"
-        blocker.write_text("x")
-        monkeypatch.setenv("STAMPER_LOCAL_DIR", str(blocker))
-        expect = "can't be created"
+def _refusal() -> str:
+    return (f"Document Stamper can't use its working folder ({work_dir()}). "
+            "Nothing was combined and your files are unchanged.")
+
+
+def _break_work_folder(why: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the private work folder unusable in one of the ways D-115 checks."""
+    if why == "not-a-folder":
+        work_dir().parent.mkdir(parents=True, exist_ok=True)
+        work_dir().write_text("x")  # a file where the folder should be: it can't be created
+    elif why == "unwritable":
+        def refuse(parent: Path, *, hide: bool = True) -> Path:
+            raise StampError(f"Can't write to the folder {parent} (Access is denied).")
+
+        monkeypatch.setattr(combine, "_make_temp_folder", refuse)
     elif why == "network":
         monkeypatch.setattr(combine, "_on_network_drive", lambda _p: True)
-        expect = "network drive"
     else:
         class Usage:
             free = 1024 * 1024
 
         monkeypatch.setattr(combine.shutil, "disk_usage", lambda _p: Usage)
-        expect = "free there"
+
+
+WHYS = ["not-a-folder", "unwritable", "network", "space"]
+
+
+@pytest.mark.parametrize("why", WHYS)
+def test_unusable_work_folder_refuses_and_writes_nothing(corpus_dir: Path, evidence: Path, why: str,
+                                                         monkeypatch: pytest.MonkeyPatch) -> None:
     inputs = _two_protected(corpus_dir, evidence)
-    combined = combine_pdfs(inputs, fallback=evidence)
-    try:
-        assert expect in combined.fallback_reason
-        assert combined.folder.parent == evidence
-        assert combined.folder.name.startswith(TEMP_PREFIX)
-        assert (combined.folder / MARKER_NAME).is_file()
-        warning = combined.location_warning()
-        assert expect in warning and str(evidence) in warning and "unprotected" in warning
-    finally:
-        combined.cleanup()
-    assert [p for p in evidence.iterdir() if p.name.startswith("~")] == []
+    before = _listing(evidence)
+    digests = {i.path: sha256(i.path) for i in inputs}
+    _break_work_folder(why, monkeypatch)
+    with pytest.raises(StampError) as caught:
+        combine_pdfs(inputs, sweep=evidence)
+    assert str(caught.value) == _refusal()
+    assert _listing(evidence) == before  # nothing in the output folder, hidden or not
+    for path, digest in digests.items():
+        assert sha256(path) == digest
+    assert not combine.in_progress()
 
 
-def test_no_fallback_refuses(corpus_dir: Path, evidence: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(combine, "_on_network_drive", lambda _p: True)
-    with pytest.raises(StampError, match="private work folder can't be used"):
-        combine_pdfs(_two_protected(corpus_dir, evidence))
-    assert [p for p in evidence.iterdir() if p.name.startswith("~")] == []
+@pytest.mark.parametrize("why", WHYS)
+def test_refusal_comes_before_any_source_is_opened(corpus_dir: Path, evidence: Path, why: str,
+                                                   monkeypatch: pytest.MonkeyPatch) -> None:
+    def opened(*_a: object, **_k: object) -> None:
+        raise AssertionError("a source was opened")
+
+    monkeypatch.setattr(PdfHandler, "inspect", opened)
+    monkeypatch.setattr(PdfHandler, "_open", opened)
+    _break_work_folder(why, monkeypatch)
+    progress: list[str] = []
+    with pytest.raises(StampError, match="can't use its working folder"):
+        combine_pdfs(_two_protected(corpus_dir, evidence), sweep=evidence,
+                     progress=lambda _d, _t, name: progress.append(name))
+    assert progress == []
+
+
+def test_cli_refuses_with_the_sentence_and_the_cant_stamp_code(corpus_dir: Path, evidence: Path,
+                                                               monkeypatch: pytest.MonkeyPatch) -> None:
+    # The first file needs a password and none is given: the refusal must come first, not a password error.
+    a = copy_to(corpus_dir / "encrypted_user_password.pdf", evidence, "locked_a.pdf")
+    b = copy_to(corpus_dir / "letter_portrait.pdf", evidence, "plain_b.pdf")
+    before = _listing(evidence)
+    _break_work_folder("network", monkeypatch)
+    out, err = io.StringIO(), io.StringIO()
+    code = cli_main(["--combine", str(a), str(b), "--out", str(evidence / "exhibit.pdf"),
+                     "--config", str(DEFAULT_CONFIG), "--set", f"identifier={FAKE_ID}", "--set", "doc_type=Report"],
+                    stdout=out, stderr=err, stdin=io.StringIO(""))
+    assert code == ExitCode.ERROR
+    assert err.getvalue().strip() == _refusal()
+    assert _listing(evidence) == before
 
 
 @pytest.mark.parametrize("path", [r"\\server\share\work", r"\\?\UNC\server\share\work"])
@@ -114,20 +153,57 @@ def test_local_path_is_not_network(tmp_path: Path) -> None:
     assert not combine._on_network_drive(tmp_path)
 
 
-def test_cancel_in_fallback_leaves_nothing(corpus_dir: Path, evidence: Path,
-                                           monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cancel_leaves_nothing(corpus_dir: Path, evidence: Path) -> None:
     from stamper.handlers.base import Cancelled
 
-    monkeypatch.setattr(combine, "_on_network_drive", lambda _p: True)
     calls = {"n": 0}
 
     def cancel() -> bool:
         calls["n"] += 1
         return calls["n"] >= 2
 
+    inputs = _two_protected(corpus_dir, evidence)
+    before = _listing(evidence)
     with pytest.raises(Cancelled):
-        combine_pdfs(_two_protected(corpus_dir, evidence), fallback=evidence, cancel=cancel)
-    assert [p for p in evidence.iterdir() if p.name.startswith("~")] == []
+        combine_pdfs(inputs, sweep=evidence, cancel=cancel)
+    assert _listing(evidence) == before
+    assert list(work_dir().iterdir()) == []
+
+
+def test_a_failed_combine_leaves_nothing(corpus_dir: Path, evidence: Path) -> None:
+    from stamper.handlers.base import WrongPassword
+
+    inputs = [CombineInput(i.path, "wrong") for i in _two_protected(corpus_dir, evidence)]
+    before = _listing(evidence)
+    with pytest.raises(WrongPassword):
+        combine_pdfs(inputs, sweep=evidence)
+    assert _listing(evidence) == before
+    assert list(work_dir().iterdir()) == []
+
+
+def test_old_leftover_in_the_output_folder_is_swept_when_a_combine_starts(corpus_dir: Path,
+                                                                          evidence: Path) -> None:
+    # Releases before this one could leave a working folder in the output folder.
+    old = _work(evidence, "oldrelease", pid=os.getpid(), started=time.time() - 2 * 24 * 3600)
+    recent = _work(evidence, "otherrun", pid=os.getpid())  # still in use by a running process: kept
+    with combine_pdfs(_two_protected(corpus_dir, evidence), sweep=evidence) as combined:
+        assert combined.folder.parent == work_dir()
+    assert not old.exists()
+    assert recent.is_dir()
+
+
+def test_cli_combine_sweeps_an_old_leftover_in_the_output_folder(corpus_dir: Path, evidence: Path,
+                                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    old = _work(evidence, "oldrelease", started=time.time() - 2 * 24 * 3600)
+    a = copy_to(corpus_dir / "letter_portrait.pdf", evidence, "a.pdf")
+    b = copy_to(corpus_dir / "rotate_90.pdf", evidence, "b.pdf")
+    err = io.StringIO()
+    code = cli_main(["--combine", str(a), str(b), "--out", str(evidence / "exhibit.pdf"),
+                     "--config", str(DEFAULT_CONFIG), "--set", f"identifier={FAKE_ID}", "--set", "doc_type=Report"],
+                    stdout=io.StringIO(), stderr=err, stdin=io.StringIO(""))
+    assert code == ExitCode.OK, err.getvalue()
+    assert not old.exists()
+    assert sorted(p.name for p in evidence.iterdir()) == ["a.pdf", "b.pdf", "exhibit.pdf"]
 
 
 _KILLED = """
@@ -135,7 +211,7 @@ import os, sys
 from pathlib import Path
 from stamper.handlers.combine import CombineInput, combine_pdfs
 a, b, pw = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
-combined = combine_pdfs([CombineInput(a, pw), CombineInput(b, pw)], fallback=a.parent)
+combined = combine_pdfs([CombineInput(a, pw), CombineInput(b, pw)])
 print(combined.folder)
 sys.stdout.flush()
 os._exit(1)  # killed while the dialog was open: no cleanup
@@ -150,6 +226,28 @@ def test_a_killed_combine_is_swept_next_time(corpus_dir: Path, evidence: Path) -
     assert left.parent == work_dir() and left.is_dir(), run.stderr
     assert remove_stale_temp(work_dir()) == [left]
     assert not left.exists()
+
+
+_EXITED = """
+import sys
+from pathlib import Path
+from stamper.handlers.combine import CombineInput, combine_pdfs
+a, b, pw = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+combined = combine_pdfs([CombineInput(a, pw), CombineInput(b, pw)])
+print(combined.folder)
+sys.exit(0)  # exits without calling cleanup(): the atexit fallback removes the folder
+"""
+
+
+def test_atexit_removes_the_working_copy(corpus_dir: Path, evidence: Path) -> None:
+    inputs = _two_protected(corpus_dir, evidence)
+    before = _listing(evidence)
+    run = subprocess.run([sys.executable, "-c", _EXITED, str(inputs[0].path), str(inputs[1].path), PW],
+                         cwd=REPO, env=os.environ.copy(), capture_output=True, text=True, check=False)
+    left = Path(run.stdout.strip())
+    assert run.returncode == 0 and left.parent == work_dir(), run.stderr
+    assert not left.exists()
+    assert _listing(evidence) == before
 
 
 def test_window_start_sweeps_the_work_folder(qtbot: QtBot, fake: FakeServices, corpus_dir: Path,
@@ -275,31 +373,28 @@ def test_own_cleanup_removes_a_link_but_not_its_target(corpus_dir: Path, evidenc
     outside = tmp_path / "outside"
     outside.mkdir()
     (outside / "evidence.pdf").write_bytes(b"keep me")
-    combined = combine_pdfs(_two_protected(corpus_dir, evidence), fallback=evidence)
+    combined = combine_pdfs(_two_protected(corpus_dir, evidence))
     _link_dir(combined.folder / "planted", outside)
     combined.cleanup()
     assert not combined.folder.exists()
     assert (outside / "evidence.pdf").read_bytes() == b"keep me"
 
 
-def test_combine_dialog_shows_the_fallback(qtbot: QtBot, fake: FakeServices, corpus_dir: Path, evidence: Path,
-                                           monkeypatch: pytest.MonkeyPatch) -> None:
-    from stamper.gui.multi import CombineDialog
-    from tests.gui_support import WAIT_MS, wait_ready
+def test_window_refuses_before_password_or_progress(qtbot: QtBot, fake: FakeServices, corpus_dir: Path,
+                                                   evidence: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests.gui_support import WAIT_MS
 
-    monkeypatch.setattr(combine, "_on_network_drive", lambda _p: True)
-    files = [copy_to(corpus_dir / n, evidence) for n in ("letter_portrait.pdf", "rotate_90.pdf")]
+    # Both files need a password: without the early check, the Before stamping screen would ask for it.
+    files = [i.path for i in _two_protected(corpus_dir, evidence)]
+    before = _listing(evidence)
     w = MainWindow(config_path=DEFAULT_CONFIG, services=fake.services())
     qtbot.addWidget(w)
     w.open_files(files)
     qtbot.waitUntil(lambda: w.stack.currentWidget() is w.files_screen, timeout=WAIT_MS)
+    _break_work_folder("network", monkeypatch)
     w.files_screen.combine_button.click()
-    qtbot.waitUntil(lambda: isinstance(w.dialog, CombineDialog), timeout=WAIT_MS)
-    d = wait_ready(qtbot, w.dialog)
-    from PySide6.QtWidgets import QLabel
-
-    texts = [lbl.text() for lbl in d.findChildren(QLabel)]
-    assert any("private work folder couldn't be used (it's on a network drive" in t for t in texts), texts
-    assert any("private work folder" in n for n in d.saved_notes())
-    d.cancel_button.click()
-    qtbot.waitUntil(lambda: not [p for p in evidence.iterdir() if p.name.startswith("~")], timeout=WAIT_MS)
+    assert w.stack.currentWidget() is w.files_screen  # no password screen, no progress bar
+    assert w.prepare is None and w.dialog is None and w._task is None
+    assert w.files_screen.message.text() == _refusal()
+    assert w.files_screen.message_frame.isVisibleTo(w.files_screen)
+    assert _listing(evidence) == before

@@ -4,9 +4,9 @@ The window and the command line call ``combine_pdfs`` with the files in the
 order the user chose. It writes one unencrypted PDF inside a new folder,
 ``~stamper-combine-<random>``, in the private work folder
 ``%LOCALAPPDATA%\\DocumentStamper\\work`` (D-115). If that can't be used (it
-can't be written, is short of space, or is on a network drive), it falls back
-to a hidden folder of the same name in the output folder and says so
-(``CombinedFile.location_warning``). The temporary file is named after the first source file, so
+can't be written, is short of space, or is on a network drive), Combine
+refuses before any source is opened; the working copy is never written into
+the output folder or anywhere else. The temporary file is named after the first source file, so
 ``{original_name}`` in a stamp or a document property means the first file's
 name (D-104) without any change to the handler. Then ``plan``,
 ``render_preview`` and ``apply`` run on that file exactly as on a single
@@ -70,6 +70,7 @@ __all__ = [
     "CombineProgress",
     "CombinedFile",
     "SourceRange",
+    "check_work_folder",
     "combine_pdfs",
     "field_suffix",
     "remove_stale_temp",
@@ -152,7 +153,6 @@ class CombinedFile:
     signed: tuple[str, ...] = ()
     renamed_fields: dict[str, list[tuple[str, str]]] = field(default_factory=dict)
     notes: tuple[str, ...] = ()
-    fallback_reason: str = ""  # why the private work folder wasn't used (D-115); empty when it was
 
     @property
     def page_count(self) -> int:
@@ -172,15 +172,6 @@ class CombinedFile:
             return ""
         return (f"{COMBINED_UNPROTECTED_NOTE} "
                 f"Protected files in it: {', '.join(self.protected)}.")
-
-    def location_warning(self) -> str:
-        """The D-115 note when the working copy sits in the output folder; empty otherwise."""
-        if not self.fallback_reason:
-            return ""
-        unprotected = (" Files in it had a password, and that working copy is unprotected."
-                       if self.protected else "")
-        return (f"Your private work folder couldn't be used ({self.fallback_reason}), so the combined "
-                f"working copy is in {self.folder.parent} until you close this window.{unprotected}")
 
     def cleanup(self) -> None:
         """Remove the temporary folder. Safe to call more than once."""
@@ -597,33 +588,41 @@ def _copy_attachments(src: pymupdf.Document, out: pymupdf.Document, label: str) 
     return count
 
 
-def _private_or_fallback(inputs: Sequence[CombineInput], fallback: Path | None) -> tuple[Path, str]:
-    """The temporary folder: private work folder first, else ``fallback`` with the reason (D-115)."""
-    needed = 0
-    for item in inputs:
-        try:
-            needed += Path(item.path).stat().st_size
-        except OSError:
-            pass
+def _private_temp_folder(needed: int) -> Path:
+    """A new temporary folder in the private work folder; StampError if that can't be used (D-115).
+
+    There is no other place: the working copy is never written into the
+    output folder or anywhere else.
+    """
     private = work_dir()
-    reason = work_folder_problem(private, needed)
-    if not reason:
-        remove_stale_temp(private)
-        try:
-            return _make_temp_folder(private, hide=False), ""
-        except StampError as e:
-            reason = str(e).rstrip(".")
-    if fallback is None:
-        raise StampError(f"Your private work folder can't be used ({reason}), so the files weren't combined.")
-    remove_stale_temp(Path(fallback))
-    return _make_temp_folder(Path(fallback)), reason
+    refusal = (f"Document Stamper can't use its working folder ({private}). "
+               "Nothing was combined and your files are unchanged.")
+    if work_folder_problem(private, needed):
+        raise StampError(refusal)
+    remove_stale_temp(private)
+    try:
+        return _make_temp_folder(private, hide=False)
+    except StampError:
+        raise StampError(refusal) from None
+
+
+def check_work_folder() -> None:
+    """Refuse now, before any source is opened, if the private work folder can't be written.
+
+    Makes and removes one empty temporary folder there, so the window and
+    the command line can stop before asking for a password or showing
+    progress for a combine that can't finish.
+    """
+    folder = _private_temp_folder(0)
+    _remove_own_folder(folder)
+    _LIVE.discard(folder)
 
 
 def combine_pdfs(
     inputs: Sequence[CombineInput],
     folder: Path | None = None,
     *,
-    fallback: Path | None = None,
+    sweep: Path | None = None,
     accept_signature_loss: bool = False,
     accept_restrictions: bool = False,
     progress: CombineProgress | None = None,
@@ -632,10 +631,10 @@ def combine_pdfs(
     """Combine ``inputs``, in order, into one temporary PDF.
 
     With ``folder`` (tests), the temporary folder goes there. Without it, it
-    goes in the private work folder (D-115); if that can't be used, in
-    ``fallback`` (the output folder) with ``fallback_reason`` set on the
-    result, or StampError when there is no fallback. Stopped runs' folders
-    are swept first from whichever folder is used (D-120).
+    goes in the private work folder (D-115); if that can't be used, StampError
+    before any source is opened. Stopped runs' folders are swept from the
+    work folder first, and from ``sweep`` (the output folder, where releases
+    before this one could leave one) (D-120). Nothing is written to ``sweep``.
 
     Raises the handler's errors for a source (PasswordRequired, WrongPassword,
     UnsupportedDocument for a damaged or XFA file, SourceChanged for a source
@@ -645,7 +644,7 @@ def combine_pdfs(
     behind. The caller must call ``cleanup()`` on the result.
     """
     try:
-        return _combine(inputs, folder, fallback=fallback, accept_signature_loss=accept_signature_loss,
+        return _combine(inputs, folder, sweep=sweep, accept_signature_loss=accept_signature_loss,
                         accept_restrictions=accept_restrictions, progress=progress, cancel=cancel)
     finally:
         # PyMuPDF's insert_pdf (its form-field helper) leaves the documents in a
@@ -659,7 +658,7 @@ def _combine(
     inputs: Sequence[CombineInput],
     folder: Path | None,
     *,
-    fallback: Path | None,
+    sweep: Path | None,
     accept_signature_loss: bool,
     accept_restrictions: bool,
     progress: CombineProgress | None,
@@ -668,6 +667,10 @@ def _combine(
     if len(inputs) < 2:
         raise StampError("Combining needs at least two files.")
     handler = PdfHandler()
+    if folder is None:
+        check_work_folder()  # before any source is opened
+        if sweep is not None:
+            remove_stale_temp(Path(sweep))
 
     # Check every source before writing anything, so problems show up front.
     signed: list[str] = []
@@ -698,11 +701,16 @@ def _combine(
             "Confirm to combine them anyway; the combined file has no restrictions.")
 
     first = Path(inputs[0].path)
-    reason = ""
     if folder is not None:
         temp = _make_temp_folder(Path(folder))
     else:
-        temp, reason = _private_or_fallback(inputs, fallback)
+        needed = 0
+        for item in inputs:
+            try:
+                needed += Path(item.path).stat().st_size
+            except OSError:
+                pass
+        temp = _private_temp_folder(needed)
     target = temp / first.name if first.suffix.lower() == ".pdf" else temp / f"{first.stem}.pdf"
     out = pymupdf.open()
     try:
@@ -797,5 +805,4 @@ def _combine(
         signed=tuple(signed),
         renamed_fields=renamed,
         notes=tuple(notes),
-        fallback_reason=reason,
     )

@@ -212,15 +212,16 @@ def combine_task(files: Sequence[ScreenedFile], *, accept_signature_loss: bool,
                  accept_restrictions: bool, ctx: TaskContext, handler: Handler) -> tuple[CombinedFile, DocumentInfo]:
     """Combine on the engine thread, in the private work folder (D-115).
 
-    If that can't be used, the working copy goes in the first file's folder and
-    the dialog says why (``CombinedFile.location_warning``).
+    If that can't be used, the combine is refused (StampError) and nothing is
+    written anywhere. The first file's folder, where releases before this one
+    could leave a working folder, is swept of such leftovers (D-120).
     """
     inputs = [CombineInput(f.path, f.password, f.info.fingerprint if f.info else None) for f in files]
 
     def progress(done: int, total: int, name: str) -> None:
         ctx.progress(done, total, name)
 
-    combined = combine_pdfs(inputs, fallback=files[0].path.parent,
+    combined = combine_pdfs(inputs, sweep=files[0].path.parent,
                             accept_signature_loss=accept_signature_loss,
                             accept_restrictions=accept_restrictions,
                             progress=progress, cancel=ctx.cancelled)
@@ -895,11 +896,10 @@ class CombineDialog(_MultiMixin, StampDialog):
         self.signature_tick = None
         self.restriction_tick = None
         self.owner_button = None
-        for warning in (self.combined.location_warning(), self.combined.protection_warning()):
-            if warning:
-                frame, fl = _notice("warning")
-                fl.addWidget(_wrap_label(warning))
-                lay.addWidget(frame)
+        if self.combined.protection_warning():
+            frame, fl = _notice("warning")
+            fl.addWidget(_wrap_label(self.combined.protection_warning()))
+            lay.addWidget(frame)
         lines = [f"Pages in this order: {', '.join(visible(s.path.name) for s in self.combined.sources)}."]
         if self.combined.signed:
             lines.append(f"Signed files ({_names(self.combined.signed)}) were confirmed; the originals stay signed.")
@@ -953,7 +953,7 @@ class CombineDialog(_MultiMixin, StampDialog):
 
     def saved_notes(self) -> list[str]:
         """Notes for the saved screen: the protection warning, then the combine notes."""
-        notes = [w for w in (self.combined.location_warning(), self.combined.protection_warning()) if w]
+        notes = [w for w in (self.combined.protection_warning(),) if w]
         return notes + list(self.combined.notes)
 
 
