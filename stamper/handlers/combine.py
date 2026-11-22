@@ -23,7 +23,9 @@ Evidentiary-integrity notes (for manual review)
   source, with its own bookmarks nested under it), the layer list (hidden
   layers stay hidden) and document-level attached files. Page labels and
   accessibility tags are not carried over; the result says so.
-- The combined file has no password or restrictions (D-096). It exists only
+- The temporary combined file has no password or restrictions (D-096). The
+  saved copy has none either unless the user sets a password for it, which
+  ``apply`` uses for that save only (AES-256, nothing restricted). It exists only
   inside the temporary folder, which is removed on save, cancel, failure and
   close (D-055), with an ``atexit`` fallback. Folders left by a crash are
   swept only when they carry the app's ``.stamper-work`` marker, their
@@ -61,7 +63,7 @@ from .base import (
     UnsupportedDocument,
     check_unchanged,
 )
-from .pdf import _REF_RE, COMBINED_UNPROTECTED_NOTE, PdfHandler, xfa_refusal
+from .pdf import _REF_RE, COMBINED_UNPROTECTED_NOTE, PdfHandler, combined_no_password_note, xfa_refusal
 
 __all__ = [
     "SOURCES_PROPERTY",
@@ -141,7 +143,9 @@ class CombinedFile:
     """The temporary combined PDF and what the user must be told about it.
 
     ``protected`` names sources that had a password or restrictions (the
-    combined file has neither, D-096). ``signed`` names signed sources.
+    combined file has neither unless the user sets a password, D-096).
+    ``locked`` names the ones among them that needed a password to open;
+    owner restrictions alone don't count. ``signed`` names signed sources.
     ``renamed_fields`` maps a source file name (with its place in the order
     when two sources share a name) to its ``(old, new)`` field names (D-098).
     ``notes`` are sentences for the stamp dialog and the saved screen.
@@ -152,6 +156,7 @@ class CombinedFile:
     sources: tuple[SourceRange, ...]
     protected: tuple[str, ...] = ()
     signed: tuple[str, ...] = ()
+    locked: tuple[str, ...] = ()
     renamed_fields: dict[str, list[tuple[str, str]]] = field(default_factory=dict)
     notes: tuple[str, ...] = ()
 
@@ -167,10 +172,16 @@ class CombinedFile:
                 return src, page - src.first + 1
         raise ValueError(f"page {page} is outside 1-{self.page_count}")
 
-    def protection_warning(self) -> str:
-        """The D-096 warning, or an empty string when no source was protected."""
-        if not self.protected:
+    def protection_warning(self, password_set: bool = False) -> str:
+        """The D-096 warning, or an empty string when no source was protected or a password is set.
+
+        When a source needed a password to open, the warning counts those
+        sources and says how to keep their level of protection.
+        """
+        if not self.protected or password_set:
             return ""
+        if self.locked:
+            return combined_no_password_note(len(self.locked))
         return (f"{COMBINED_UNPROTECTED_NOTE} "
                 f"Protected files in it: {', '.join(self.protected)}.")
 
@@ -690,6 +701,7 @@ def _combine(
     signed: list[str] = []
     restricted: list[str] = []
     protected: list[str] = []
+    locked: list[str] = []
     fingerprints: list[SourceFingerprint | None] = []
     for item in inputs:
         check_unchanged(Path(item.path), item.expect)
@@ -703,6 +715,8 @@ def _combine(
             restricted.append(info.path.name)
         if info.encrypted:
             protected.append(info.path.name)
+        if info.needs_password:
+            locked.append(info.path.name)
     if signed and not accept_signature_loss:
         raise ConfirmationRequired(
             "signature",
@@ -817,6 +831,7 @@ def _combine(
         sources=tuple(ranges),
         protected=tuple(protected),
         signed=tuple(signed),
+        locked=tuple(locked),
         renamed_fields=renamed,
         notes=tuple(notes),
     )

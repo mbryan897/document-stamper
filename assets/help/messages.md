@@ -44,7 +44,9 @@ These appear under "Before you save" in the stamp dialog, and again as "Note:" l
 
 | Note | What it means |
 | --- | --- |
-| "The combined file is saved without a password or restrictions. Protected files in it: …" | The combined file has no protection, even though some originals did. Store it accordingly. |
+| "This combined file has no password. N of its files were password-protected. To keep the same level of protection, encrypt this file or keep it only on encrypted drives and shares." | Some originals needed a password to open, and you chose **No password** for the combined file. Store it accordingly. |
+| "The combined file is saved without a password or restrictions. Protected files in it: …" | Some originals had owner restrictions (they opened without a password); the combined file has none. |
+| "This file opens only with the password you set. Whoever receives it will need that password." | You chose **Set a password**. |
 | "Bookmarks: one for each of the N files, with each file's own bookmarks under it." | How the combined file's bookmarks are arranged. |
 | "Form fields in … were renamed so they stay separate: …" | Two files had form fields with the same name. |
 | "Form-field scripts in … may still refer to the old field names; check calculated fields in the combined file." | Calculated fields may show wrong values in the combined file. |

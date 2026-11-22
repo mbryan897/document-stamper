@@ -36,7 +36,8 @@ from tests.test_gui_multi import CASE, _clipped, _inside, open_several, wait_dia
 
 # Literal, not imported, so each test runs (and fails on its own assertion) against older code.
 SIGNATURE_LOST_NOTE = "The original is digitally signed; the stamped copy's signature won't validate."
-UNPROTECTED_NOTE = "The copy isn't password-protected, unlike the original."
+UNPROTECTED_NOTE = ("The copy isn't password-protected, unlike the original. To keep the same level of "
+                    "protection, encrypt this file or keep it only on encrypted drives and shares.")
 COMBINED_UNPROTECTED_NOTE = "The combined file is saved without a password or restrictions."
 MAX_PROPERTY_CHARS = 60
 SHRINK = [f"Page {n}, stamp 1: font reduced from 9 pt to 7 pt to fit." for n in range(1, 9)]
@@ -63,6 +64,8 @@ def _shown(widget: QLabel | object) -> list[str]:
     SIGNATURE_LOST_NOTE,
     UNPROTECTED_NOTE,
     f"{COMBINED_UNPROTECTED_NOTE} Protected files in it: a.pdf.",
+    "This combined file has no password. 2 of its files were password-protected. To keep the same level of "
+    "protection, encrypt this file or keep it only on encrypted drives and shares.",
     'Document property Title was "Old" in the original; the copy has "New".',
     "On pages 3, 7 the white box covers text that was already on the page. "
     "Choose another position under Placement, or turn off the white box.",
