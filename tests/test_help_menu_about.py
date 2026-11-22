@@ -83,7 +83,7 @@ def test_help_menu_entries(qtbot: QtBot, fake: FakeServices, locs: Locations) ->
         assert isinstance(w.about, TextDialog) and w.about.windowTitle() == "What's new"
         assert isinstance(w.about.view, HelpBrowser)  # the help viewer, not a second copy
         shown = w.about.view.toPlainText()
-        assert shown.startswith("What's new in Document Stamper") and "Unreleased" in shown and "1.0.0" in shown
+        assert shown.startswith("What's new in Document Stamper") and about_module.program_version() in shown and "1.0.0" in shown
 
         w.drop.about_action.trigger()
         assert isinstance(w.about, AboutDialog)

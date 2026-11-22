@@ -227,7 +227,7 @@ def test_what_is_drawn_is_unchanged(name: str, corpus_dir: Path, tmp_path: Path)
 
 def test_note_reaches_the_command_line(corpus_dir: Path, tmp_path: Path) -> None:
     out, err = io.StringIO(), io.StringIO()
-    code = main([str(corpus_dir / "text_top_right.pdf"), "--set", f"identifier={FAKE_ID}", "--set", "doc_type=Report",
+    code = main([str(corpus_dir / "text_top_right.pdf"), "--set", f"identifier={FAKE_ID}",
                  "--out", str(tmp_path / "out.pdf")], stdout=out, stderr=err, stdin=io.StringIO(""))
     assert code == ExitCode.OK, err.getvalue()
     assert _note("page 1") in out.getvalue()

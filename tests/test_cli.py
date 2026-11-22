@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import os
 import shutil
 import subprocess
 import sys
@@ -32,6 +33,12 @@ def _copy(corpus_dir: Path, name: str, tmp_path: Path) -> Path:
     return dst
 
 
+@pytest.fixture(autouse=True)
+def _three_field_config_next_to_the_app() -> None:
+    """Runs without ``--config`` use the tests' three-field config, found next to the app (D-080)."""
+    shutil.copyfile(DEFAULT_CONFIG, Path(os.environ["STAMPER_APP_DIR"]) / "config.json")
+
+
 def test_success_with_out(corpus_dir: Path, tmp_path: Path) -> None:
     out = tmp_path / "stamped.pdf"
     r = Run([str(corpus_dir / "letter_portrait.pdf"), "--set", f"identifier={FAKE_ID}",
@@ -39,7 +46,7 @@ def test_success_with_out(corpus_dir: Path, tmp_path: Path) -> None:
     assert r.code == ExitCode.OK, r.stderr
     assert f"Saved: {out}" in r.stdout
     with pymupdf.open(out) as d:
-        assert f"{FAKE_ID}  |  Page 1 of 3" in d[0].get_text()  # the shipped default's stamp
+        assert f"{FAKE_ID}  |  Report  |  Page 1 of 3" in d[0].get_text()
 
 
 def test_suggested_name_in_source_folder_and_prefill(corpus_dir: Path, tmp_path: Path) -> None:

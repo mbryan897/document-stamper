@@ -92,8 +92,7 @@ def test_stamper_cli_entry_point_always_runs_the_cli(corpus_dir: Path, tmp_path:
     out = tmp_path / "o.pdf"
     p = subprocess.run(
         [sys.executable, "-c", "import sys; from stamper.cli import main; sys.exit(main())",
-         str(corpus_dir / "letter_portrait.pdf"), "--set", "identifier=X1", "--set", "doc_type=Report",
-         "--out", str(out)],
+         str(corpus_dir / "letter_portrait.pdf"), "--set", "identifier=X1", "--out", str(out)],
         cwd=REPO, capture_output=True, text=True, timeout=60)
     assert p.returncode == 0, p.stderr
     assert out.is_file()
