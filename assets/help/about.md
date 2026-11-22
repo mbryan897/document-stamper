@@ -45,10 +45,10 @@ Both are copyright the Atkinson Hyperlegible Mono and Next Project Authors, desi
 Document Stamper never connects to the internet or to any network, sends nothing anywhere and keeps no log. It writes only these:
 
 - The stamped copy, where you save it. While saving, it writes a temporary `~stamper-….tmp` file beside it and renames it when it's complete. If the program stops part-way, the next start offers to delete what's left.
-- A small note of each save in progress, in `%LOCALAPPDATA%\DocumentStamper\pending`, removed when the save finishes. It lets the next start find a copy that wasn't finished.
+- A small note of each save in progress, in `%LOCALAPPDATA%\DocumentStamper\pending`, with the original's name but not its folder, removed when the save finishes. It lets the next start find a copy that wasn't finished.
 - When combining files, a working copy in a `~stamper-combine-…` folder in `%LOCALAPPDATA%\DocumentStamper\work`, removed when you're done, or at the next start if the program stopped. If that folder can't be used, the files aren't combined and nothing is written.
 - The settings file, `config.json`, when you save Profile settings, with `config.json.bak` and up to five dated backups beside it; and a copy where you choose when you use **Export…**.
-- `state.json` in `%APPDATA%\DocumentStamper`: the last profile, the last folders used and the last settings file found. Never anything typed into a field.
+- `state.json` in `%APPDATA%\DocumentStamper`: the last profile, the last folders used (unless the settings file turns that off) and the last settings file found. Never anything typed into a field.
 - The Send to shortcut, `Document Stamper.lnk` in `%APPDATA%\Microsoft\Windows\SendTo`, only when you add it.
 - While Profile settings is open, a made-up one-page sample PDF for the preview, in a temporary folder (`%TEMP%\stamper-sample-…`), removed when you leave Profile settings.
 - Each time the single-file program starts, it unpacks itself into a temporary folder (`%TEMP%\_MEI…`). The folder is removed when the program closes normally, but can be left behind if it's stopped by force.
