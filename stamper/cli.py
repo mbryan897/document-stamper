@@ -53,7 +53,12 @@ from .handlers.base import (
     WrongPassword,
 )
 from .handlers.batch import BatchItem, BatchOutcome, Status, check_batch, run_batch
-from .handlers.combine import CombineInput, check_work_folder, combine_pdfs
+from .handlers.combine import (
+    CombineInput,
+    check_work_folder,
+    combine_pdfs,
+    sweep_work_folder,
+)
 from .handlers.pdf import PdfHandler, xfa_refusal
 
 __all__ = [
@@ -687,6 +692,7 @@ def main(
         err.write(f"Error: {removed}\n")
         return int(ExitCode.USAGE)
     args = build_parser().parse_intermixed_args(argv)
+    sweep_work_folder()  # combine folders left by a stopped run (D-120); silent if it fails
     try:
         return int(_run(args, out, inp, err))  # type: ignore[arg-type]
     except _Fail as e:

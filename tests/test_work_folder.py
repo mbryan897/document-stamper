@@ -262,6 +262,79 @@ def test_window_start_sweeps_the_work_folder(qtbot: QtBot, fake: FakeServices, c
     assert not left.exists()
 
 
+def _cli_start() -> None:
+    """Start the command line (it stops at a missing file, after the start-up sweep)."""
+    cli_main(["no-such-file.pdf"], stdout=io.StringIO(), stderr=io.StringIO(), stdin=io.StringIO(""))
+
+
+def test_cli_start_sweeps_the_work_folder() -> None:
+    work_dir().mkdir(parents=True)
+    left = _work(work_dir(), "crashed")  # its process (pid 999999999) has stopped
+    _cli_start()
+    assert not left.exists()
+
+
+def test_start_sweep_leaves_similar_names_alone() -> None:
+    work_dir().mkdir(parents=True)
+    names = ["~stamper-combine", "~stamper-combinex", "stamper-combine-1", "x~stamper-combine-1", "~Stamper-Combine_1"]
+    kept = []
+    for name in names:
+        folder = work_dir() / name
+        folder.mkdir()
+        (folder / MARKER_NAME).write_text(json.dumps({"pid": 999_999_999, "started": 0}), encoding="utf-8")
+        kept.append(folder)
+    _cli_start()
+    assert all(f.is_dir() and (f / MARKER_NAME).is_file() for f in kept)
+
+
+_HELD = """
+import sys, time
+from pathlib import Path
+from stamper.handlers.combine import CombineInput, combine_pdfs
+a, b, pw = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+combined = combine_pdfs([CombineInput(a, pw), CombineInput(b, pw)])
+print(combined.folder)
+sys.stdout.flush()
+time.sleep(120)  # a second copy of the program, in the middle of a combine
+"""
+
+
+def test_start_sweep_leaves_a_running_combine_alone(qtbot: QtBot, fake: FakeServices, corpus_dir: Path,
+                                                    evidence: Path) -> None:
+    inputs = _two_protected(corpus_dir, evidence)
+    other = subprocess.Popen([sys.executable, "-c", _HELD, str(inputs[0].path), str(inputs[1].path), PW],
+                             cwd=REPO, env=os.environ.copy(), stdout=subprocess.PIPE, text=True)
+    try:
+        assert other.stdout is not None
+        held = Path(other.stdout.readline().strip())
+        assert held.parent == work_dir() and held.is_dir()
+        _cli_start()
+        w = MainWindow(config_path=DEFAULT_CONFIG, services=fake.services())
+        qtbot.addWidget(w)
+        assert held.is_dir() and any(held.glob("*.pdf"))
+    finally:
+        other.kill()
+        other.wait()
+    _cli_start()  # killed: next start removes it
+    assert not held.exists()
+
+
+def test_a_failing_start_sweep_is_silent(qtbot: QtBot, fake: FakeServices,
+                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    def broken(*_a: object, **_k: object) -> list[Path]:
+        raise RuntimeError("sweep failed")
+
+    from stamper.gui import main_window
+
+    monkeypatch.setattr(combine, "remove_stale_temp", broken)
+    monkeypatch.setattr(main_window, "remove_stale_temp", broken, raising=False)  # releases that imported it
+    err = io.StringIO()
+    code = cli_main(["no-such-file.pdf"], stdout=io.StringIO(), stderr=err, stdin=io.StringIO(""))
+    assert code != ExitCode.OK and "sweep" not in err.getvalue()
+    w = MainWindow(config_path=DEFAULT_CONFIG, services=fake.services())
+    qtbot.addWidget(w)
+
+
 # ------------------------------------------------------------ the sweep (D-120)
 
 

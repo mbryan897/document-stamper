@@ -75,6 +75,7 @@ __all__ = [
     "field_suffix",
     "remove_stale_temp",
     "rename_clashing_fields",
+    "sweep_work_folder",
     "work_folder_problem",
 ]
 
@@ -616,6 +617,19 @@ def check_work_folder() -> None:
     folder = _private_temp_folder(0)
     _remove_own_folder(folder)
     _LIVE.discard(folder)
+
+
+def sweep_work_folder() -> None:
+    """Start-up: remove folders a stopped run left in the private work folder (D-120).
+
+    Uses ``remove_stale_temp``, so a folder whose process is still running
+    (another copy in the middle of a combine) is left alone. Never raises:
+    a sweep that fails is silent and never blocks start-up.
+    """
+    try:
+        remove_stale_temp(work_dir())
+    except Exception:  # noqa: BLE001, S110 - best effort by design
+        pass
 
 
 def combine_pdfs(
