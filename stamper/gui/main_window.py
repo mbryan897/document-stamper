@@ -93,7 +93,7 @@ from ..handlers.base import (
 )
 from ..handlers.batch import BatchOutcome, Status
 from ..handlers.combine import CombinedFile, check_work_folder, sweep_work_folder
-from ..handlers.pdf import PdfHandler, xfa_refusal
+from ..handlers.pdf import PASSWORD_SET_NOTE, PdfHandler, xfa_refusal
 from .engine import EngineClient, EngineFailure, TaskContext
 from .fonts import MONO_FAMILY
 from .about import AboutDialog, TextDialog, whats_new
@@ -1400,13 +1400,13 @@ class MainWindow(QMainWindow):
         ident = dialog.values().get("identifier", "")
         label = self.config.fields["identifier"].label if "identifier" in self.config.fields else "Identifier"
         password = dialog.password if result.encryption_kept else None
-        if isinstance(dialog, CombineDialog) and dialog.output_password() is not None:
+        if dialog.output_password() is not None:
             password = dialog.output_password()  # for the thumbnail only; dropped with the dialog below
         signed = dialog.info.signed
         first = dialog.info.pages[0]
         ratio = self.devicePixelRatioF() or 1.0
         thumb_dpi = int(min(THUMB_W / (first.width / 72), THUMB_H / (first.height / 72)) * ratio * 1.5)
-        extra: list[str] = []
+        extra: list[str] = [PASSWORD_SET_NOTE] if dialog.output_password() is not None else []
         original: str | None = None
         source: Path | None = dialog.info.path
         if isinstance(dialog, CombineDialog):

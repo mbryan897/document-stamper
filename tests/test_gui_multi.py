@@ -406,6 +406,8 @@ def test_batch_five_files(qtbot: QtBot, window: MainWindow, fake: FakeServices, 
     wait_ready(qtbot, d)
     existing = tmp_path / d.name_for(taken)
     existing.write_bytes(b"already here - must not be replaced")
+    assert d.password_box is not None and d.password_box.keep_radio is not None
+    d.password_box.keep_radio.setChecked(True)  # each copy keeps its original's protection
     d.show_file(3)  # the tiny page: its problem shows, but doesn't block the others
     wait_ready(qtbot, d)
     assert d.placement_problem()
@@ -657,9 +659,9 @@ def _restricted_notice(screen: PrepareScreen) -> QLabel:
     ("mode", "count", "text", "tick"),
     [
         ("batch", 1, "This PDF is set not to allow changes: r0.pdf. The original isn't touched. "
-                     "The stamped copy keeps the same setting.", "Stamp a copy"),
+                     "On the next screen, choose whether the stamped copy keeps the setting.", "Stamp a copy"),
         ("batch", 2, "These PDFs are set not to allow changes: r0.pdf, r1.pdf. The originals aren't touched. "
-                     "Each stamped copy keeps the same setting.", "Stamp copies"),
+                     "On the next screen, choose whether the stamped copies keep the setting.", "Stamp copies"),
         ("combine", 2, "These PDFs are set not to allow changes: r0.pdf, r1.pdf. The originals aren't touched. "
                        "The combined file won't have this setting.", "Stamp copies"),
         ("combine", 1, "This PDF is set not to allow changes: r0.pdf. The original isn't touched. "

@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QProgressBar,
     QPushButton,
+    QRadioButton,
     QScrollArea,
     QSizePolicy,
     QToolButton,
@@ -58,7 +59,7 @@ from ..handlers.base import (
     StampDoesNotFit,
     StampJob,
 )
-from ..handlers.pdf import PROPERTIES_NOTE_PREFIX, needs_check
+from ..handlers.pdf import PROPERTIES_NOTE_PREFIX, needs_check, output_password_problem
 from .engine import ApplyRequest, EngineClient, EngineFailure
 from .help import help_button
 from .page_numbers import (
@@ -73,7 +74,7 @@ from .profiles import PageScrollCombo, watch_page_scroll
 from .services import Services
 from .wrap_label import WrapAnywhereLabel
 
-__all__ = ["CARRIED_NOTE", "DEBOUNCE_MS", "NotesView", "StampDialog", "StartFrom", "describe_date",
+__all__ = ["CARRIED_NOTE", "DEBOUNCE_MS", "NotesView", "OutputPasswordBox", "StampDialog", "StartFrom", "describe_date",
            "group_warnings", "sort_notes"]
 
 DEBOUNCE_MS = 150  # typing; clicks redraw at once
@@ -162,11 +163,102 @@ def group_warnings(warnings: Sequence[str], limit: int | None = MAX_LISTED_WARNI
     return out
 
 
+class OutputPasswordBox(QWidget):
+    """A password choice for what is saved: keep the original's, none, or a new one (F-01).
+
+    ``what`` names the output in headings and sentences ("the combined file",
+    "the stamped copy"). ``keep`` is the label for keeping the original's
+    protection, offered only when the original has some. With ``ask`` (a
+    source needed a password to open), nothing is chosen until the user picks;
+    otherwise keeping (or, with nothing to keep, "No password") stands.
+    The password is held in the two boxes only, never prefilled and never
+    written anywhere; ``clear`` drops it.
+    """
+
+    changed = Signal()
+
+    def __init__(self, *, ask: bool, what: str = "the combined file", keep: str = "",
+                 parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.what = what
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
+        heading = QLabel(f"Password for {what}")
+        heading.setObjectName("sectionLabel")
+        lay.addWidget(heading)
+        self.keep_radio = QRadioButton(keep) if keep else None
+        self.none_radio = QRadioButton("No password")
+        self.set_radio = QRadioButton("Set a password")
+        group = QButtonGroup(self)
+        for radio in (self.keep_radio, self.none_radio, self.set_radio):
+            if radio is not None:
+                group.addButton(radio)
+                lay.addWidget(radio)
+                radio.toggled.connect(lambda _on: self.changed.emit())
+        if not ask:
+            (self.keep_radio or self.none_radio).setChecked(True)
+        self.boxes = QWidget()
+        grid = QGridLayout(self.boxes)
+        grid.setContentsMargins(24, 0, 0, 0)
+        grid.setHorizontalSpacing(10)
+        self.password_edit = QLineEdit()
+        self.repeat_edit = QLineEdit()
+        for row, (text, edit) in enumerate((("Password", self.password_edit), ("Repeat", self.repeat_edit))):
+            edit.setEchoMode(QLineEdit.EchoMode.Password)
+            edit.setAccessibleName(f"Repeat password for {what}" if row else f"Password for {what}")
+            edit.textChanged.connect(lambda _t: self.changed.emit())
+            label = QLabel(text)
+            label.setBuddy(edit)
+            grid.addWidget(label, row, 0)
+            grid.addWidget(edit, row, 1)
+        grid.setColumnStretch(1, 1)
+        self.boxes.setVisible(False)
+        lay.addWidget(self.boxes)
+        self.set_radio.toggled.connect(self._toggled)
+
+    def _toggled(self, on: bool) -> None:
+        self.boxes.setVisible(on)
+        if on:
+            self.password_edit.setFocus()
+
+    def problem(self) -> str:
+        """Why the choice can't be used yet, as a sentence; "" when it can."""
+        choices = [r for r in (self.keep_radio, self.none_radio, self.set_radio) if r is not None]
+        if not any(r.isChecked() for r in choices):
+            listed = " or ".join(f'"{r.text()}"' for r in choices)
+            return f"Choose {listed} for {self.what}."
+        if not self.set_radio.isChecked():
+            return ""
+        typed, repeat = self.password_edit.text(), self.repeat_edit.text()
+        if not typed or not repeat:
+            return f"Type the password for {self.what} in both boxes."
+        if typed != repeat:
+            return f"The two passwords for {self.what} don't match."
+        return output_password_problem(typed)
+
+    def password(self) -> str | None:
+        """The new password to save with, or None (keep, "No password", or while there's a problem)."""
+        if self.set_radio.isChecked() and not self.problem():
+            return self.password_edit.text()
+        return None
+
+    def removes(self) -> bool:
+        """True when "No password" was chosen over keeping the original's protection."""
+        return self.keep_radio is not None and self.none_radio.isChecked()
+
+    def clear(self) -> None:
+        """Forget what was typed."""
+        self.password_edit.clear()
+        self.repeat_edit.clear()
+
+
 def restricted_notice(names: Sequence[str] = (), *, combined: bool = False) -> str:
     """The notice for PDFs set not to allow changes (UX-044), for the stamp and prepare screens.
 
     ``names`` are the files' shown names; none on the one-file stamp screen.
-    A stamped copy keeps the setting (D-050); a combined file has none.
+    A combined file has no such setting; whether a stamped copy keeps it is
+    chosen under its password (D-050 as amended).
     """
     many = len(names) > 1
     lead = ("These PDFs are" if many else "This PDF is") + " set not to allow changes"
@@ -174,8 +266,11 @@ def restricted_notice(names: Sequence[str] = (), *, combined: bool = False) -> s
     kept = "The originals aren't touched." if many else "The original isn't touched."
     if combined:
         after = "The combined file won't have this setting."
+    elif names:  # the Before stamping screen, ahead of the stamp screen
+        after = ("On the next screen, choose whether the stamped copies keep the setting." if many else
+                 "On the next screen, choose whether the stamped copy keeps the setting.")
     else:
-        after = "Each stamped copy keeps the same setting." if many else "The stamped copy keeps the same setting."
+        after = "Choose below whether the stamped copy keeps the setting."
     return f"{lead} {kept} {after}"
 
 
@@ -367,6 +462,7 @@ class StampDialog(QWidget):
             if start.page_numbers in option.choices and option.enabled[option.choices.index(start.page_numbers)]:
                 self.page_numbers = start.page_numbers
         self.owner_password_given = False  # kept through a profile switch (UX-036)
+        self.password_box: OutputPasswordBox | None = None  # the copy's password choice, when offered (F-01)
         self.revision = 0
         self.saving = False
         self._preview_req = 0
@@ -518,8 +614,12 @@ class StampDialog(QWidget):
         return self.path.name
 
     def output_password(self) -> str | None:
-        """A password of its own for the saved copy; only a combined file has one."""
-        return None
+        """A new password for the saved copy, when "Set a password" is chosen."""
+        return self.password_box.password() if self.password_box is not None else None
+
+    def removes_protection(self) -> bool:
+        """True when "No password" was chosen for a protected original (D-050 as amended)."""
+        return self.password_box is not None and self.password_box.removes()
 
     def _accept_flags(self) -> tuple[bool, bool]:
         """``(accept_signature_loss, accept_restrictions)`` for the save."""
@@ -712,10 +812,11 @@ class StampDialog(QWidget):
             self.owner_button.clicked.connect(self._ask_owner_password)
             fl.addWidget(self.owner_button, 0, Qt.AlignmentFlag.AlignLeft)
             lay.addWidget(frame)
-        if self.info.encrypted and not self.info.restricted:
-            frame, fl = _notice("info")
-            fl.addWidget(_wrap_label("The copy keeps the original's password and permissions."))
-            lay.addWidget(frame)
+        if self.info.encrypted:  # keep its protection, remove it, or a new password (F-01, amends D-050)
+            self.password_box = OutputPasswordBox(ask=self.info.needs_password, what="the stamped copy",
+                                                  keep="Keep the original's password and permissions")
+            self.password_box.changed.connect(self._update_button)
+            lay.addWidget(self.password_box)
         box.setVisible(lay.count() > 0)
         return box
 
@@ -1145,7 +1246,9 @@ class StampDialog(QWidget):
         e.apply_failed.connect(self._on_apply_failed)
 
     def disconnect_engine(self) -> None:
-        """Stop listening to the engine (the screen is being closed)."""
+        """Stop listening to the engine (the screen is being closed), and forget any new password."""
+        if self.password_box is not None:
+            self.password_box.clear()
         e = self.engine
         for signal, slot in (
             (e.previewed, self._on_preview), (e.preview_failed, self._on_preview_failed),
@@ -1328,6 +1431,8 @@ class StampDialog(QWidget):
                    if isinstance(err, MissingGlyph) else None)
             where = self.config.fields[row.name].label if row else "Placement"
             out.append(f"Fix the problem shown under {where} to continue.")
+        if self.password_box is not None and (problem := self.password_box.problem()):
+            out.append(problem)
         if self.saving:
             out.append("Saving…")  # the progress bar says what is happening
         return out
@@ -1479,6 +1584,7 @@ class StampDialog(QWidget):
             accept_restrictions=accept_restrictions,
             expect=self.info.fingerprint,
             out_password=self.output_password(),
+            remove_encryption=self.removes_protection(),
         ))
 
     def _cancel_save(self) -> None:
