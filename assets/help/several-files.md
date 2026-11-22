@@ -29,7 +29,7 @@ There's no default; choose each time.
 
 - One set of values and one placement for the whole file.
 - The combined file has one bookmark for each original file, with that file's own bookmarks under it.
-- The combined file is saved *without a password or restrictions*, even when some of the originals had them. You're told which files were protected before anything is combined.
+- The combined file is saved *without a password or restrictions* unless you set a password for it, even when some of the originals had them. You're told which files were protected before anything is combined. See [A password for the combined file](#a-password-for-the-combined-file).
 - Form fields with the same name in two files are renamed so they stay separate; a note lists them.
 - Page labels (such as "i, ii, iii") and accessibility tags from the originals aren't kept. Attached files are kept.
 - The names of the original files, with the pages each one became, are recorded in the combined file's document properties (as `StamperSources`). See [What changes in the stamped copy](what-changes.md#combined-files).
@@ -46,6 +46,7 @@ When any file needs something from you, the "Before stamping" screen collects it
 - One tick for every digitally signed file in the set: **Combine without valid signatures** or **Save copies without valid signatures**.
 - One tick for every file set not to allow changes: **Stamp a copy** (or **Stamp copies**). The originals aren't touched. When combining, the combined file doesn't have the setting; when stamping separately, each copy keeps its own.
 - When combining files of which any is protected, the warning that the combined file is saved without a password or restrictions.
+- When combining and any file needs a password to open: **Password for the combined file**, with **No password** and **Set a password**. Neither is chosen for you, and **Continue** waits until you pick one.
 
 The line above **Continue** says what's still needed. **Back** returns to the files screen.
 
@@ -60,7 +61,18 @@ After "Combining N files…" (with a progress bar and **Cancel**), the combined 
 - Values are filled in from the file names only when every file name that contains one agrees. If they disagree, the field is left empty and an amber note lists what each name suggests: check that the files really belong together, then type the value.
 - In the stamp and the file name, the original file name is the first file's. The suggested name ends with `_combined`, and Save As starts in the first file's folder.
 
-The combined file is built in a private work folder in your user profile (`%LOCALAPPDATA%\DocumentStamper\work`) and deleted when you save, cancel or close. That working copy has no password, even if the originals had one, until it's deleted. If that folder can't be used (for example it can't be written, it's full, or it's on a network drive), the files aren't combined: the message says so before any password is asked for, and nothing is written next to your files.
+### A password for the combined file
+
+Most combined files are saved without a password. You can choose to protect one:
+
+- When any of the files needs a password to open, the Before stamping screen asks. Choose **No password**, or **Set a password** and type it twice. A file that only has owner restrictions (it opens without a password) doesn't make the screen ask.
+- Otherwise, **Set a password for the combined file…** on the stamp dialog shows the same choice, with **No password** already chosen.
+
+A password can have up to 40 characters: unaccented letters, digits, spaces and the symbols on a US keyboard. The two boxes must match. The combined file is then saved with AES-256 encryption: it opens only with that password, and nothing else is restricted. The password isn't prefilled, isn't saved anywhere, and isn't carried to the next file by **Stamp another with the same values**; it's forgotten once the file is saved or you leave the screen. The saved screen says "This file opens only with the password you set. Whoever receives it will need that password."
+
+If you choose **No password** when some files needed one, a note under **Check the copy** says how many, and that to keep the same level of protection you should encrypt the file or keep it only on encrypted drives and shares.
+
+The combined file is built in a private work folder in your user profile (`%LOCALAPPDATA%\DocumentStamper\work`) and deleted when you save, cancel or close. That working copy has no password, even if the originals had one or you set one for the combined file, until it's deleted. If that folder can't be used (for example it can't be written, it's full, or it's on a network drive), the files aren't combined: the message says so before any password is asked for, and nothing is written next to your files.
 
 ## Stamping each file separately
 
