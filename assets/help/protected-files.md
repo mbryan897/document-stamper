@@ -6,9 +6,17 @@ Some PDFs need a step from you before they can be stamped. The original is never
 
 If a PDF needs a password just to open it, you're asked for it when you open the file (see [Opening files](opening-files.md#files-that-need-a-password)).
 
-The stamped copy keeps the original's password and permissions, so it opens with the same password. A note in the stamp dialog says so: "The copy keeps the original's password and permissions."
+## A password for the stamped copy
 
-Combining is different: a combined file is saved without any password. See [Several files at once](several-files.md#combine-or-stamp-each-file-separately).
+When the original is protected (it needs a password to open, or has owner restrictions), the stamp dialog asks what the copy gets, under "Password for the stamped copy":
+
+- **Keep the original's password and permissions**: the copy opens with the same password and has the same restrictions.
+- **No password**: the copy has no password and no restrictions. A note under **Check the copy** says so, and that to keep the same level of protection you should encrypt the file or keep it only on encrypted drives and shares.
+- **Set a password**: type a new password twice. The copy is saved with AES-256 encryption, opens only with that password, and has no restrictions. It can have up to 40 characters: unaccented letters, digits, spaces and the symbols on a US keyboard.
+
+When the original needed a password to open, nothing is chosen for you and **Stamp and save…** waits until you pick one. When it only has owner restrictions, keeping them is chosen already. A new password isn't prefilled, isn't saved anywhere, and is forgotten once the copy is saved or you leave the screen.
+
+**Stamp each file separately** asks the same question once for all the protected files in the set ("Keep each original's password and permissions"). Combining asks differently; see [Several files at once](several-files.md#a-password-for-the-combined-file).
 
 ## Files set not to allow changes
 
@@ -18,8 +26,8 @@ Some PDFs open without a password but are set not to allow changes, by whoever p
 
 You have two ways on:
 
-- Tick **Stamp a copy**. This is the usual way. The stamped copy keeps the same setting as the original.
-- Click **I have the permissions password (optional)…** if you have it (PDF tools also call it the owner password). If it allows changes, the tick is replaced by "Permissions password given; changes allowed". The copy still keeps the original's password settings and permissions. A password that opens the file but doesn't allow changes is refused, and you can try again.
+- Tick **Stamp a copy**. This is the usual way. Whether the copy keeps the setting is chosen under "Password for the stamped copy" (above).
+- Click **I have the permissions password (optional)…** if you have it (PDF tools also call it the owner password). If it allows changes, the tick is replaced by "Permissions password given; changes allowed". A password that opens the file but doesn't allow changes is refused, and you can try again.
 
 Whether you may stamp a restricted file is a question about where it came from, not about this tool. Check your agency's practice if you're not sure.
 

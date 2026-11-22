@@ -57,7 +57,7 @@ If a PDF needs a password to open, you're asked for it.
 
 ![The password prompt](images/password-prompt.png)
 
-A wrong password asks again and says so. Click **Cancel** to give up; the file isn't opened. The stamped copy keeps the same password; see [Signed, password-protected and restricted files](protected-files.md).
+A wrong password asks again and says so. Click **Cancel** to give up; the file isn't opened. The stamp dialog then asks whether the copy keeps that password; see [Signed, password-protected and restricted files](protected-files.md).
 
 ## Files that can't be opened
 

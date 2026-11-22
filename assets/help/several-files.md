@@ -34,7 +34,7 @@ There's no default; choose each time.
 - Page labels (such as "i, ii, iii") and accessibility tags from the originals aren't kept. Attached files are kept.
 - The names of the original files, with the pages each one became, are recorded in the combined file's document properties (as `StamperSources`). See [What changes in the stamped copy](what-changes.md#combined-files).
 
-**Stamp each file separately** makes one stamped copy of each file, all with the same values and placement. Use it for a set of separate documents that belong to the same identifier. Each copy keeps its own original's password and permissions.
+**Stamp each file separately** makes one stamped copy of each file, all with the same values and placement. Use it for a set of separate documents that belong to the same identifier. For protected files, you choose whether each copy keeps its original's password and permissions, gets no password, or gets a new one; see [A password for the stamped copy](protected-files.md#a-password-for-the-stamped-copy).
 
 ## Before stamping
 
@@ -46,7 +46,7 @@ When any file needs something from you, the "Before stamping" screen collects it
 - One tick for every digitally signed file in the set: **Combine without valid signatures** or **Save copies without valid signatures**.
 - One tick for every file set not to allow changes: **Stamp a copy** (or **Stamp copies**). The originals aren't touched. When combining, the combined file doesn't have the setting; when stamping separately, each copy keeps its own.
 - When combining files of which any is protected, the warning that the combined file is saved without a password or restrictions.
-- When combining and any file needs a password to open: **Password for the combined file**, with **No password** and **Set a password**. Neither is chosen for you, and **Continue** waits until you pick one.
+- When combining and any file needs a password to open: "Password for the combined file", with **No password** and **Set a password**. Neither is chosen for you, and **Continue** waits until you pick one.
 
 The line above **Continue** says what's still needed. **Back** returns to the files screen.
 

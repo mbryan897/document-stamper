@@ -58,7 +58,7 @@ stamper-cli --batch a.pdf b.pdf c.pdf --out-dir "D:\Records\Stamped" --set ident
 | `--no-box` | Don't draw the white box behind the stamp. |
 | `--accept-signature-loss` | Go ahead with digitally signed files; the copy's signature won't validate. |
 | `--accept-restrictions` | Go ahead with files whose owner restrictions don't allow changes. |
-| `--remove-encryption` | Save the copy without the original's password and permissions. The window never does this. |
+| `--remove-encryption` | Save the copy without the original's password and permissions (the window's **No password**). |
 | `--overwrite` | Replace a stamped copy that already exists. It can never replace an original. |
 | `--dry-run` | Check everything and print the name the copy would get, and which confirmation flags are missing, without saving. |
 | `--quiet` | Print only errors. |
