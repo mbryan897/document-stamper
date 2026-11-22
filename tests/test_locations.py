@@ -15,7 +15,7 @@ import pytest
 from stamper.core import locations as loc
 from stamper.core.config import ConfigError, load_config
 from stamper.core.locations import AppState, Locations, SourceKind
-from tests.stamping import DEFAULT_CONFIG, RECORDS_CONFIG
+from tests.stamping import BUILTIN_CONFIG, DEFAULT_CONFIG, RECORDS_CONFIG
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -36,7 +36,7 @@ def _make_read_only(path: Path) -> None:
 
 def test_source_layout_folders() -> None:
     assert loc.resource_dir() == REPO
-    assert loc.builtin_config_path() == DEFAULT_CONFIG
+    assert loc.builtin_config_path() == BUILTIN_CONFIG
     assert (loc.resource_dir() / "assets" / "fonts").is_dir()
 
 
