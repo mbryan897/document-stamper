@@ -141,7 +141,7 @@ PATTERN_HELP = """<p>Write the rule the way the value looks:</p>
 <tr><td><b>\\</b>x</td><td>the character x itself, for example <b>\\#</b></td></tr>
 <tr><td>anything else</td><td>itself, exactly</td></tr>
 </table>
-<p>Example: <b>SOYYMMDD-######</b> accepts SO261017-000412.
+<p>Example: <b>REF-YYYY-####</b> accepts REF-2026-0042.
 Letters compare exactly, so keep "Make letters uppercase" ticked for rules with letters.</p>"""
 
 
@@ -996,7 +996,7 @@ class FormatEditor(QFrame):
             _restyle(self.explanation, "msgNeutral")
             return
         if not text:
-            self.explanation.setText("Write a rule, for example ##-YYYY-######.")
+            self.explanation.setText("Write a rule, for example REF-YYYY-####.")
             _restyle(self.explanation, "msgNeutral")
             return
         try:
@@ -1205,7 +1205,7 @@ class FieldsPage(_Page):
             self.form.addWidget(self.from_filename)
             self.no_usable_rule = _label(
                 "No rule here can be used to fill in from the file name. "
-                "Add a rule without * (for example ##-YYYY-######).", "msgBad")
+                "Add a rule without * (for example REF-YYYY-####).", "msgBad")
             self.no_usable_rule.setVisible(False)
             self.form.addWidget(self.no_usable_rule)
 
@@ -1223,7 +1223,7 @@ class FieldsPage(_Page):
         if kind == "text" and spec.get("from_filename"):
             self.form.addWidget(_label("A file name, to see what would be filled in:", "muted"))
             self.try_file = QLineEdit()
-            self.try_file.setPlaceholderText("Type a file name, e.g. SO261017-000412_return.pdf")
+            self.try_file.setPlaceholderText("Type a file name, e.g. REF-2026-0042_report.pdf")
             self.try_file.setAccessibleName("Try a file name")
             self.try_file.textEdited.connect(lambda _t: self.refresh_live())
             self.form.addWidget(self.try_file)
