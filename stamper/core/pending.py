@@ -63,21 +63,23 @@ class Leftover:
     path: Path  # the partial copy
     size: int
     modified: datetime
-    source: str | None = None  # the file being stamped, as recorded; untrusted, only ever shown
+    source: str | None = None  # the file being stamped, as recorded; untrusted, only ever shown as a name
 
 
 def record(tmp: Path, *, source: Path | None = None, base: Path | None = None) -> Path | None:
     """Note ``tmp`` before it's written; returns the entry to ``forget``, or None if it can't.
 
     ``source`` is the file being stamped, so the notice can name it (UX-024).
-    The output name is never recorded: it is built from field values (D-081).
+    Only its name is recorded, never its folder: folder names can hold case
+    details (F-03). The output name is never recorded: it is built from field
+    values (D-081).
     """
     folder = journal_dir(base)
     entry = folder / f"{uuid.uuid4().hex}.json"
     data: dict[str, object] = {"path": str(Path(tmp).resolve()), "pid": os.getpid(),
                                "created": datetime.now().isoformat(timespec="seconds")}
     if source is not None:
-        data["source"] = str(source)
+        data["source"] = Path(source).name
     try:
         folder.mkdir(parents=True, exist_ok=True)
         entry.write_text(json.dumps(data), encoding="utf-8")
@@ -207,7 +209,9 @@ def keep(leftover: Leftover) -> None:
 def _source_text(lo: Leftover) -> str:
     """"the stamped copy of <name>" (or of a combined file), or "" when unknown (UX-024).
 
-    The recorded path is only shown, as a name: never opened or acted on.
+    The recorded value is only shown, as a name: never opened or acted on.
+    Entries from versions before F-03 hold a full path; a combine's then
+    points into the work folder, which says it was combined.
     """
     if not lo.source:
         return ""

@@ -233,7 +233,7 @@ def test_record_stores_the_source_only_when_given(tmp_path: Path) -> None:
     with_source = pending.record(tmp_path / "~stamper-a.tmp", source=tmp_path / "Report 99-2026-999901.pdf")
     without = pending.record(tmp_path / "~stamper-b.tmp")
     assert with_source is not None and without is not None
-    assert json.loads(with_source.read_text("utf-8"))["source"] == str(tmp_path / "Report 99-2026-999901.pdf")
+    assert json.loads(with_source.read_text("utf-8"))["source"] == "Report 99-2026-999901.pdf"  # no folder (F-03)
     assert "source" not in json.loads(without.read_text("utf-8"))
 
 
