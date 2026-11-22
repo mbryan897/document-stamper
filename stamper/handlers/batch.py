@@ -6,14 +6,15 @@ so the window and the command line can show every problem up front.
 ``run_batch`` then saves each file that passed. One file failing never stops
 the others; an existing output file is skipped and reported, never replaced
 unless the caller explicitly allows overwriting (the window never does,
-D-075). Each copy keeps its original's protection (D-050).
+D-075). Each copy keeps its original's protection unless the caller asks
+to remove it or gives a new password for the protected files (D-050, as amended).
 
 Nothing here imports Qt; progress and cancellation are plain callables.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -178,6 +179,7 @@ def run_batch(
     overwrite: bool = False,
     progress: BatchProgress | None = None,
     cancel: CancelCheck | None = None,
+    out_passwords: Mapping[Path, str] | None = None,
 ) -> list[BatchOutcome]:
     """Save every file whose check passed; report every file.
 
@@ -186,6 +188,8 @@ def run_batch(
     a file changed since the check) is reported and the batch goes on.
     Cancelling stops between pages: copies already saved stay, the current
     file is reported as cancelled and the rest as not started.
+    ``out_passwords`` gives a new password for the copy of each source it
+    names (the protected ones); it is passed to that save only.
     """
     total = sum(c.plan.page_count for c in checks if c.ok and c.plan is not None)
     done_before = 0
@@ -217,6 +221,7 @@ def run_batch(
                 progress=page_progress,
                 cancel=cancel,
                 expect=item.expect,
+                out_password=(out_passwords or {}).get(item.path),
             )
         except Cancelled:
             stopped = True

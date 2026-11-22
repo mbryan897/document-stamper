@@ -11,9 +11,10 @@ Evidentiary-integrity notes (for manual review)
   Existing content isn't removed; the white box covers what is under it
   visually, and that content stays in the file.
 - Encryption and permissions are kept exactly (``PDF_ENCRYPT_KEEP``) unless
-  the caller asks to remove them (D-050). With ``out_password`` (a combined
-  file only), the copy is saved with AES-256 and that password as both the
-  open and the owner password, with no permission restrictions. The password
+  the caller asks to remove them (D-050, as amended: the window asks). With
+  ``out_password``, the copy is saved with AES-256 and that password as both
+  the open and the owner password, with no permission restrictions, in place
+  of any protection the original had. The password
   is only passed to that save; it is never stored.
 - Document properties: existing Info entries are kept; configured keys are
   added (or replaced, with a warning naming old and new values); ``ModDate``
@@ -284,7 +285,7 @@ PASSWORD_SET_NOTE = "This file opens only with the password you set. Whoever rec
 # the text as typed, without the SASLprep normalisation the PDF format asks readers to apply, so
 # anything outside printable ASCII may not open in another reader with the same keystrokes.
 MAX_OUTPUT_PASSWORD = 40
-OUTPUT_PASSWORD_RULE = ("The password for the combined file can have up to 40 characters: unaccented letters, "
+OUTPUT_PASSWORD_RULE = ("The password can have up to 40 characters: unaccented letters, "
                         "digits, spaces and the symbols on a US keyboard.")
 # Information, not "Check the copy" (UX-030): what a receiver may see, since XMP is never touched (D-051).
 XMP_NOTE = ("The original has a second set of properties (XMP) that this copy keeps unchanged. "
@@ -308,9 +309,9 @@ def combined_no_password_note(count: int) -> str:
 
 
 def output_password_problem(password: str) -> str:
-    """Why ``password`` can't protect a combined file, as a sentence; "" when it can."""
+    """Why ``password`` can't protect a saved copy, as a sentence; "" when it can."""
     if not password:
-        return "The password for the combined file can't be empty."
+        return "The password can't be empty."
     if len(password) > MAX_OUTPUT_PASSWORD or not (password.isascii() and password.isprintable()):
         return OUTPUT_PASSWORD_RULE
     return ""

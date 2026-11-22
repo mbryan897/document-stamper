@@ -389,9 +389,9 @@ class Handler(abc.ABC):
     ) -> ApplyResult:
         """Write a stamped copy to ``out_path``. The input is never changed.
 
-        ``out_password`` (a combined file only) saves the copy with AES-256 and
-        that password to open it, in place of the original's protection. It is
-        used for the save and not kept.
+        ``out_password`` saves the copy with AES-256 and that password to open
+        it, in place of any protection the original had. It is used for the
+        save and not kept.
 
         Raises a StampError subclass for anything the user must deal with.
         With ``expect`` (from ``DocumentInfo.fingerprint``), a source that
