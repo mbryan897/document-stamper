@@ -106,6 +106,9 @@ def combine_three(qtbot: QtBot, w: MainWindow, files: list[Path]) -> tuple[Combi
     give_passwords(qtbot, screen)
     assert screen.signature_tick is not None and not screen.continue_button.isEnabled()
     screen.signature_tick.setChecked(True)
+    assert not screen.continue_button.isEnabled()  # a file needed a password: asked about the combined file's
+    assert screen.password_box is not None
+    screen.password_box.none_radio.setChecked(True)
     assert screen.continue_button.isEnabled()
     screen.continue_button.click()
     d = wait_dialog(qtbot, w, CombineDialog)
@@ -232,7 +235,7 @@ def test_combine_signed_locked_rotated(qtbot: QtBot, window: MainWindow, fake: F
     assert fake.save_suggestions[0].name.endswith("rotate_90_combined.pdf")
     qtbot.waitUntil(lambda: window.stack.currentWidget() is window.saved, timeout=WAIT_MS)
     notes = "\n".join(window.saved.notes.texts())
-    assert "Protected files in it: encrypted_user_password.pdf" in notes
+    assert "This combined file has no password. 1 of its files was password-protected." in notes
     assert "Bookmarks: one for each of the 3 files" in notes
     assert window.saved.original_label.text().startswith("All 3 files unchanged")
     qtbot.waitUntil(lambda: not _temp_left(tmp_path), timeout=WAIT_MS)
@@ -403,6 +406,8 @@ def test_batch_five_files(qtbot: QtBot, window: MainWindow, fake: FakeServices, 
     wait_ready(qtbot, d)
     existing = tmp_path / d.name_for(taken)
     existing.write_bytes(b"already here - must not be replaced")
+    assert d.password_box is not None and d.password_box.keep_radio is not None
+    d.password_box.keep_radio.setChecked(True)  # each copy keeps its original's protection
     d.show_file(3)  # the tiny page: its problem shows, but doesn't block the others
     wait_ready(qtbot, d)
     assert d.placement_problem()
@@ -611,7 +616,7 @@ def test_protection_warning_shows_before_the_password(qtbot: QtBot, window: Main
     window.files_screen.combine_button.click()
     screen = prepare(qtbot, window)
     texts = [label.text() for label in screen.findChildren(QLabel)]
-    assert any("saved without a password" in t and "encrypted_user_password.pdf" in t for t in texts)
+    assert any("no password unless you set one below" in t and "encrypted_user_password.pdf" in t for t in texts)
 
 
 def test_batch_preview_not_cropped_at_minimum(qtbot: QtBot, small: MainWindow, corpus_dir: Path,
@@ -654,9 +659,9 @@ def _restricted_notice(screen: PrepareScreen) -> QLabel:
     ("mode", "count", "text", "tick"),
     [
         ("batch", 1, "This PDF is set not to allow changes: r0.pdf. The original isn't touched. "
-                     "The stamped copy keeps the same setting.", "Stamp a copy"),
+                     "On the next screen, choose whether the stamped copy keeps the setting.", "Stamp a copy"),
         ("batch", 2, "These PDFs are set not to allow changes: r0.pdf, r1.pdf. The originals aren't touched. "
-                     "Each stamped copy keeps the same setting.", "Stamp copies"),
+                     "On the next screen, choose whether the stamped copies keep the setting.", "Stamp copies"),
         ("combine", 2, "These PDFs are set not to allow changes: r0.pdf, r1.pdf. The originals aren't touched. "
                        "The combined file won't have this setting.", "Stamp copies"),
         ("combine", 1, "This PDF is set not to allow changes: r0.pdf. The original isn't touched. "

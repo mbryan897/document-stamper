@@ -54,6 +54,8 @@ class ApplyRequest:
     accept_signature_loss: bool
     accept_restrictions: bool
     expect: SourceFingerprint | None = None  # refuse a source that changed since it was opened (D-125)
+    out_password: str | None = None  # a new password for the copy; used for the save, never kept
+    remove_encryption: bool = False  # "No password" for a protected original (D-050 as amended)
 
 
 class TaskContext:
@@ -175,6 +177,8 @@ class _Worker(QObject):
                 progress=progress,
                 cancel=stop.is_set,
                 expect=request.expect,
+                out_password=request.out_password,
+                remove_encryption=request.remove_encryption,
             )
         except Exception as e:
             self.apply_failed.emit(_failure(e))

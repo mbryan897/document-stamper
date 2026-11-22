@@ -223,7 +223,7 @@ def test_restricted_needs_tick(qtbot: QtBot, window: MainWindow, corpus_dir: Pat
     notice = d.restriction_tick.parentWidget().findChildren(QLabel)[0]
     assert notice.textFormat() == Qt.TextFormat.PlainText
     assert notice.text() == ("This PDF is set not to allow changes. The original isn't touched. "
-                             "The stamped copy keeps the same setting.")
+                             "Choose below whether the stamped copy keeps the setting.")
     assert d.owner_button is not None and d.owner_button.text() == "I have the permissions password (optional)…"
     type_into(qtbot, d, "identifier", SO)
     choose(d, "doc_type", "Court order")

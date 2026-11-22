@@ -165,6 +165,8 @@ def test_encrypted_copy_keeps_password(qtbot: QtBot, window: MainWindow, fake: F
     src = copy_to(corpus_dir / "encrypted_user_password.pdf", tmp_path)
     fake.passwords.append(make_corpus.USER_PASSWORD)
     d = open_dialog(qtbot, window, src)
+    assert d.password_box is not None and d.password_box.keep_radio is not None
+    d.password_box.keep_radio.setChecked(True)  # asked, since it needed a password to open
     _fill(qtbot, d)
     out = tmp_path / "copy.pdf"
     fake.save_paths.append(out)

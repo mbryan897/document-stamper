@@ -93,7 +93,7 @@ from ..handlers.base import (
 )
 from ..handlers.batch import BatchOutcome, Status
 from ..handlers.combine import CombinedFile, check_work_folder, sweep_work_folder
-from ..handlers.pdf import PdfHandler, xfa_refusal
+from ..handlers.pdf import PASSWORD_SET_NOTE, PdfHandler, xfa_refusal
 from .engine import EngineClient, EngineFailure, TaskContext
 from .fonts import MONO_FAMILY
 from .about import AboutDialog, TextDialog, whats_new
@@ -940,6 +940,9 @@ class MainWindow(QMainWindow):
             kept.append("the permissions password")
         elif dialog.restriction_tick is not None and dialog.restriction_tick.isChecked():
             kept.append("the confirmation to stamp a protected file")
+        out_password = dialog.output_password()  # a combined file's own password, if one is set
+        if out_password is not None:
+            kept.append("the password for the combined file")
         notice = []
         if lost:
             these = "this field" if len(lost) == 1 else "these fields"
@@ -960,7 +963,7 @@ class MainWindow(QMainWindow):
                 batch.next_to_radio.setChecked(True)
             rebuilt = batch
         elif isinstance(dialog, CombineDialog):
-            rebuilt = self._show_combine(dialog.combined, dialog.info, start=start)
+            rebuilt = self._show_combine(dialog.combined, dialog.info, start=start, out_password=out_password)
         else:
             rebuilt = self.show_dialog(dialog.path, dialog.info, dialog.password, start=start)
         self.update_title()
@@ -1301,7 +1304,9 @@ class MainWindow(QMainWindow):
         elif kind == "combine":
             combined, info = result  # type: ignore[misc]
             self._combined = combined
-            self._show_combine(combined, info)
+            # The password chosen on the Before stamping screen, if it was shown; that screen closes next.
+            chosen = self.prepare.output_password() if self.prepare is not None else None
+            self._show_combine(combined, info, out_password=chosen)
 
     def _on_task_failed(self, req: int, failure: EngineFailure) -> None:
         if self._task is None or self._task[1] != req:
@@ -1318,13 +1323,13 @@ class MainWindow(QMainWindow):
                                 else failure.message)
 
     def _show_combine(self, combined: CombinedFile, info: DocumentInfo,
-                      start: StartFrom | None = None) -> CombineDialog:
+                      start: StartFrom | None = None, out_password: str | None = None) -> CombineDialog:
         assert self.config is not None and self.profile is not None
         self._close_dialog()
         self._close_prepare()
         dialog = CombineDialog(config=self.config, profile=self.profile, combined=combined, info=info,
                                engine=self.engine, services=self.services, today=self.today,
-                               start=self._take_carry(start))
+                               start=self._take_carry(start), out_password=out_password)
         dialog.last_save_folder = self.state.last_save_folder
         dialog.cancelled.connect(lambda: self._back_to_files())
         dialog.saved.connect(self._on_saved)
@@ -1395,11 +1400,13 @@ class MainWindow(QMainWindow):
         ident = dialog.values().get("identifier", "")
         label = self.config.fields["identifier"].label if "identifier" in self.config.fields else "Identifier"
         password = dialog.password if result.encryption_kept else None
+        if dialog.output_password() is not None:
+            password = dialog.output_password()  # for the thumbnail only; dropped with the dialog below
         signed = dialog.info.signed
         first = dialog.info.pages[0]
         ratio = self.devicePixelRatioF() or 1.0
         thumb_dpi = int(min(THUMB_W / (first.width / 72), THUMB_H / (first.height / 72)) * ratio * 1.5)
-        extra: list[str] = []
+        extra: list[str] = [PASSWORD_SET_NOTE] if dialog.output_password() is not None else []
         original: str | None = None
         source: Path | None = dialog.info.path
         if isinstance(dialog, CombineDialog):

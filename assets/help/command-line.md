@@ -53,10 +53,12 @@ stamper-cli --batch a.pdf b.pdf c.pdf --out-dir "D:\Records\Stamped" --set ident
 | `--password-stdin` | Read the password from the first line of standard input. |
 | `--password-env-for FILE VAR` | With several files: one file's password, from an environment variable. Repeat for each file. |
 | `--passwords-stdin` | With several files: one password per line of standard input, in the order the files are given; an empty line for a file with none. |
+| `--out-password-env VAR` | With `--combine`: protect the combined file with the password in this environment variable. |
+| `--out-password-stdin` | With `--combine`: read the combined file's password from the first line of standard input. It can't be used with `--password-stdin` or `--passwords-stdin`. |
 | `--no-box` | Don't draw the white box behind the stamp. |
 | `--accept-signature-loss` | Go ahead with digitally signed files; the copy's signature won't validate. |
 | `--accept-restrictions` | Go ahead with files whose owner restrictions don't allow changes. |
-| `--remove-encryption` | Save the copy without the original's password and permissions. The window never does this. |
+| `--remove-encryption` | Save the copy without the original's password and permissions (the window's **No password**). |
 | `--overwrite` | Replace a stamped copy that already exists. It can never replace an original. |
 | `--dry-run` | Check everything and print the name the copy would get, and which confirmation flags are missing, without saving. |
 | `--quiet` | Print only errors. |
@@ -77,6 +79,10 @@ Remove-Item Env:STAMPER_PW
 ```
 
 A file that needs a password and didn't get one stops with exit code 6 and names the options.
+
+### A password for the combined file
+
+A combined file is saved without a password unless you give one with `--out-password-env VAR` or `--out-password-stdin`. It is then saved with AES-256 encryption: the password is needed to open it, and nothing else is restricted. It can have up to 40 characters: unaccented letters, digits, spaces and the symbols on a US keyboard; anything else stops with exit code 6 before anything is combined. The command never asks whether you want one. When some of the files needed a password and none was given for the combined file, a note says so.
 
 ## Signed and restricted files
 

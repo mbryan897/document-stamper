@@ -181,7 +181,7 @@ def test_cli_combine_in_argument_order(corpus_dir: Path, tmp_path: Path, monkeyp
     r = Run(["--combine", str(b), str(a), "--out", str(out),
              "--password-env-for", str(a), "STAMPER_TEST_PW_A", *BASE])
     assert r.code == ExitCode.OK, r.stderr
-    assert "Protected files in it: encrypted_user_password.pdf" in r.stdout
+    assert "Note: This combined file has no password. 1 of its files was password-protected." in r.stdout
     with pymupdf.open(out) as doc:
         assert [t[1] for t in doc.get_toc() if t[0] == 1] == ["rotate_90.pdf", "encrypted_user_password.pdf"]
         assert "Page 5 of 5" in doc[4].get_text()

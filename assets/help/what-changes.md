@@ -26,7 +26,7 @@ The white box behind the stamp is a white rectangle drawn over that part of the 
 - The copy is a complete new save of the document, not an edit added to the end of the original. That's why a digital signature on the original doesn't validate on the copy.
 - If the original was edited after it was first saved, it holds earlier versions of itself; the copy keeps only the latest version, as a viewer shows it. (A note says when this applies.) Objects the document no longer uses may still be in the copy, as they are in the original.
 - Pages, form fields and their values, comments, links, bookmarks, attached files, layers and any JavaScript or actions are kept unchanged. Field calculations and scripts are never run.
-- *Password and permissions* are kept exactly as they are: the copy opens with the same password and has the same restrictions. The window never removes them. The command line removes them only with `--remove-encryption`, and then the copy says so in a note.
+- *Password and permissions* are kept exactly as they are when you choose **Keep the original's password and permissions**: the copy opens with the same password and has the same restrictions. With **No password** (or `--remove-encryption` on the command line) the copy has neither, and a note says so. With **Set a password** the copy opens only with the new password. See [A password for the stamped copy](protected-files.md#a-password-for-the-stamped-copy).
 - The copy's bytes differ from the original's, so any hash of the two will differ.
 
 ## Document properties

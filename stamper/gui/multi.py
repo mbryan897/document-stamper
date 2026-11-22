@@ -70,12 +70,14 @@ from ..handlers.base import (
 )
 from ..handlers.batch import BatchCheck, BatchItem, BatchOutcome, Status, check_batch, run_batch
 from ..handlers.combine import CombinedFile, CombineInput, combine_pdfs
+from ..handlers.pdf import COMBINED_UNPROTECTED_NOTE, PASSWORD_SET_NOTE
 from .engine import EngineClient, EngineFailure, TaskContext
 from .help import help_button
 from .profiles import PageScrollCombo
 from .services import Services
 from .stamp_dialog import (
     NotesView,
+    OutputPasswordBox,
     StampDialog,
     StartFrom,
     _before_saving,
@@ -567,7 +569,11 @@ class _PasswordRow:
 
 
 class PrepareScreen(QWidget):
-    """Every password and confirmation for the set, collected before anything is saved (D-109)."""
+    """Every password and confirmation for the set, collected before anything is saved (D-109).
+
+    When combining and a file needs a password to open, it also asks whether
+    the combined file gets a password of its own; Continue waits for an answer.
+    """
 
     proceed = Signal()
     back = Signal()
@@ -582,6 +588,7 @@ class PrepareScreen(QWidget):
         self._rows: list[_PasswordRow] = []
         self.signature_tick: QCheckBox | None = None
         self.restriction_tick: QCheckBox | None = None
+        self.password_box: OutputPasswordBox | None = None  # made when first needed; kept across rebuilds
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(24, 16, 24, 16)
@@ -632,7 +639,7 @@ class PrepareScreen(QWidget):
         while self.body_layout.count():
             item = self.body_layout.takeAt(0)
             w = item.widget()
-            if w is not None:
+            if w is not None and w is not self.password_box:  # what's typed there survives a rebuild
                 w.deleteLater()
 
     def _build_body(self) -> None:
@@ -703,13 +710,22 @@ class PrepareScreen(QWidget):
             self.body_layout.addWidget(frame)
         if self.mode == COMBINE and protected:
             frame, fl = _notice("warning")
-            fl.addWidget(_wrap_label(
-                "The combined file is saved without a password or restrictions. "
-                f"Protected files in it: {_names(protected)}."))
+            if self.locked_count():
+                fl.addWidget(_plain_label(
+                    "The combined file has no restrictions, and no password unless you set one below. "
+                    f"Protected files in it: {_names(protected)}."))
+            else:
+                fl.addWidget(_plain_label(f"{COMBINED_UNPROTECTED_NOTE} Protected files in it: {_names(protected)}."))
             self.body_layout.addWidget(frame)
+            if self.locked_count():  # the question (F-01): no choice made until the user picks one
+                if self.password_box is None:
+                    self.password_box = OutputPasswordBox(ask=True)
+                    self.password_box.changed.connect(self._update)
+                self.body_layout.addWidget(self.password_box)
         elif self.mode == BATCH and protected:
             frame, fl = _notice("info")
-            fl.addWidget(_wrap_label("Each copy keeps its original's password and permissions."))
+            fl.addWidget(_wrap_label("On the next screen, choose whether the copies keep their originals' "
+                                     "passwords and permissions."))
             self.body_layout.addWidget(frame)
         self.body_layout.addStretch(1)
         self._update()
@@ -754,6 +770,14 @@ class PrepareScreen(QWidget):
         """``(file name, password box)`` for each file that still needs a password (tests)."""
         return [(r.file.path.name, r.edit) for r in self._rows]
 
+    def locked_count(self) -> int:
+        """Files that need (or needed) a password to open; owner restrictions alone don't count."""
+        return sum(1 for f in self._files if f.info is None or f.info.needs_password)
+
+    def output_password(self) -> str | None:
+        """The password chosen for the combined file, or None (not asked, or "No password")."""
+        return self.password_box.password() if self.password_box is not None else None
+
     def accepted(self) -> tuple[bool, bool]:
         """``(signature ticked, restrictions ticked)``; a missing tick counts as not needed."""
         return (bool(self.signature_tick and self.signature_tick.isChecked()),
@@ -769,6 +793,8 @@ class PrepareScreen(QWidget):
             out.append(f"Tick \"{self.signature_tick.text()}\" to continue.")
         if self.restriction_tick is not None and not self.restriction_tick.isChecked():
             out.append(f"Tick \"{self.restriction_tick.text()}\" to continue.")
+        if self.password_box is not None and (problem := self.password_box.problem()):
+            out.append(problem)
         return out
 
     def _update(self) -> None:
@@ -781,7 +807,9 @@ class PrepareScreen(QWidget):
             self.proceed.emit()
 
     def dispose(self) -> None:
-        """Stop listening to the engine."""
+        """Stop listening to the engine, and forget the combined file's password."""
+        if self.password_box is not None:
+            self.password_box.clear()
         for signal, slot in ((self.engine.inspected, self._on_inspected),
                              (self.engine.inspect_failed, self._on_inspect_failed)):
             try:
@@ -834,10 +862,13 @@ class CombineDialog(_MultiMixin, StampDialog):
         services: Services,
         today: date | None = None,
         start: StartFrom | None = None,
+        out_password: str | None = None,
         parent: QWidget | None = None,
     ) -> None:
         self.combined = combined
         self.originals = tuple(s.path for s in combined.sources)
+        self.chosen_password = out_password  # from the Before stamping screen; memory only
+        self.password_link: QPushButton | None = None
         super().__init__(config=config, profile=profile, path=combined.path, info=info, password=None,
                          engine=engine, services=services, today=today, start=start, parent=parent)
         self.save_button.setText("&Stamp and save…")
@@ -896,10 +927,25 @@ class CombineDialog(_MultiMixin, StampDialog):
         self.signature_tick = None
         self.restriction_tick = None
         self.owner_button = None
-        if self.combined.protection_warning():
+        warning = self.combined.protection_warning(password_set=self.chosen_password is not None)
+        if warning:
             frame, fl = _notice("warning")
-            fl.addWidget(_wrap_label(self.combined.protection_warning()))
+            fl.addWidget(_plain_label(warning))
             lay.addWidget(frame)
+        if self.chosen_password is not None:
+            frame, fl = _notice("info")
+            fl.addWidget(_wrap_label(PASSWORD_SET_NOTE))
+            lay.addWidget(frame)
+        elif not self.combined.locked:  # not asked before combining: offered here, "No password" standing
+            self.password_link = QPushButton("Set a password for the combined file…")
+            self.password_link.setObjectName("mutedLink")
+            self.password_link.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.password_box = OutputPasswordBox(ask=False)
+            self.password_box.hide()
+            self.password_box.changed.connect(self._update_button)
+            self.password_link.clicked.connect(self._show_password_box)
+            lay.addWidget(self.password_link, 0, Qt.AlignmentFlag.AlignLeft)
+            lay.addWidget(self.password_box)
         lines = [f"Pages in this order: {', '.join(visible(s.path.name) for s in self.combined.sources)}."]
         if self.combined.signed:
             lines.append(f"Signed files ({_names(self.combined.signed)}) were confirmed; the originals stay signed.")
@@ -910,6 +956,22 @@ class CombineDialog(_MultiMixin, StampDialog):
             fl.addWidget(_wrap_label(line))
         lay.addWidget(frame)
         return box
+
+    def _show_password_box(self) -> None:
+        assert self.password_box is not None and self.password_link is not None
+        self.password_link.hide()
+        self.password_box.show()
+        self.password_box.set_radio.setFocus()
+
+    def output_password(self) -> str | None:
+        if self.chosen_password is not None:
+            return self.chosen_password
+        return super().output_password()
+
+    def disconnect_engine(self) -> None:
+        """Also forget the password chosen before combining: the dialog is being left."""
+        super().disconnect_engine()
+        self.chosen_password = None
 
     def _uses_original_name(self) -> bool:
         for stamp in self.profile.stamps:
@@ -952,8 +1014,11 @@ class CombineDialog(_MultiMixin, StampDialog):
         return super().check_output(out)
 
     def saved_notes(self) -> list[str]:
-        """Notes for the saved screen: the protection warning, then the combine notes."""
-        notes = [w for w in (self.combined.protection_warning(),) if w]
+        """Notes for the saved screen: the protection warning or the password note, then the combine notes."""
+        protected = self.output_password() is not None
+        notes = [w for w in (self.combined.protection_warning(password_set=protected),) if w]
+        if protected:
+            notes.append(PASSWORD_SET_NOTE)
         return notes + list(self.combined.notes)
 
 
@@ -1115,8 +1180,6 @@ class BatchDialog(_MultiMixin, StampDialog):
         self.owner_button = None
         infos = [f.info for f in self.files if f.info is not None]
         lines = []
-        if any(i.encrypted for i in infos):
-            lines.append("Each copy keeps its original's password and permissions.")
         signed = [visible(f.path.name) for f in self.files if f.info and f.info.signed]
         if signed:
             lines.append(f"Signed files ({_names(signed)}) were confirmed; the originals stay signed.")
@@ -1125,7 +1188,17 @@ class BatchDialog(_MultiMixin, StampDialog):
             for line in lines:
                 fl.addWidget(_wrap_label(line))
             lay.addWidget(frame)
-        box.setVisible(bool(lines))
+        protected = [i for i in infos if i.encrypted]
+        if protected:  # keep, remove or replace the protected files' protection (F-01, amends D-050)
+            self.password_box = OutputPasswordBox(ask=any(i.needs_password for i in protected),
+                                                  what="the stamped copies",
+                                                  keep="Keep each original's password and permissions")
+            self.password_box.changed.connect(self._update_button)
+            lay.addWidget(self.password_box)
+            if len(protected) < len(infos):
+                lay.addWidget(_wrap_label("This applies to the copies of protected files; the others are saved "
+                                          "without a password.", "help"))
+        box.setVisible(lay.count() > 0)
         return box
 
     def _build_filename(self) -> QVBoxLayout:
@@ -1313,12 +1386,18 @@ class BatchDialog(_MultiMixin, StampDialog):
         accept_signature, accept_restrictions = self._accepted
         names = [c.item.path.name for c in checks]
         count = len(checks)
+        remove = self.removes_protection()
+        new = self.output_password()  # held by this task only; given to the protected files' saves
+        out_passwords = ({f.path: new for f in self.files if f.info is not None and f.info.encrypted}
+                         if new is not None else None)
 
         def save(ctx: TaskContext) -> list[BatchOutcome]:
             return run_batch(
                 handler, checks, job,
                 accept_signature_loss=accept_signature,
                 accept_restrictions=accept_restrictions,
+                remove_encryption=remove,
+                out_passwords=out_passwords,
                 progress=lambda d, t, i: ctx.progress(d, t, f"File {i + 1} of {count} · {names[i]}"),
                 cancel=ctx.cancelled,
             )

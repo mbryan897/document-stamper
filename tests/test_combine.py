@@ -49,7 +49,9 @@ def test_combine_order_stamps_bookmarks_protection(corpus_dir: Path, tmp_path: P
                                                            "encrypted_user_password.pdf"]
         assert combined.protected == ("encrypted_user_password.pdf",)
         assert combined.signed == ("signed_return.pdf",)
-        assert "encrypted_user_password.pdf" in combined.protection_warning()
+        assert combined.locked == ("encrypted_user_password.pdf",)
+        assert combined.protection_warning().startswith(
+            "This combined file has no password. 1 of its files was password-protected.")
         assert combined.path.name == "signed_return.pdf"  # {original_name} is the first file's (D-104)
 
         out = tmp_path / "combined_out.pdf"
