@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import re
+import tomllib
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -50,11 +51,15 @@ def test_the_spec_bundles_what_check_exe_compares() -> None:
         assert needed.replace("'", '"') in [d.replace("'", '"') for d in datas], needed
 
 
-def test_changelog_has_1_0_0_and_unreleased() -> None:
+def test_changelog_lists_this_version_first() -> None:
+    """Newest first: an optional "Unreleased", then the version in pyproject.toml, down to 1.0.0."""
     text = (REPO / "CHANGELOG.md").read_text(encoding="utf-8")
     assert text.startswith("# What's new in Document Stamper\n")
     heads = re.findall(r"^## (.+)$", text, flags=re.M)
-    assert heads == ["Unreleased", "1.0.0"]
+    version = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    released = heads[1:] if heads[0] == "Unreleased" else heads
+    assert released[0] == version and released[-1] == "1.0.0", heads
+    assert len(set(heads)) == len(heads) and "Unreleased" not in released
     assert "SHA256SUMS.txt" in text and "never of a document" in text
     assert not re.search(r"\b[DOU]-\d{3}\b|UX-\d{3}", text)  # plain language: no planning references
 

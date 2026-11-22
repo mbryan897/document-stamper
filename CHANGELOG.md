@@ -2,7 +2,7 @@
 
 The newest changes are first. Each released version lists what changed since the one before.
 
-## Unreleased
+## 1.1.0
 
 Usability fixes from a review of the whole program, and the things a released program is expected to have.
 
@@ -29,6 +29,7 @@ Usability fixes from a review of the whole program, and the things a released pr
 - "Paste choices" adds a list's choices from the clipboard.
 - A settings file made by a newer version of the program says so in one sentence instead of a list of problems.
 - "Remove my settings from this computer…" removes what the program keeps about you (never a settings file).
+- The built-in settings are simpler: the stamp is the identifier and the page number. Document type is optional and, when filled in, goes in the file name after the identifier. The only document property the built-in profile writes is `Identifier`.
 
 ### Getting around
 

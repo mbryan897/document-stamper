@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "document-stamper"
-version = "1.0.0"
+version = "1.1.0"
 description = "Add a configurable text stamp (case number, document type, page numbers) to every page of a document and save a new copy."
 readme = "README.md"
 license = "AGPL-3.0-or-later"
@@ -25,7 +25,7 @@ classifiers = [
 # reproducible between the dev machine and the packaged build.
 dependencies = [
     "PyMuPDF==1.28.2",
-    "PySide6==6.12.0",
+    "PySide6-Essentials==6.12.0",
     "pydantic==2.14.1",
 ]
 

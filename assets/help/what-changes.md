@@ -34,7 +34,7 @@ The white box behind the stamp is a white rectangle drawn over that part of the 
 Document properties are the information a PDF carries about itself, such as Title and Author, shown under File › Properties in most viewers.
 
 - The original's properties are all kept.
-- The properties set in the profile are added. The built-in profile adds `Identifier` (the stamped identifier), `Source` (the original's file name, without `.pdf`) and `StampedOn` (the stamping date), so the copy records which original it came from and when it was stamped. If the original already had a property of that name with a different value, it's replaced, and a note gives the old and new values.
+- The properties set in the profile are added. The built-in profile adds `Identifier` (the stamped identifier). A profile can also add `Source` (`{original_name}`, the original's file name) and `StampedOn` (`{date}`, the stamping date), so the copy records which original it came from and when it was stamped. If the original already had a property of that name with a different value, it's replaced, and a note gives the old and new values.
 - The modification date (`ModDate`) is set to the time of stamping.
 - XMP metadata, a second, separate set of properties some PDFs carry, is left exactly as it was. It isn't updated, so some programs may show the original's title and dates for this copy instead of the updated properties. A note says when the original has XMP.
 
