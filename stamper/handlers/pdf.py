@@ -11,7 +11,10 @@ Evidentiary-integrity notes (for manual review)
   Existing content isn't removed; the white box covers what is under it
   visually, and that content stays in the file.
 - Encryption and permissions are kept exactly (``PDF_ENCRYPT_KEEP``) unless
-  the caller asks to remove them (D-050).
+  the caller asks to remove them (D-050). With ``out_password`` (a combined
+  file only), the copy is saved with AES-256 and that password as both the
+  open and the owner password, with no permission restrictions. The password
+  is only passed to that save; it is never stored.
 - Document properties: existing Info entries are kept; configured keys are
   added (or replaced, with a warning naming old and new values); ``ModDate``
   is set to the stamping time. XMP is never touched (D-051); when the original
@@ -65,6 +68,7 @@ from .base import (
     PlanResult,
     ProgressCallback,
     StampDoesNotFit,
+    StampError,
     StampJob,
     StampPlacement,
     UnsupportedDocument,
@@ -77,8 +81,10 @@ __all__ = [
     "FONT_RESOURCE",
     "PdfHandler",
     "SHRINK_STEP_PT",
+    "combined_no_password_note",
     "font_path",
     "needs_check",
+    "output_password_problem",
     "stamp_font",
     "write_sample_page",
     "xfa_refusal",
@@ -263,8 +269,23 @@ _PDF_DATE_RE = re.compile(r"D:(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)(\d\d)(?:(Z)|([+-])
 # Notes the saved screens show first, under "Check the copy" (UX-019): the copy differs
 # from the original in a way the sender should look at. Worded here, classified here.
 SIGNATURE_LOST_NOTE = "The original is digitally signed; the stamped copy's signature won't validate."
-UNPROTECTED_NOTE = "The copy isn't password-protected, unlike the original."
+KEEP_PROTECTION = ("To keep the same level of protection, encrypt this file or keep it only on encrypted "
+                   "drives and shares.")
+UNPROTECTED_NOTE = f"The copy isn't password-protected, unlike the original. {KEEP_PROTECTION}"
+# D-096, as amended: for a combined file whose protected sources only had owner restrictions.
 COMBINED_UNPROTECTED_NOTE = "The combined file is saved without a password or restrictions."
+# ... and when at least one source needed a password to open and none was set for the combined file.
+COMBINED_NO_PASSWORD_NOTE = ("This combined file has no password. {count} of its files {were} "
+                             f"password-protected. {KEEP_PROTECTION}")
+_NO_PASSWORD_START = COMBINED_NO_PASSWORD_NOTE.split(" {count}", 1)[0]
+# Information on the saved screen when the user set a password for the combined file.
+PASSWORD_SET_NOTE = "This file opens only with the password you set. Whoever receives it will need that password."
+# What an output password may be: PyMuPDF 1.28.2 refuses more than 40 characters, and MuPDF hashes
+# the text as typed, without the SASLprep normalisation the PDF format asks readers to apply, so
+# anything outside printable ASCII may not open in another reader with the same keystrokes.
+MAX_OUTPUT_PASSWORD = 40
+OUTPUT_PASSWORD_RULE = ("The password for the combined file can have up to 40 characters: unaccented letters, "
+                        "digits, spaces and the symbols on a US keyboard.")
 # Information, not "Check the copy" (UX-030): what a receiver may see, since XMP is never touched (D-051).
 XMP_NOTE = ("The original has a second set of properties (XMP) that this copy keeps unchanged. "
             "Some programs may show the original's title and dates for this copy.")
@@ -281,12 +302,26 @@ def covers_text_note(pages: list[int]) -> str:
     return f"On {_page_list(pages)}{COVERS_TEXT_NOTE_END}"
 
 
+def combined_no_password_note(count: int) -> str:
+    """The warning for a combined file saved without a password when ``count`` sources needed one."""
+    return COMBINED_NO_PASSWORD_NOTE.format(count=count, were="was" if count == 1 else "were")
+
+
+def output_password_problem(password: str) -> str:
+    """Why ``password`` can't protect a combined file, as a sentence; "" when it can."""
+    if not password:
+        return "The password for the combined file can't be empty."
+    if len(password) > MAX_OUTPUT_PASSWORD or not (password.isascii() and password.isprintable()):
+        return OUTPUT_PASSWORD_RULE
+    return ""
+
+
 def needs_check(note: str) -> bool:
     """True for a note about something to check in the copy: repaired, signature lost,
     a document property replaced, protection removed, or a white box over existing text.
     Every other note is information."""
     return (note in (SIGNATURE_LOST_NOTE, UNPROTECTED_NOTE)
-            or note.startswith((COMBINED_UNPROTECTED_NOTE, _REPLACED_NOTE_START))
+            or note.startswith((COMBINED_UNPROTECTED_NOTE, _NO_PASSWORD_START, _REPLACED_NOTE_START))
             or note.endswith((_REPAIRED_NOTE_END, COVERS_TEXT_NOTE_END)))
 
 
@@ -829,14 +864,18 @@ class PdfHandler(Handler):
 
     @staticmethod
     def _save_atomic(doc: pymupdf.Document, out: Path, encryption: int, overwrite: bool,
-                     source: Path | None = None) -> None:
+                     source: Path | None = None, password: str | None = None) -> None:
         fd, tmp_name = tempfile.mkstemp(prefix=pending.TEMP_NAME_PREFIX, suffix=pending.TEMP_NAME_SUFFIX,
                                         dir=out.parent)
         os.close(fd)
         tmp = Path(tmp_name)
         entry = pending.record(tmp, source=source)  # so a crash before the rename can be cleaned up later (D-124)
         try:
-            doc.save(tmp, garbage=0, deflate=False, clean=False, encryption=encryption)
+            if password is None:
+                doc.save(tmp, garbage=0, deflate=False, clean=False, encryption=encryption)
+            else:  # AES-256, open and owner password the same, nothing restricted
+                doc.save(tmp, garbage=0, deflate=False, clean=False, encryption=pymupdf.PDF_ENCRYPT_AES_256,
+                         user_pw=password, owner_pw=password, permissions=-1)
             if overwrite:
                 os.replace(tmp, out)
             elif os.name == "nt":
@@ -866,9 +905,12 @@ class PdfHandler(Handler):
         progress: ProgressCallback | None = None,
         cancel: CancelCheck | None = None,
         expect: SourceFingerprint | None = None,
+        out_password: str | None = None,
     ) -> ApplyResult:
         """See Handler.apply."""
         src, out = Path(path), Path(out_path)
+        if out_password is not None and (problem := output_password_problem(out_password)):
+            raise StampError(problem)
         self._check_output(src, out, overwrite)
         check_unchanged(src, expect)
         today = job.today or date.today()
@@ -916,7 +958,7 @@ class PdfHandler(Handler):
             values, sources = _info_values(doc)
             warnings.append(properties_note(values, sources, info.has_xmp))
 
-            keep = info.encrypted and not remove_encryption
+            keep = info.encrypted and not remove_encryption and out_password is None
             if info.encrypted and remove_encryption:
                 warnings.append(UNPROTECTED_NOTE)
             self._check_output(src, out, overwrite)  # again, just before writing
@@ -926,6 +968,7 @@ class PdfHandler(Handler):
                 pymupdf.PDF_ENCRYPT_KEEP if keep else pymupdf.PDF_ENCRYPT_NONE,
                 overwrite,
                 source=src,
+                password=out_password,
             )
 
         return ApplyResult(
