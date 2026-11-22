@@ -59,7 +59,7 @@ from .handlers.combine import (
     combine_pdfs,
     sweep_work_folder,
 )
-from .handlers.pdf import PdfHandler, xfa_refusal
+from .handlers.pdf import PASSWORD_SET_NOTE, PdfHandler, output_password_problem, xfa_refusal
 
 __all__ = [
     "ExitCode", "batch_exit_code", "build_parser", "get_version",
@@ -124,6 +124,8 @@ def build_parser() -> argparse.ArgumentParser:
             "  --password-env-for FILE VAR reads one file's password from an environment variable\n"
             "    (repeat for each file); --passwords-stdin reads one line per file, in the order\n"
             "    the files are given (an empty line for a file without a password).\n"
+            "  --out-password-env VAR or --out-password-stdin sets a password for the\n"
+            "    combined file; without one it's saved without a password.\n"
             "  Passwords are never taken on the command line itself."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -157,6 +159,13 @@ def build_parser() -> argparse.ArgumentParser:
                    metavar=("FILE", "VAR"),
                    help="with --combine or --batch: read one file's password from this environment "
                         "variable (repeat for each file)")
+    out_pw = p.add_mutually_exclusive_group()
+    out_pw.add_argument("--out-password-env", metavar="VAR",
+                        help="with --combine: protect the combined file with the password in this "
+                             "environment variable (AES-256)")
+    out_pw.add_argument("--out-password-stdin", action="store_true",
+                        help="with --combine: read the combined file's password from the first line of "
+                             "standard input")
     p.add_argument("--no-box", action="store_true", help="don't draw the white box behind the stamp")
     p.add_argument("--accept-signature-loss", action="store_true",
                    help="stamp a digitally signed file; the copy's signature won't validate")
@@ -210,8 +219,30 @@ def _get_password(args: argparse.Namespace, stdin: TextIO) -> str | None:
     return None
 
 
+def _out_password(args: argparse.Namespace, stdin: TextIO) -> str | None:
+    """The combined file's own password (--out-password-env or --out-password-stdin), or None."""
+    if not (args.out_password_env or args.out_password_stdin):
+        return None
+    if args.out_password_stdin and (args.password_stdin or args.passwords_stdin):
+        other = "--password-stdin" if args.password_stdin else "--passwords-stdin"
+        raise _Fail(ExitCode.USAGE, f"--out-password-stdin can't be used with {other}: both read standard "
+                                    "input. Give one of them with an environment variable instead.")
+    if args.out_password_env:
+        value = os.environ.get(args.out_password_env)
+        if value is None:
+            raise _Fail(ExitCode.PASSWORD, f"The environment variable {args.out_password_env} isn't set.")
+    else:
+        value = stdin.readline().rstrip("\r\n")
+    problem = output_password_problem(value)
+    if problem:
+        raise _Fail(ExitCode.PASSWORD, problem)
+    return value
+
+
 def _run(args: argparse.Namespace, out: TextIO, stdin: TextIO, err: TextIO | None = None) -> ExitCode:
     say = (lambda msg: None) if args.quiet else (lambda msg: out.write(msg + "\n"))
+    if (args.out_password_env or args.out_password_stdin) and not args.combine:
+        raise _Fail(ExitCode.USAGE, "--out-password-env and --out-password-stdin work only with --combine.")
 
     # Partial copies from a stopped run (D-124): told, never deleted from here.
     left = pending.leftovers()
@@ -455,8 +486,10 @@ def _run_multi(
     say: Say, stdin: TextIO, err: TextIO,
 ) -> ExitCode:
     handler = PdfHandler()
+    out_password = None
     if args.combine:
         check_work_folder()  # before any source is read or a password asked for (D-115)
+        out_password = _out_password(args, stdin)  # memory only; refused before any work if unusable
     paths = _multi_inputs(args.input, handler)
     if args.batch and args.out:
         raise _Fail(ExitCode.USAGE, "--batch saves one copy per file: use --out-dir for the folder, not --out.")
@@ -490,7 +523,7 @@ def _run_multi(
     seen = {p: infos[p].fingerprint for p in paths}
     if args.combine:
         return _run_combine(args, handler, paths, passwords, seen, job, name_values, ticked, dedupe,
-                            profile, signed, restricted, say)
+                            profile, signed, restricted, say, out_password)
     return _run_batch(args, handler, paths, passwords, seen, job, name_values, ticked, dedupe,
                       profile, signed, restricted, say, err)
 
@@ -509,7 +542,7 @@ def _confirmations(args: argparse.Namespace, signed: list[str], restricted: list
 def _run_combine(
     args: argparse.Namespace, handler: PdfHandler, paths: list[Path], passwords: dict[Path, str | None],
     seen: dict[Path, SourceFingerprint | None], job: StampJob, name_values: dict[str, str], ticked: list[str] | None, dedupe: list[str],
-    profile: Profile, signed: list[str], restricted: list[str], say: Say,
+    profile: Profile, signed: list[str], restricted: list[str], say: Say, out_password: str | None = None,
 ) -> ExitCode:
     first = paths[0]
     if args.out:
@@ -547,13 +580,17 @@ def _run_combine(
     try:
         result = handler.apply(combined.path, job, out_path,
                                accept_signature_loss=True,  # confirmed above for every signed source
-                               overwrite=args.overwrite)
+                               overwrite=args.overwrite, out_password=out_password)
     finally:
         combined.cleanup()
+    protected = out_password is not None
     for note in combined.notes:
         say(f"Note: {note}")
-    if combined.protection_warning():
-        say(f"Note: {combined.protection_warning()}")
+    warning = combined.protection_warning(password_set=protected)
+    if warning:
+        say(f"Note: {warning}")
+    if protected:
+        say(f"Note: {PASSWORD_SET_NOTE}")
     for w in result.warnings:
         say(f"Note: {w}")
     say(f"Saved: {result.output_path} ({result.pages_stamped} pages from {len(paths)} files)")
@@ -643,6 +680,11 @@ _ERROR_CODES: tuple[tuple[type[StampError], ExitCode], ...] = (
 
 _CONFIRM_FLAGS = {"signature": "--accept-signature-loss", "restrictions": "--accept-restrictions"}
 
+REFUSED_OUT_PASSWORD = (
+    "--out-password isn't an option: a password typed on the command line is kept in PowerShell "
+    "history, the process list and Windows event logs. Use --out-password-env VAR or --out-password-stdin."
+)
+
 REMOVED_PASSWORD_FOR = (
     "--password-for was removed: a password typed on the command line is kept in PowerShell "
     "history, the process list and Windows event logs. Use --password-env-for FILE VAR "
@@ -657,6 +699,8 @@ def _removed_flag(argv: Sequence[str]) -> str | None:
             break
         if a == "--password-for" or a.startswith("--password-for="):
             return REMOVED_PASSWORD_FOR
+        if a == "--out-password" or a.startswith("--out-password="):
+            return REFUSED_OUT_PASSWORD
     return None
 
 
