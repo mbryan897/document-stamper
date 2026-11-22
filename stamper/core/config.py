@@ -103,6 +103,7 @@ class Settings(_Model):
     """Settings that apply to the whole config."""
 
     date_format: str = "MM-DD-YYYY"
+    remember_folders: bool = True  # False: state.json keeps no folders (F-03)
 
     @field_validator("date_format")
     @classmethod
@@ -290,8 +291,16 @@ class Config(_Model):
         raise KeyError(name)
 
     def to_json(self) -> str:
-        """Serialize back to config.json text, keys in schema order."""
-        return json.dumps(self.model_dump(mode="json"), indent=2, ensure_ascii=False) + "\n"
+        """Serialize back to config.json text, keys in schema order.
+
+        ``remember_folders`` is written only when it's off: versions before
+        it refuse a settings key they don't know, so a file that leaves it
+        at the default still loads in them.
+        """
+        data = self.model_dump(mode="json")
+        if data["settings"]["remember_folders"] is True:
+            del data["settings"]["remember_folders"]
+        return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
 
 def _quoted(names: Iterable[str]) -> str:
