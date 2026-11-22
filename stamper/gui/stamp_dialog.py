@@ -517,6 +517,10 @@ class StampDialog(QWidget):
         """The original file name the suggested name is built from."""
         return self.path.name
 
+    def output_password(self) -> str | None:
+        """A password of its own for the saved copy; only a combined file has one."""
+        return None
+
     def _accept_flags(self) -> tuple[bool, bool]:
         """``(accept_signature_loss, accept_restrictions)`` for the save."""
         return (bool(self.signature_tick and self.signature_tick.isChecked()),
@@ -1474,6 +1478,7 @@ class StampDialog(QWidget):
             accept_signature_loss=accept_signature,
             accept_restrictions=accept_restrictions,
             expect=self.info.fingerprint,
+            out_password=self.output_password(),
         ))
 
     def _cancel_save(self) -> None:
