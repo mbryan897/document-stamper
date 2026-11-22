@@ -53,7 +53,12 @@ from .handlers.base import (
     WrongPassword,
 )
 from .handlers.batch import BatchItem, BatchOutcome, Status, check_batch, run_batch
-from .handlers.combine import CombineInput, combine_pdfs
+from .handlers.combine import (
+    CombineInput,
+    check_work_folder,
+    combine_pdfs,
+    sweep_work_folder,
+)
 from .handlers.pdf import PdfHandler, xfa_refusal
 
 __all__ = [
@@ -450,6 +455,8 @@ def _run_multi(
     say: Say, stdin: TextIO, err: TextIO,
 ) -> ExitCode:
     handler = PdfHandler()
+    if args.combine:
+        check_work_folder()  # before any source is read or a password asked for (D-115)
     paths = _multi_inputs(args.input, handler)
     if args.batch and args.out:
         raise _Fail(ExitCode.USAGE, "--batch saves one copy per file: use --out-dir for the folder, not --out.")
@@ -533,7 +540,7 @@ def _run_combine(
     _confirmations(args, signed, restricted, "The combined file")
 
     combined = combine_pdfs(
-        [CombineInput(p, passwords[p], seen[p]) for p in paths], fallback=out_path.parent,
+        [CombineInput(p, passwords[p], seen[p]) for p in paths], sweep=out_path.parent,
         accept_signature_loss=args.accept_signature_loss,
         accept_restrictions=args.accept_restrictions,
     )
@@ -543,8 +550,6 @@ def _run_combine(
                                overwrite=args.overwrite)
     finally:
         combined.cleanup()
-    if combined.location_warning():
-        say(f"Note: {combined.location_warning()}")
     for note in combined.notes:
         say(f"Note: {note}")
     if combined.protection_warning():
@@ -687,6 +692,7 @@ def main(
         err.write(f"Error: {removed}\n")
         return int(ExitCode.USAGE)
     args = build_parser().parse_intermixed_args(argv)
+    sweep_work_folder()  # combine folders left by a stopped run (D-120); silent if it fails
     try:
         return int(_run(args, out, inp, err))  # type: ignore[arg-type]
     except _Fail as e:

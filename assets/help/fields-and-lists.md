@@ -40,7 +40,7 @@ Keep "Make letters uppercase" ticked for fields whose rules contain letters, bec
 
 Text fields can have rules: the formats a value must match. A value is accepted when it matches any one of them; with no rules, any value is accepted. Rules are explained in [Validation rules](validation-rules.md).
 
-**Fill in from the file name when it contains a match**: when the file name contains exactly one value that matches a rule, the field is filled in for the user, who sees "Taken from the file name." Rules with `*`, and advanced rules, are never used for this, because they could match almost anything. If the box is ticked and no rule can be used, a red line under it says so; add a rule without `*`, for example `##-YYYY-######`.
+**Fill in from the file name when it contains a match**: when the file name contains exactly one value that matches a rule, the field is filled in for the user, who sees "Taken from the file name." Rules with `*`, and advanced rules, are never used for this, because they could match almost anything. If the box is ticked and no rule can be used, a red line under it says so; add a rule without `*`, for example `REF-YYYY-####`.
 
 ## Try it
 

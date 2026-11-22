@@ -79,7 +79,6 @@ from ..core.locations import (
     locations,
     save_state,
     state_folder,
-    work_dir,
 )
 from ..core.pending import Leftover
 from ..handlers.base import (
@@ -88,11 +87,12 @@ from ..handlers.base import (
     DocumentInfo,
     Handler,
     PasswordRequired,
+    StampError,
     StampJob,
     WrongPassword,
 )
 from ..handlers.batch import BatchOutcome, Status
-from ..handlers.combine import CombinedFile, remove_stale_temp
+from ..handlers.combine import CombinedFile, check_work_folder, sweep_work_folder
 from ..handlers.pdf import PdfHandler, xfa_refusal
 from .engine import EngineClient, EngineFailure, TaskContext
 from .fonts import MONO_FAMILY
@@ -718,7 +718,7 @@ class MainWindow(QMainWindow):
         loaded = self.load_config(source.path, source)
         # Keep the reason on screen when the config can't be used.
         self.show_drop("" if loaded else self.drop.message.text())
-        remove_stale_temp(work_dir())  # combine folders left by a stopped run (D-120)
+        sweep_work_folder()  # combine folders left by a stopped run (D-120); silent if it fails
         if loaded:
             self._note_config_change()
         self.check_leftovers()
@@ -1225,6 +1225,12 @@ class MainWindow(QMainWindow):
         files = self.files_screen.files()
         if len(files) < 2:
             return
+        if mode == COMBINE:
+            try:
+                check_work_folder()  # before any password prompt or progress bar (D-115)
+            except StampError as e:
+                self.files_screen.show_message(visible(str(e)))
+                return
         pages = sum(f.page_count for f in files)
         if len(files) > LARGE_FILE_COUNT or pages > LARGE_PAGE_COUNT:
             if not self.services.confirm(

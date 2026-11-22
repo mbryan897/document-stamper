@@ -60,7 +60,7 @@ After "Combining N files…" (with a progress bar and **Cancel**), the combined 
 - Values are filled in from the file names only when every file name that contains one agrees. If they disagree, the field is left empty and an amber note lists what each name suggests: check that the files really belong together, then type the value.
 - In the stamp and the file name, the original file name is the first file's. The suggested name ends with `_combined`, and Save As starts in the first file's folder.
 
-The combined file is built in a private work folder in your user profile (`%LOCALAPPDATA%\DocumentStamper\work`) and deleted when you save, cancel or close. If that folder can't be used (for example it's full, or on a network drive), the working copy goes in a hidden folder next to the first file instead, and an amber note says so. That working copy has no password, even if the originals had one, until it's deleted.
+The combined file is built in a private work folder in your user profile (`%LOCALAPPDATA%\DocumentStamper\work`) and deleted when you save, cancel or close. That working copy has no password, even if the originals had one, until it's deleted. If that folder can't be used (for example it can't be written, it's full, or it's on a network drive), the files aren't combined: the message says so before any password is asked for, and nothing is written next to your files.
 
 ## Stamping each file separately
 

@@ -66,7 +66,7 @@ A file with problems can't be imported or restored; the problems are listed.
 | A blank sample page for the Profile settings preview | Windows' temporary folder | Removed when you close Profile settings. |
 | The Send to shortcut, if you add it | `%APPDATA%\Microsoft\Windows\SendTo\` | See [Send to menu and running from a USB drive](send-to-and-portable.md). |
 
-Apart from these, the app writes only the copies you save (and, when combining can't use the work folder, a hidden working folder next to your files; see [Stamping the combined file](several-files.md#stamping-the-combined-file)).
+Apart from these, the app writes only the copies you save.
 
 The full list, including short-lived temporary files, is under [Privacy](about.md#privacy).
 

@@ -14,7 +14,11 @@ from stamper.handlers.base import StampJob
 from tools import make_corpus
 
 REPO = Path(__file__).resolve().parents[1]
-DEFAULT_CONFIG = REPO / "config" / "default.json"
+BUILTIN_CONFIG = REPO / "config" / "default.json"  # the config every build ships
+# The engine and window tests' generic config: identifier, a required doc type in the stamp, and the
+# Source/StampedOn provenance properties. Kept apart so a change to the shipped default doesn't
+# remove what these tests exercise.
+DEFAULT_CONFIG = REPO / "tests" / "fixtures" / "generic_sample.json"
 RECORDS_CONFIG = REPO / "tests" / "fixtures" / "records_sample.json"
 MANUAL_DIR = REPO / "tests" / "corpus" / "manual"
 

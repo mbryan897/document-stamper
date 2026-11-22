@@ -13,7 +13,7 @@ import pymupdf
 import pytest
 
 from stamper.cli import ExitCode, main
-from tests.stamping import DEFAULT_CONFIG, FAKE_ID, RECORDS_CONFIG, REPO
+from tests.stamping import BUILTIN_CONFIG, DEFAULT_CONFIG, FAKE_ID, RECORDS_CONFIG, REPO
 from tools import make_corpus
 
 
@@ -39,7 +39,7 @@ def test_success_with_out(corpus_dir: Path, tmp_path: Path) -> None:
     assert r.code == ExitCode.OK, r.stderr
     assert f"Saved: {out}" in r.stdout
     with pymupdf.open(out) as d:
-        assert f"{FAKE_ID}  |  Report  |  Page 1 of 3" in d[0].get_text()
+        assert f"{FAKE_ID}  |  Page 1 of 3" in d[0].get_text()  # the shipped default's stamp
 
 
 def test_suggested_name_in_source_folder_and_prefill(corpus_dir: Path, tmp_path: Path) -> None:
@@ -73,7 +73,8 @@ def test_every_validation_failure_listed(corpus_dir: Path, tmp_path: Path) -> No
 
 
 def test_missing_required_field_hint(corpus_dir: Path, tmp_path: Path) -> None:
-    r = Run([str(corpus_dir / "letter_portrait.pdf"), "--set", "identifier=X1", "--out-dir", str(tmp_path)])
+    r = Run([str(corpus_dir / "letter_portrait.pdf"), "--config", str(DEFAULT_CONFIG), "--set", "identifier=X1",
+             "--out-dir", str(tmp_path)])
     assert r.code == ExitCode.INVALID_FIELDS
     assert "Document type is required. (use --set doc_type=...)" in r.stderr
 
@@ -206,7 +207,7 @@ def test_name_fields_including_date(corpus_dir: Path, tmp_path: Path) -> None:
 def test_default_config_is_the_shipped_one() -> None:
     from stamper.core.locations import builtin_config_path
 
-    assert builtin_config_path() == DEFAULT_CONFIG
+    assert builtin_config_path() == BUILTIN_CONFIG
 
 
 def _module(*args: str) -> subprocess.CompletedProcess[str]:

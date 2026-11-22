@@ -20,6 +20,7 @@ Usability fixes from a review of the whole program, and the things a released pr
 - Notes reach the reader: the saved screen puts "Check the copy" notes first and can show all of them, and batch results show notes for files that saved.
 - Re-running an interrupted batch says which files already have a stamped copy, instead of calling them files that can't be stamped. "Show in folder" works when copies went to several folders.
 - The notice about a copy left unfinished after a crash names the original.
+- Combining builds its unprotected working copy only in your private work folder. If that folder can't be used, the files aren't combined, instead of the working copy going in a hidden folder next to them. A working folder left by a crash is removed the next time the program starts, from the window or the command line.
 
 ### Profile settings
 
