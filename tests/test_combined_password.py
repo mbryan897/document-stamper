@@ -6,6 +6,7 @@ Synthetic files only. The planted password below is made up for these tests.
 from __future__ import annotations
 
 import io
+import re
 from pathlib import Path
 
 import pymupdf
@@ -22,6 +23,7 @@ from stamper.handlers.pdf import (
     combined_no_password_note,
     needs_check,
     output_password_problem,
+    output_password_strength,
 )
 from tests.gui_support import copy_to
 from tests.stamping import DEFAULT_CONFIG, FAKE_ID, default_job
@@ -106,8 +108,8 @@ def test_out_of_range_passwords_are_refused_before_saving(corpus_dir: Path, tmp_
 
 
 def test_accepted_passwords() -> None:
-    assert output_password_problem("x" * 40) == ""
-    assert output_password_problem("Pass word ~!@#$%^&*()_+{}|:\"<>?") == ""
+    assert output_password_problem("Aa1!" + "x" * 36) == ""
+    assert output_password_problem("Pass word 1 ~!@#$%^&*()_+{}|:\"<>?") == ""
     assert output_password_problem("é") == OUTPUT_PASSWORD_RULE
 
 
@@ -233,3 +235,124 @@ def test_cli_refuses_an_out_of_range_password_before_combining(corpus_dir: Path,
     code, _, err = _run([*_combine_args(corpus_dir, tmp_path, out), "--out-password-env", "OUT_PW"])
     assert code == 6
     assert OUTPUT_PASSWORD_RULE in err and not out.exists()
+
+
+# ------------------------------------------------------------ the 10-character minimum (F-01)
+
+TEN = "Aa1! tenpw"  # exactly 10: upper, lower, digit, symbol and a space
+FORTY = "Aa1! " * 8
+
+
+def _short_password_pdf(folder: Path, password: str = "abc") -> Path:
+    """A synthetic original locked with a password far shorter than the rule allows for a new one."""
+    path = folder / "short_pw_original.pdf"
+    with pymupdf.open() as doc:
+        doc.new_page().insert_text((72, 72), "Synthetic page")
+        doc.save(path, encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw=password, owner_pw=password)
+    return path
+
+
+def test_length_limits() -> None:
+    assert (len(TEN), len(FORTY)) == (10, 40)
+    assert output_password_problem(TEN) == "" and output_password_problem(FORTY) == ""
+    assert output_password_problem(TEN[:9]) == OUTPUT_PASSWORD_RULE
+    assert output_password_problem(FORTY + "x") == OUTPUT_PASSWORD_RULE
+    assert output_password_problem("") == "The password can't be empty."  # unchanged
+
+
+@pytest.mark.parametrize("missing", ["aa1! tenpw", "AA1! TENPW", "Aax! tenpw", "Aa1x tenpw", "Aa1  tenpw"])
+def test_each_kind_of_character_is_needed(missing: str) -> None:
+    assert len(missing) == 10 and output_password_problem(missing) == OUTPUT_PASSWORD_RULE  # a space isn't a symbol
+
+
+def test_ten_spaces_and_symbols_alone_are_refused() -> None:
+    assert output_password_problem("!@ #$ %^ &*") == OUTPUT_PASSWORD_RULE
+    assert output_password_problem("A1 #$ %^ &b") == ""  # the same, with the other three kinds in it
+
+
+def test_strength_meter() -> None:
+    assert output_password_strength("") == (0, "nothing typed")
+    assert output_password_strength(TEN[:9]) == (1, "doesn't meet the rule")
+    assert output_password_strength(TEN) == (2, "fair")
+    assert output_password_strength(TEN + "xyzw") == (3, "good")
+    assert output_password_strength(FORTY) == (4, "strong")
+
+
+def test_a_short_password_is_refused_before_the_source_is_opened(corpus_dir: Path, tmp_path: Path,
+                                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    opened: list[object] = []
+    real = pymupdf.open
+    monkeypatch.setattr(pymupdf, "open", lambda *a, **kw: opened.append(a) or real(*a, **kw))
+    (tmp_path / "in").mkdir()
+    src = copy_to(corpus_dir / "letter_portrait.pdf", tmp_path / "in")
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    with pytest.raises(StampError, match="^" + re.escape(OUTPUT_PASSWORD_RULE) + "$"):
+        PdfHandler().apply(src, default_job(), out_dir / "copy.pdf", out_password=TEN[:9])
+    assert opened == [] and list(out_dir.iterdir()) == []
+
+
+def test_a_copy_saved_with_ten_characters_opens_only_with_them(corpus_dir: Path, tmp_path: Path) -> None:
+    out = tmp_path / "copy.pdf"
+    PdfHandler().apply(copy_to(corpus_dir / "letter_portrait.pdf", tmp_path), default_job(), out, out_password=TEN)
+    with pymupdf.open(out) as doc:
+        assert doc.needs_pass and not doc.authenticate(TEN[:9]) and not doc.authenticate("Aa1! tenpW")
+    with pymupdf.open(out) as doc:
+        assert doc.authenticate(TEN) and doc.metadata["encryption"] == "Standard V5 R6 256-bit AES"
+
+
+def test_an_original_with_a_short_password_still_opens_and_keep_still_saves(tmp_path: Path) -> None:
+    src = _short_password_pdf(tmp_path)
+    handler = PdfHandler()
+    assert handler.inspect(src, "abc").needs_password
+    out = tmp_path / "copy.pdf"
+    handler.apply(src, default_job(), out, password="abc")  # keep: no new password, protection not removed
+    with pymupdf.open(out) as doc:
+        assert doc.needs_pass and doc.authenticate("abc")
+
+
+def test_help_and_security_policy_quote_the_rule_exactly() -> None:
+    repo = Path(__file__).resolve().parent.parent
+    for name in ("SECURITY.md", "assets/help/several-files.md", "assets/help/command-line.md",
+                 "assets/help/protected-files.md"):
+        text = (repo / name).read_text(encoding="utf-8")
+        assert OUTPUT_PASSWORD_RULE in text, name
+        assert "up to 40 characters" not in text, name
+
+
+def _cli_combine_with(corpus_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                      how: str, password: str) -> tuple[int, str, Path, list[object]]:
+    monkeypatch.setenv("SRC_PW", PW)
+    inspected: list[object] = []
+    real = PdfHandler.inspect
+    monkeypatch.setattr(PdfHandler, "inspect", lambda self, *a, **kw: inspected.append(a) or real(self, *a, **kw))
+    out = tmp_path / "combined.pdf"
+    args = _combine_args(corpus_dir, tmp_path, out)
+    if how == "env":
+        monkeypatch.setenv("OUT_PW", password)
+        code, _, err = _run([*args, "--out-password-env", "OUT_PW"])
+    else:
+        code, _, err = _run([*args, "--out-password-stdin"], f"{password}\n")
+    return code, err, out, inspected
+
+
+@pytest.mark.parametrize("how", ["env", "stdin"])
+@pytest.mark.parametrize("password", [TEN[:9], FORTY + "x"])
+def test_cli_refuses_a_password_outside_10_to_40_before_any_file_is_opened(
+        corpus_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, how: str, password: str) -> None:
+    code, err, out, inspected = _cli_combine_with(corpus_dir, tmp_path, monkeypatch, how, password)
+    assert code == 6
+    assert err.strip().endswith(OUTPUT_PASSWORD_RULE) and err.count("The password") == 1
+    assert password not in err and inspected == [] and not out.exists()
+
+
+@pytest.mark.parametrize("how", ["env", "stdin"])
+@pytest.mark.parametrize("password", [TEN, FORTY])
+def test_cli_accepts_10_and_40_characters(corpus_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                          how: str, password: str) -> None:
+    code, err, out, _ = _cli_combine_with(corpus_dir, tmp_path, monkeypatch, how, password)
+    assert code == 0, err
+    with pymupdf.open(out) as doc:
+        assert not doc.authenticate(password[:-1] + "#")
+    with pymupdf.open(out) as doc:
+        assert doc.authenticate(password)

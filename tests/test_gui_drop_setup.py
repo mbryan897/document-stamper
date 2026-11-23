@@ -127,14 +127,14 @@ def test_no_drop_screen_wording_says_config(qtbot: QtBot, fake: FakeServices, lo
 
 
 def test_settings_file_path_shows_hidden_characters(qtbot: QtBot, fake: FakeServices, tmp_path: Path) -> None:
-    odd = tmp_path / "rec‮ords.json"
+    odd = tmp_path / "rec\u202eords.json"
     shutil.copyfile(RECORDS_CONFIG, odd)
     make_app()
     w = MainWindow(config_path=odd, services=fake.services(), today=TODAY,
                    sendto_shortcut=tmp_path / "SendTo" / sendto.SHORTCUT_NAME)
     qtbot.addWidget(w)
     try:
-        assert "⟨U+202E⟩" in w.drop.config_label.text() and "‮" not in w.drop.config_label.text()
+        assert "⟨U+202E⟩" in w.drop.config_label.text() and "\u202e" not in w.drop.config_label.text()
     finally:
         close_window(w)
 
@@ -176,7 +176,7 @@ def test_link_shows_while_the_shortcut_is_missing_and_adds_it(qtbot: QtBot, fake
 @pytest.mark.usefixtures("on_windows")
 def test_link_stays_with_the_reason_when_adding_fails(qtbot: QtBot, fake: FakeServices, locs: Locations,
                                                      monkeypatch: pytest.MonkeyPatch) -> None:
-    why = "Windows couldn't save the shortcut x‮.lnk (error 0x80070005)."
+    why = "Windows couldn't save the shortcut x\u202e.lnk (error 0x80070005)."
 
     def refuse(lnk: Path | None = None, what: object = None) -> Path:
         raise sendto.SendToError(why)

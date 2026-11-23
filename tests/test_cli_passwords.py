@@ -144,3 +144,16 @@ def test_help_no_longer_offers_password_for() -> None:
     text = build_parser().format_help()
     assert "--password-for" not in text
     assert "--password-env-for" in text and "--passwords-stdin" in text
+
+
+def test_an_original_with_a_short_password_opens_and_keeps_it(tmp_path: Path) -> None:
+    """The 10-character minimum is for a new password only; an original's is whatever it has (F-01)."""
+    src = tmp_path / "short_pw_original.pdf"
+    with pymupdf.open() as doc:
+        doc.new_page().insert_text((72, 72), "Synthetic page")
+        doc.save(src, encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="abc", owner_pw="abc")
+    out = tmp_path / "copy.pdf"
+    r = Run([str(src), "--password-stdin", "--out", str(out), *BASE], "abc\n")
+    assert r.code == ExitCode.OK, r.stderr
+    with pymupdf.open(out) as doc:
+        assert doc.needs_pass and doc.authenticate("abc") and FAKE_ID in doc[0].get_text()

@@ -293,10 +293,10 @@ def test_copy_details_for_the_builtin_and_for_none() -> None:
 def test_copy_details_shows_hidden_characters_in_the_path(tmp_path: Path) -> None:
     from stamper.core.locations import SourceKind, describe
 
-    odd = tmp_path / "rec‮ords.json"
+    odd = tmp_path / "rec\u202eords.json"
     shutil.copyfile(RECORDS_CONFIG, odd)
     text = copy_details(describe(odd, SourceKind.OTHER))
-    assert "‮" not in text and "⟨U+202E⟩" in text
+    assert "\u202e" not in text and "⟨U+202E⟩" in text
     assert "Settings file: opened for this session" in text
 
 

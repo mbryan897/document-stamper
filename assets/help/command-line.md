@@ -82,7 +82,7 @@ A file that needs a password and didn't get one stops with exit code 6 and names
 
 ### A password for the combined file
 
-A combined file is saved without a password unless you give one with `--out-password-env VAR` or `--out-password-stdin`. It is then saved with AES-256 encryption: the password is needed to open it, and nothing else is restricted. It can have up to 40 characters: unaccented letters, digits, spaces and the symbols on a US keyboard; anything else stops with exit code 6 before anything is combined. The command never asks whether you want one. When some of the files needed a password and none was given for the combined file, a note says so.
+A combined file is saved without a password unless you give one with `--out-password-env VAR` or `--out-password-stdin`. It is then saved with AES-256 encryption: the password is needed to open it, and nothing else is restricted. The password needs 10 to 40 characters, including an upper-case letter, a lower-case letter, a digit and a symbol; it can use unaccented letters, digits, spaces and the symbols on a US keyboard. Anything else stops with exit code 6 before any of the files is opened. The command never asks whether you want one. When some of the files needed a password and none was given for the combined file, a note says so.
 
 ## Signed and restricted files
 

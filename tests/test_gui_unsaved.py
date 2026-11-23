@@ -243,7 +243,7 @@ def test_title_name_keeps_brackets_and_is_capped() -> None:
     assert _title_name("a[*]b.pdf") == "a[*][*]b.pdf"
     long = _title_name("x" * 300 + ".pdf")
     assert len(long) == MAX_TITLE_NAME and long.endswith("…")
-    assert _title_name("evil‮fdp.exe") == "evil⟨U+202E⟩fdp.exe"
+    assert _title_name("evil\u202efdp.exe") == "evil⟨U+202E⟩fdp.exe"
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="'*' can't be in a Windows file name")

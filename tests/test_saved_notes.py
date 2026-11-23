@@ -181,7 +181,7 @@ def test_saved_screen_names_the_original(qtbot: QtBot, window: MainWindow) -> No
     saved = window.saved
     saved.show_result(_result([PROPS]), label="Case number", identifier="X", signed=True, source=src)
     label = saved.original_label
-    shown = str(src).replace("‮", "⟨U+202E⟩")
+    shown = str(src).replace("\u202e", "⟨U+202E⟩")
     assert label.text() == f"{shown} – unchanged, still digitally signed"
     assert "return<b>x<b>" in label.text()
     assert label.textFormat() == Qt.TextFormat.PlainText

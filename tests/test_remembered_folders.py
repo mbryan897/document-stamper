@@ -207,7 +207,7 @@ def test_batch_choice_is_remembered_and_preselected(qtbot: QtBot, window: MainWi
                                                    corpus_dir: Path, tmp_path: Path) -> None:
     files = [copy_to(corpus_dir / n, tmp_path) for n in ("letter_portrait.pdf", "rotate_90.pdf")]
     tiny = make_tiny(tmp_path / "tiny.pdf")  # can't be stamped: makes the pre-run question show both groups
-    out = tmp_path / "out‮fdp.exe"  # a hidden character in the folder name
+    out = tmp_path / "out\u202efdp.exe"  # a hidden character in the folder name
     out.mkdir()
     d = _batch(qtbot, window, [*files, tiny])
     assert d.next_to_radio.isChecked() and d.out_folder is None  # nothing remembered yet

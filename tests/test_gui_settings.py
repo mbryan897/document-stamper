@@ -918,7 +918,7 @@ def test_user_folder_config_has_no_shared_folder_line(qtbot: QtBot, fake: FakeSe
 
 def test_names_in_the_save_summary_are_shown_as_text(records_window: MainWindow, fake: FakeServices) -> None:
     s = _settings(records_window)
-    name = "<b>x</b>‮"
+    name = "<b>x</b>\u202e"
     s.profiles_page.name.setText(name)
     s.profiles_page.name.textEdited.emit(name)
     s.changed()

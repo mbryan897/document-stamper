@@ -93,3 +93,44 @@ def test_security_policy_lists_what_is_stored_and_quotes_the_notes_as_worded() -
                    UNPROTECTED_NOTE, KEEP_PROTECTION, OUTPUT_PASSWORD_RULE):
         assert needed in section, needed
     assert not re.search(r"\b[DOUF]-\d{2,3}\b|UX-\d{3}", section)  # plain language: no planning references
+
+
+# F-04: a raw bidirectional control character in source can make code read differently from how it
+# runs. Escapes (\u202e) are fine; the characters themselves are not, in product code or tests.
+_BIDI_CONTROLS = re.compile("[\u202a-\u202e\u2066-\u2069]")
+_SCANNED_DIRS = ("stamper", "tests", "tools", "packaging", "config", "assets/help")
+
+
+def _text_files() -> list[Path]:
+    """Every text file under the scanned folders, plus those at the repo root; no binaries or generated corpus."""
+    generated = REPO / "tests" / "corpus" / "generated"
+    paths = [p for p in REPO.iterdir() if p.is_file()]
+    for top in _SCANNED_DIRS:
+        paths += [p for p in (REPO / top).rglob("*") if p.is_file() and "__pycache__" not in p.parts
+                  and not p.is_relative_to(generated)]
+    out = []
+    for p in sorted(paths):
+        data = p.read_bytes()
+        if b"\0" in data:
+            continue
+        try:
+            data.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        out.append(p)
+    return out
+
+
+def test_no_raw_bidirectional_control_characters_in_text_files() -> None:
+    found = [f"{p.relative_to(REPO).as_posix()}:{n}: U+{ord(m.group()):04X}"
+             for p in _text_files()
+             for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1)
+             for m in _BIDI_CONTROLS.finditer(line)]
+    assert not found, "Raw bidirectional control characters; write them as \\u escapes:\n" + "\n".join(found)
+
+
+def test_the_bidi_scan_reads_the_folders_it_names() -> None:
+    names = {p.relative_to(REPO).as_posix() for p in _text_files()}
+    assert {"stamper/handlers/pdf.py", "tests/test_hidden_characters.py", "config/default.json",
+            "assets/help/protected-files.md", "SECURITY.md", "CHANGELOG.md"} <= names
+    assert not any(n.startswith("tests/corpus/generated/") for n in names)

@@ -17,10 +17,10 @@ from tests.gui_support import WAIT_MS, copy_to, fake, open_dialog, type_into, wi
 from tests.stamping import DEFAULT_CONFIG, FAKE_ID
 
 HIDDEN = {
-    "‮": "right-to-left override",
-    "‭": "left-to-right override",
-    "⁦": "left-to-right isolate",
-    "⁧": "right-to-left isolate",
+    "\u202e": "right-to-left override",
+    "\u202d": "left-to-right override",
+    "\u2066": "left-to-right isolate",
+    "\u2067": "right-to-left isolate",
     "​": "zero width space",
     "‌": "zero width non-joiner",
     "‍": "zero width joiner",
@@ -28,7 +28,7 @@ HIDDEN = {
     "﻿": "zero width no-break space",
     "­": "soft hyphen",
 }
-SPOOF = "report‮fdp.exe.pdf"  # displays as "reportexe.pdf.pdf"-ish in many viewers
+SPOOF = "report\u202efdp.exe.pdf"  # displays as "reportexe.pdf.pdf"-ish in many viewers
 
 
 @pytest.mark.parametrize("ch", list(HIDDEN))
@@ -93,7 +93,7 @@ def test_cli_shows_a_spoofed_name_escaped(corpus_dir: Path, tmp_path: Path) -> N
     assert code == ExitCode.OK, err.getvalue()
     text = out.getvalue()
     assert "report⟨U+202E⟩fdp.exe.pdf" in text
-    assert "‮" not in text
+    assert "\u202e" not in text
 
 
 def test_cli_refuses_a_hidden_character_in_set(corpus_dir: Path) -> None:
@@ -115,7 +115,7 @@ def test_files_list_shows_a_spoofed_name_escaped(qtbot: QtBot, window: MainWindo
     qtbot.waitUntil(lambda: fs.list.count() == 2, timeout=WAIT_MS)
     texts = [fs.list.item(i).text() for i in range(fs.list.count())]
     assert any("report⟨U+202E⟩fdp.exe.pdf" in t for t in texts), texts
-    assert not any("‮" in t for t in texts)
+    assert not any("\u202e" in t for t in texts)
     assert fs.paths()[0] == spoof  # the real path is kept for opening the file
 
 
