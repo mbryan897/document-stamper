@@ -187,6 +187,7 @@ def test_one_note_lists_every_page(tmp_path: Path) -> None:
     plan = H.plan(src, default_job())
     assert _covers(plan.warnings) == [
         "On pages 3, 7 the white box covers text that was already on the page. "
+        "The covered text is still in the file: the box is not redaction. "
         "Choose another position under Placement, or turn off the white box."]
     assert _covers(H.apply(src, default_job(), tmp_path / "out.pdf").warnings) == _covers(plan.warnings)
 

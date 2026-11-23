@@ -48,7 +48,7 @@ A combined file is a new document built from the originals' pages, then stamped 
 - Bookmarks are rebuilt: one for each original file, with that file's own bookmarks under it. The list of layers is rebuilt, and hidden layers stay hidden. Attached files are kept, renamed after the file each came from.
 - Form fields with the same name in two files are renamed so they stay separate. Field scripts that refer to another field by name aren't changed, so calculated fields may not work as before; a note says when.
 - Not kept: page labels (such as "i, ii, iii"), accessibility tags, the originals' document properties, their XMP metadata, their earlier versions and unused objects.
-- The combined file has *no password or restrictions*, whatever the originals had.
+- The combined file has *no password or restrictions*, whatever the originals had, unless you set a password for it. See [A password for the combined file](several-files.md#a-password-for-the-combined-file).
 - A `StamperSources` property records the original file names (names only, never folders) and the pages each one became, for example `report_part1.pdf|1-3`. Viewers show it with the custom properties.
 - A property that uses `{original_name}`, such as `Source`, names only the first original file; `StamperSources` lists them all.
 

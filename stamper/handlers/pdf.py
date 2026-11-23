@@ -295,6 +295,7 @@ _REPLACED_NOTE_START = "Document property "
 # The page list comes first ("On pages 3, 7"), so the fixed part is matched at the end:
 # "On page" alone would also match the dialog's grouped form-field note (D-066).
 COVERS_TEXT_NOTE_END = (" the white box covers text that was already on the page. "
+                        "The covered text is still in the file: the box is not redaction. "
                         "Choose another position under Placement, or turn off the white box.")
 
 
