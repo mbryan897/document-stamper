@@ -2,6 +2,12 @@
 
 The newest changes are first. Each released version lists what changed since the one before.
 
+## 1.1.1
+
+### Passwords
+
+- A password you set for a saved copy now needs 10 to 40 characters, including an upper-case letter, a lower-case letter, a digit and a symbol. Spaces are allowed and count towards the length. The rule shows under the password boxes before you type, the save button stays unavailable until the password meets it, and a meter shows how strong it is. The command line refuses a password that breaks the rule before it opens any file. The password that opens an original isn't checked, and keeping the original's password still works whatever its length.
+
 ## 1.1.0
 
 Usability fixes from a review of the whole program, and the things a released program is expected to have.
