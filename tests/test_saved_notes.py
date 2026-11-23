@@ -68,6 +68,7 @@ def _shown(widget: QLabel | object) -> list[str]:
     "protection, encrypt this file or keep it only on encrypted drives and shares.",
     'Document property Title was "Old" in the original; the copy has "New".',
     "On pages 3, 7 the white box covers text that was already on the page. "
+    "The covered text is still in the file: the box is not redaction. "
     "Choose another position under Placement, or turn off the white box.",
 ])
 def test_check_the_copy_notes(note: str) -> None:
@@ -234,3 +235,10 @@ def test_batch_check_lists_a_passing_files_note(qtbot: QtBot, window: MainWindow
     qtbot.waitUntil(lambda: "Saved" in _shown(window.batch_saved.rows_widget), timeout=WAIT_MS)
     texts = _shown(window.batch_saved.rows_widget)
     assert "Saved, with notes (2)" in texts and "Saved" in texts  # shrunk, and the box covers the receipt's title
+
+
+def test_the_covers_text_note_says_the_box_is_not_redaction() -> None:
+    """F-02: the warning itself says the covered text stays in the file, and is still a "Check the copy" note."""
+    note = pdf.covers_text_note([3, 7])
+    assert "The covered text is still in the file: the box is not redaction." in note
+    assert note.endswith(pdf.COVERS_TEXT_NOTE_END) and pdf.needs_check(note)
