@@ -7,13 +7,14 @@ plain functions instead, and nothing modal ever blocks a test run.
 
 from __future__ import annotations
 
+import functools
 import os
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import QSettings, Qt, QUrl
 from PySide6.QtGui import QColor, QDesktopServices
 from PySide6.QtWidgets import (
     QColorDialog,
@@ -60,29 +61,77 @@ class Services:
     ask_folder: Callable[[QWidget, Path], Path | None] = lambda _p, _s: None
 
 
+def _dialog_settings() -> QSettings:
+    """Where Qt's file dialog keeps its own settings (the registry on Windows)."""
+    settings = QSettings(QSettings.Scope.UserScope, "QtProject")
+    settings.beginGroup("FileDialog")
+    return settings
+
+
+def _leaves_no_folder[**P, R](ask: Callable[P, R]) -> Callable[P, R]:
+    """Undo what Qt's file dialog saves about itself (F-03).
+
+    Each time a QFileDialog is used, Qt saves the folder it was last in
+    (``lastVisited``, ``history``) under ``QtProject`` / ``FileDialog`` in the
+    user's settings, whatever the config's ``remember_folders`` says, and Qt
+    has no switch for it. So the values are read before the dialog and put
+    back straight after: what another Qt program left there stays as it was,
+    and nothing of ours is added. Never raises; a dialog is never blocked by it.
+    """
+
+    @functools.wraps(ask)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        try:
+            before = _dialog_settings()
+            was = {key: before.value(key) for key in before.allKeys()}
+        except Exception:  # noqa: BLE001 - best effort by design
+            was = None
+        try:
+            return ask(*args, **kwargs)
+        finally:
+            if was is not None:
+                try:
+                    after = _dialog_settings()
+                    for key in after.allKeys():
+                        if key not in was:
+                            after.remove(key)
+                        elif after.value(key) != was[key]:
+                            after.setValue(key, was[key])
+                    after.sync()
+                except Exception:  # noqa: BLE001, S110 - best effort by design
+                    pass
+
+    return wrapper
+
+
+@_leaves_no_folder
 def _ask_open_file(parent: QWidget, start: Path | None) -> Path | None:
     name, _ = QFileDialog.getOpenFileName(
         parent, "Choose a PDF to stamp", str(start or ""), "PDF files (*.pdf)")
     return Path(name) if name else None
 
 
+@_leaves_no_folder
 def _ask_open_files(parent: QWidget, start: Path | None) -> list[Path] | None:
     names, _ = QFileDialog.getOpenFileNames(
         parent, "Choose PDFs to stamp", str(start or ""), "PDF files (*.pdf)")
     return [Path(n) for n in names] if names else None
 
 
+@_leaves_no_folder
 def _ask_folder(parent: QWidget, start: Path) -> Path | None:
     name = QFileDialog.getExistingDirectory(parent, "Save the stamped copies in", str(start))
     return Path(name) if name else None
 
 
+@_leaves_no_folder
 def _ask_config_file(parent: QWidget) -> Path | None:
     name, _ = QFileDialog.getOpenFileName(
         parent, "Open a config file", "", "Config files (*.json)")
     return Path(name) if name else None
 
 
+@_leaves_no_folder
 def _ask_save_path(parent: QWidget, suggested: Path) -> Path | None:
     # The window refuses existing files itself (D-075), so the dialog's own
     # "Replace?" question is turned off rather than offering an overwrite.
@@ -115,12 +164,14 @@ def _confirm(parent: QWidget, title: str, text: str, yes_label: str) -> bool:
     return box.clickedButton() is yes
 
 
+@_leaves_no_folder
 def _ask_import_file(parent: QWidget, start: Path | None = None, name_filter: str | None = None) -> Path | None:
     name, _ = QFileDialog.getOpenFileName(
         parent, "Import a config file", str(start or ""), name_filter or "Config files (*.json)")
     return Path(name) if name else None
 
 
+@_leaves_no_folder
 def _ask_export_path(parent: QWidget, suggested: Path) -> Path | None:
     name, _ = QFileDialog.getSaveFileName(
         parent, "Export the config", str(suggested), "Config files (*.json)")
