@@ -84,6 +84,19 @@ This makes two unsigned test builds:
 
 Run the build from a normal (not administrator) terminal.
 
+### Release builds on GitHub
+
+Pushing a tag `v<version>` runs `.github/workflows/release.yml`: a GitHub-hosted Windows machine runs `packaging\build.ps1 -Release` (clean tree, full test suite, `pip-audit`, the exe checks) from that tag, records a build attestation for the exe, and makes a draft release with `DocumentStamper.exe`, `SHA256SUMS.txt` and `BUILD-INFO.txt`. The draft is published by hand. The tag must match the version in `pyproject.toml`.
+
+To check a released exe against the build that made it:
+
+```powershell
+Get-FileHash .\DocumentStamper.exe -Algorithm SHA256
+gh attestation verify .\DocumentStamper.exe --repo mbryan897/document-stamper
+```
+
+`.github/workflows/tests.yml` runs the full test suite on Windows for every pull request and every change to `main`. Both workflows use no secrets, and their actions are pinned to full commit IDs.
+
 ## Command line
 
 `stamper-cli` always runs the command line. `python -m stamper` does too whenever an option is given (add `--` before a lone file name to force it).

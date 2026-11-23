@@ -14,7 +14,10 @@
 #                                          Authenticode-sign the exe with a certificate from
 #                                          your certificate store (H-5)
 #   Other switches: -FullTests, -SkipTests, -SkipAudit (offline only; never release),
-#                   -RefreshIconCache (ask Explorer to redraw icons afterwards)
+#                   -RefreshIconCache (ask Explorer to redraw icons afterwards),
+#                   -AllowAdministrator (only for a throwaway build machine whose only
+#                   account is an administrator, such as a hosted CI runner; see
+#                   .github\workflows\release.yml)
 #
 # Output (nothing else is left in dist\):
 #   dist\DocumentStamper.exe   THE portable app. One file; runs by itself from any folder or
@@ -25,7 +28,7 @@
 #                              own (its exe needs the _internal folder beside it)
 #
 # Stops on any of these:
-#   - run as administrator
+#   - run as administrator (unless -AllowAdministrator)
 #   - Python isn't 3.14 (a note if it isn't 3.14.6, the tested version)
 #   - a bundled font doesn't match the SHA-256 in assets\fonts\SOURCE.txt
 #   - an icon file is missing (one older than the master picture is only a note)
@@ -50,6 +53,7 @@ param(
     [switch]$SkipAudit,
     [switch]$RegenerateIcons,
     [switch]$RefreshIconCache,
+    [switch]$AllowAdministrator,
     [string]$SignThumbprint = "",
     [string]$TimestampUrl = ""
 )
@@ -78,7 +82,10 @@ function Note([string]$Message) { Write-Host "Note: $Message" -ForegroundColor Y
 Step "Checking the build environment"
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Fail "this terminal is running as administrator. Open a normal PowerShell and run the build there."
+    if (-not $AllowAdministrator) {
+        Fail "this terminal is running as administrator. Open a normal PowerShell and run the build there."
+    }
+    Note "running as administrator (-AllowAdministrator). Use this only on a throwaway build machine."
 }
 if ($Release) {
     if ($SkipAudit) { Fail "-Release can't be combined with -SkipAudit." }

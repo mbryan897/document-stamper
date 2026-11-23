@@ -1,0 +1,47 @@
+# Runs the full test suite on Windows for every pull request and every change to main.
+# Read-only: this workflow can't change the repository and uses no secrets.
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: pytest on Windows
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14.6"
+
+      - name: Install from the hash-pinned lock
+        shell: powershell
+        run: |
+          python -m venv .venv
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          .\.venv\Scripts\Activate.ps1
+          python -m pip install --require-hashes -r requirements\dev.lock
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -m pip install --no-deps --no-build-isolation -e .
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - name: Run the test suite
+        shell: powershell
+        run: |
+          .\.venv\Scripts\Activate.ps1
+          python -m pytest -q -p no:cacheprovider
+          exit $LASTEXITCODE
