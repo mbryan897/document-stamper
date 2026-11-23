@@ -86,6 +86,7 @@ __all__ = [
     "font_path",
     "needs_check",
     "output_password_problem",
+    "output_password_strength",
     "stamp_font",
     "write_sample_page",
     "xfa_refusal",
@@ -284,9 +285,14 @@ PASSWORD_SET_NOTE = "This file opens only with the password you set. Whoever rec
 # What an output password may be: PyMuPDF 1.28.2 refuses more than 40 characters, and MuPDF hashes
 # the text as typed, without the SASLprep normalisation the PDF format asks readers to apply, so
 # anything outside printable ASCII may not open in another reader with the same keystrokes.
+# At least 10 characters, with each of the four kinds below (F-01); a space counts towards the
+# length but isn't a symbol. Only for a password being set: one that opens an original is never checked.
+MIN_OUTPUT_PASSWORD = 10
 MAX_OUTPUT_PASSWORD = 40
-OUTPUT_PASSWORD_RULE = ("The password can have up to 40 characters: unaccented letters, "
-                        "digits, spaces and the symbols on a US keyboard.")
+OUTPUT_PASSWORD_SYMBOLS = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
+OUTPUT_PASSWORD_RULE = ("The password needs 10 to 40 characters, including an upper-case letter, a lower-case "
+                        "letter, a digit and a symbol; it can use unaccented letters, digits, spaces and the "
+                        "symbols on a US keyboard.")
 # Information, not "Check the copy" (UX-030): what a receiver may see, since XMP is never touched (D-051).
 XMP_NOTE = ("The original has a second set of properties (XMP) that this copy keeps unchanged. "
             "Some programs may show the original's title and dates for this copy.")
@@ -329,9 +335,30 @@ def output_password_problem(password: str) -> str:
     """Why ``password`` can't protect a saved copy, as a sentence; "" when it can."""
     if not password:
         return "The password can't be empty."
-    if len(password) > MAX_OUTPUT_PASSWORD or not (password.isascii() and password.isprintable()):
+    if (not MIN_OUTPUT_PASSWORD <= len(password) <= MAX_OUTPUT_PASSWORD
+            or not (password.isascii() and password.isprintable())
+            or not all(any(test(c) for c in password)
+                       for test in (str.isupper, str.islower, str.isdigit, OUTPUT_PASSWORD_SYMBOLS.__contains__))):
         return OUTPUT_PASSWORD_RULE
     return ""
+
+
+def output_password_strength(password: str) -> tuple[int, str]:
+    """A rough strength for the meter under a new password, 0 to 4 with a word; no dictionary check.
+
+    Every password the rule accepts already has all four kinds of character, so
+    beyond the rule only length counts: 0 nothing typed, 1 the rule isn't met,
+    then 2, 3 and 4 for under 14, under 20, and 20 or more characters.
+    """
+    if not password:
+        return 0, "nothing typed"
+    if output_password_problem(password):
+        return 1, "doesn't meet the rule"
+    if len(password) < 14:
+        return 2, "fair"
+    if len(password) < 20:
+        return 3, "good"
+    return 4, "strong"
 
 
 def needs_check(note: str) -> bool:

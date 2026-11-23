@@ -12,7 +12,7 @@ When the original is protected (it needs a password to open, or has owner restri
 
 - **Keep the original's password and permissions**: the copy opens with the same password and has the same restrictions.
 - **No password**: the copy has no password and no restrictions. A note under **Check the copy** says so, and that to keep the same level of protection you should encrypt the file or keep it only on encrypted drives and shares.
-- **Set a password**: type a new password twice. The copy is saved with AES-256 encryption, opens only with that password, and has no restrictions. It can have up to 40 characters: unaccented letters, digits, spaces and the symbols on a US keyboard.
+- **Set a password**: type a new password twice. The copy is saved with AES-256 encryption, opens only with that password, and has no restrictions. The password needs 10 to 40 characters, including an upper-case letter, a lower-case letter, a digit and a symbol; it can use unaccented letters, digits, spaces and the symbols on a US keyboard. A meter under the boxes shows how strong it is.
 
 When the original needed a password to open, nothing is chosen for you and **Stamp and save…** waits until you pick one. When it only has owner restrictions, keeping them is chosen already. A new password isn't prefilled, isn't saved anywhere, and is forgotten once the copy is saved or you leave the screen.
 
