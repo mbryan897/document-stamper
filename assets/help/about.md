@@ -50,6 +50,7 @@ Document Stamper never connects to the internet or to any network, sends nothing
 - The settings file, `config.json`, when you save Profile settings, with `config.json.bak` and up to five dated backups beside it; and a copy where you choose when you use **Export…**.
 - `state.json` in `%APPDATA%\DocumentStamper`: the last profile, the last folders used (unless the settings file turns that off) and the last settings file found. Never anything typed into a field.
 - The Send to shortcut, `Document Stamper.lnk` in `%APPDATA%\Microsoft\Windows\SendTo`, only when you add it.
+- The last folder used in an Open or Save window, in the Windows registry under `HKCU\Software\QtProject\OrganizationDefaults\FileDialog`. Qt, the part the window is built with, keeps this itself, whether or not the settings file turns folder memory off, and **Remove my settings from this computer…** doesn't remove it.
 - While Profile settings is open, a made-up one-page sample PDF for the preview, in a temporary folder (`%TEMP%\stamper-sample-…`), removed when you leave Profile settings.
 - Each time the single-file program starts, it unpacks itself into a temporary folder (`%TEMP%\_MEI…`). The folder is removed when the program closes normally, but can be left behind if it's stopped by force.
 - To check that a folder can be written to, and when it saves `config.json` or `state.json`, a short-lived `~stamper-….tmp` file that is removed straight away.

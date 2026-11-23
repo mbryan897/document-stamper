@@ -240,7 +240,7 @@ def test_privacy_paragraph_names_what_the_code_writes() -> None:
     privacy = md.split("## Privacy", 1)[1].split("\n## ", 1)[0]
     for thing in ("never connects", "stamped copy", "~stamper-", "pending", r"DocumentStamper\work", "~stamper-combine-",
                   "config.json.bak", "state.json", "Send to", "stamper-sample-", "_MEI", "Export",
-                  "where the temporary file is", "Passwords are never written"):
+                  "where the temporary file is", r"QtProject\OrganizationDefaults\FileDialog", "Passwords are never written"):
         assert thing in privacy, thing
 
 

@@ -89,7 +89,7 @@ def test_security_policy_lists_what_is_stored_and_quotes_the_notes_as_worded() -
     for needed in ("~stamper-", r"DocumentStamper\pending", r"DocumentStamper\work", "~stamper-combine-", "state.json",
                    "settings.remember_folders", "config.json.bak", r"Windows\SendTo", "stamper-sample-", "_MEI",
                    "held in memory only", "AES-256", "never encrypted", "not a substitute for disk encryption",
-                   "must not be used to redact", r"Explorer\ComDlg32",
+                   "must not be used to redact", r"QtProject\OrganizationDefaults\FileDialog", r"Explorer\ComDlg32",
                    UNPROTECTED_NOTE, KEEP_PROTECTION, OUTPUT_PASSWORD_RULE):
         assert needed in section, needed
     assert not re.search(r"\b[DOUF]-\d{2,3}\b|UX-\d{3}", section)  # plain language: no planning references
