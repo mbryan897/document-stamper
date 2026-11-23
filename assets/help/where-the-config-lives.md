@@ -56,7 +56,7 @@ A file with problems can't be imported or restored; the problems are listed.
 
 **Remember the folders files are opened from and saved to** is ticked to start with. Choosing files then starts in the folder you opened from last, Save As in the folder you saved to last, and a batch in the folder its copies went to last. These folders are kept on this computer in `state.json`.
 
-Untick it when folder names may contain case details. Then no folder is kept: choosing files starts where Windows starts it, Save As starts in the original's folder, and a batch starts with **Next to each original**. Folders already in `state.json` are removed from it the next time the app starts or the setting is saved. Like the other settings it's part of **Save changes**, so an organization sets it once in the shared config. The last profile is still remembered.
+Untick it when folder names may contain case details. Then no folder is kept: choosing files starts in the folder the program was started from, Save As starts in the original's folder, and a batch starts with **Next to each original**. Folders already in `state.json` are removed from it the next time the app starts or the setting is saved. Like the other settings it's part of **Save changes**, so an organization sets it once in the shared config. The last profile is still remembered.
 
 ## Trying another config
 
