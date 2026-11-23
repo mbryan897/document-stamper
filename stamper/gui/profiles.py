@@ -949,7 +949,7 @@ class FormatEditor(QFrame):
         self.rule = QLineEdit(fmt.get("regex") if self.advanced else (fmt.get("pattern") or ""))
         self.rule.setObjectName("code")
         self.rule.setAccessibleName(f"Rule {index + 1}")
-        self.rule.setPlaceholderText("For example SOYYMMDD-######")
+        self.rule.setPlaceholderText("For example REF-YYYY-####")
         self.rule.textEdited.connect(lambda _t: self._write())
         lay.addWidget(self.rule)
         self.explanation = _label("", "msgNeutral")
