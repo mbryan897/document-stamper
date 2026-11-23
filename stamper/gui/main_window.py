@@ -36,6 +36,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QRect, QSize, Qt
 from PySide6.QtGui import (
+    QAction,
     QCloseEvent,
     QDragEnterEvent,
     QDropEvent,
@@ -448,6 +449,21 @@ class _NotesScroll(QScrollArea):
             self.updateGeometry()  # the wanted height depends on the width
 
 
+def _path_label() -> WrapAnywhereLabel:
+    """A label for a path on the saved screen: wraps at any character, with Copy on right-click.
+
+    A path has few spaces, so an ordinary label can't wrap it and the end
+    was cut off. This label draws its own text, which can't be selected with
+    the mouse, so Copy puts the whole line on the clipboard instead.
+    """
+    label = WrapAnywhereLabel()
+    copy = QAction("Copy", label)
+    copy.triggered.connect(lambda: QGuiApplication.clipboard().setText(label.text()))
+    label.addAction(copy)
+    label.setContextMenuPolicy(Qt.ContextMenuPolicy.ActionsContextMenu)
+    return label
+
+
 class SavedScreen(QWidget):
     """Where the file went, notes from the result, and what to do next."""
 
@@ -487,16 +503,10 @@ class SavedScreen(QWidget):
         grid.setVerticalSpacing(10)
         saved_to = QLabel("Saved to")
         saved_to.setObjectName("muted")
-        self.path_label = QLabel()
-        self.path_label.setWordWrap(True)
-        self.path_label.setTextFormat(Qt.TextFormat.PlainText)
-        self.path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.path_label = _path_label()
         original = QLabel("Original")
         original.setObjectName("muted")
-        self.original_label = QLabel()
-        self.original_label.setWordWrap(True)
-        self.original_label.setTextFormat(Qt.TextFormat.PlainText)
-        self.original_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.original_label = _path_label()
         grid.addWidget(saved_to, 0, 0, Qt.AlignmentFlag.AlignTop)
         grid.addWidget(self.path_label, 0, 1)
         grid.addWidget(original, 1, 0, Qt.AlignmentFlag.AlignTop)
@@ -537,7 +547,14 @@ class SavedScreen(QWidget):
         links.addStretch(1)
         right.addLayout(links)
         cl.addLayout(right, 1)
-        outer.addWidget(card, 0, Qt.AlignmentFlag.AlignHCenter)
+        # Centered by a row with stretches, not by an alignment flag: an aligned card is given
+        # the height its text needs at the screen's full width, so on a wide window (where the
+        # card stops at its maximum width) wrapped paths were cut off at the bottom.
+        row = QHBoxLayout()
+        row.addStretch(1)
+        row.addWidget(card)
+        row.addStretch(1)
+        outer.addLayout(row)
         outer.addStretch(1)
         self.result: ApplyResult | None = None
 
