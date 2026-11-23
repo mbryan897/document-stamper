@@ -154,8 +154,8 @@ def test_every_file_already_there(dialog: BatchDialog, fake: FakeServices) -> No
 
 def test_refusal_shows_names_and_messages_through_visible(dialog: BatchDialog, fake: FakeServices) -> None:
     checks = _checks(dialog, "fefe")
-    checks[0] = BatchCheck(BatchItem(Path("/x/a‮cod.pdf"), Path("/o/x.pdf")), Status.FAILED,
-                           "Bad <b>name</b>‮ here.")
+    checks[0] = BatchCheck(BatchItem(Path("/x/a\u202ecod.pdf"), Path("/o/x.pdf")), Status.FAILED,
+                           "Bad <b>name</b>\u202e here.")
     dialog._after_check(checks)
     message = dialog.save_message()
     assert "a⟨U+202E⟩cod.pdf: Bad <b>name</b>⟨U+202E⟩ here." in message
@@ -193,7 +193,7 @@ def test_several_folders_give_each_row_a_button(qtbot: QtBot, window: MainWindow
                                                 tmp_path: Path) -> None:
     screen = window.batch_saved
     screen.show_outcomes([_saved("a.pdf", tmp_path / "one" / "a_s.pdf"),
-                          _saved("b&‮x.pdf", tmp_path / "two" / "b_s.pdf"),
+                          _saved("b&\u202ex.pdf", tmp_path / "two" / "b_s.pdf"),
                           BatchOutcome(BatchItem(Path("/x/c.pdf"), Path("/x/c_s.pdf")), Status.SKIPPED, "There.")])
     assert screen.folder_button.text() == "Show in folder"
     assert not screen.folder_button.isEnabled()

@@ -248,7 +248,7 @@ def test_nothing_to_remove_says_so(qtbot: QtBot, fake: FakeServices, locs: Locat
 
 
 def test_hidden_characters_in_paths_are_shown(qtbot: QtBot, fake: FakeServices, tmp_path: Path) -> None:
-    odd_user = tmp_path / "us‮er"
+    odd_user = tmp_path / "us\u202eer"
     odd_user.mkdir()
     (tmp_path / "app").mkdir()
     locs = Locations(app=tmp_path / "app", user=odd_user, builtin=DEFAULT_CONFIG)
@@ -260,6 +260,6 @@ def test_hidden_characters_in_paths_are_shown(qtbot: QtBot, fake: FakeServices, 
         fake.confirms = [False]
         s.remove_my_settings()
         text = fake.questions[-1][1]
-        assert "‮" not in text and "⟨U+202E⟩" in text
+        assert "\u202e" not in text and "⟨U+202E⟩" in text
     finally:
         close_window(w)
