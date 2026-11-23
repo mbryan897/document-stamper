@@ -2,6 +2,14 @@
 
 The newest changes are first. Each released version lists what changed since the one before.
 
+## 1.1.2
+
+The program itself is unchanged from 1.1.1.
+
+### How it's built
+
+- Released copies are now built on GitHub from the tagged source, with the full test suite, and each comes with a build attestation. The README says how to check a copy against the build that made it.
+
 ## 1.1.1
 
 ### Passwords
