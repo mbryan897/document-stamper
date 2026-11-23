@@ -32,6 +32,7 @@ Usability fixes from a review of the whole program, and the things a released pr
 - "Paste choices" adds a list's choices from the clipboard.
 - A settings file made by a newer version of the program says so in one sentence instead of a list of problems.
 - "Remember the folders files are opened from and saved to", under General, can be turned off when folder names may contain case details. No folder is then kept in `state.json`, and any already there are removed. A settings file with it turned off can't be read by version 1.0.0: put it in place only after everyone has this version.
+- The folder an Open or Save window was last in is no longer left in the Windows registry by Qt, the part the window is built with.
 - "Remove my settings from this computer…" removes what the program keeps about you (never a settings file).
 - The built-in settings are simpler: the stamp is the identifier and the page number. Document type is optional and, when filled in, goes in the file name after the identifier. The only document property the built-in profile writes is `Identifier`.
 
