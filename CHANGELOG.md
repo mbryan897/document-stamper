@@ -14,6 +14,8 @@ Usability fixes from a review of the whole program, and the things a released pr
 - When the white box behind the stamp would cover text already on the page, a note says which pages, and that the covered text is still in the file: the box is not redaction.
 - A protected original no longer decides for you what its stamped copy gets. You choose: keep the original's password and permissions, no password, or a new password. Nothing is chosen in advance when the original needed a password to open. A new password is never saved anywhere.
 - Save As suggests a name that's free, asks again instead of refusing after the window has closed, and starts in the folder used last. A batch remembers its output folder.
+- The saved screen shows long paths whole: they wrap onto as many lines as they need instead of being cut off. Right-click a path to copy it.
+- The copy's modification date carries the right time-zone offset all year. In winter it was written with the summer offset, so the time read an hour off in other time zones.
 - The stamped copy can record which original it came from and when it was stamped, through the profile's document properties. The note about a second set of properties (XMP) says what the receiver will see.
 
 ### Several files

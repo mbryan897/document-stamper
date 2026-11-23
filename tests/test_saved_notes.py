@@ -12,11 +12,13 @@ from pathlib import Path
 import pymupdf
 import pytest
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QLabel
 from pytestqt.qtbot import QtBot
 
 from stamper.gui.main_window import MINIMUM_SIZE, MainWindow
 from stamper.gui.multi import BatchDialog
+from stamper.gui.wrap_label import WrapAnywhereLabel
 from stamper.handlers.base import ApplyResult
 from stamper.handlers.batch import BatchItem, BatchOutcome, Status
 from stamper.handlers import pdf
@@ -183,7 +185,6 @@ def test_saved_screen_names_the_original(qtbot: QtBot, window: MainWindow) -> No
     assert label.text() == f"{shown} – unchanged, still digitally signed"
     assert "return<b>x<b>" in label.text()
     assert label.textFormat() == Qt.TextFormat.PlainText
-    assert label.textInteractionFlags() & Qt.TextInteractionFlag.TextSelectableByMouse
     assert saved.path_label.textFormat() == Qt.TextFormat.PlainText
     saved.show_result(_result([PROPS]), label="Case number", identifier="X", signed=False, source=src,
                       original_text="All 3 files unchanged")
@@ -242,3 +243,37 @@ def test_the_covers_text_note_says_the_box_is_not_redaction() -> None:
     note = pdf.covers_text_note([3, 7])
     assert "The covered text is still in the file: the box is not redaction." in note
     assert note.endswith(pdf.COVERS_TEXT_NOTE_END) and pdf.needs_check(note)
+
+
+LONG_OUT = Path("D:/Stamper/tests/corpus/generated/batch test/99-2026-999901_letter_landscape_with_a_long_name.pdf")
+LONG_SRC = Path("D:/Stamper/tests/corpus/generated/Zq-PlantedFolderWithNoSpacesAtAll/letter_landscape_long_name.pdf")
+
+
+@pytest.mark.parametrize("size", [(880, 560), (1400, 900)])
+def test_long_paths_on_the_saved_screen_wrap_and_are_shown_whole(qtbot: QtBot, window: MainWindow,
+                                                                  size: tuple[int, int]) -> None:
+    """A path has few spaces: each line is as tall as its text wrapped at any character, never cut off."""
+    saved = window.saved
+    window.resize(*size)
+    window.show()
+    result = _result([PROPS], out=str(LONG_OUT))
+    saved.show_result(result, label="Case number", identifier="99-2026-999901", signed=False, source=LONG_SRC)
+    window.stack.setCurrentWidget(saved)
+    labels = (saved.path_label, saved.original_label)
+    qtbot.waitUntil(lambda: all(lb.width() > 20 and lb.height() >= lb.heightForWidth(lb.width()) for lb in labels))
+    for label in labels:
+        assert isinstance(label, WrapAnywhereLabel) and label.text().startswith("D:")
+        assert label.height() >= label.heightForWidth(label.width()) > label.fontMetrics().height()  # wrapped
+        assert label.mapTo(saved, label.rect().bottomRight()).x() <= saved.width()
+        assert label.toolTip() == label.text()
+
+
+def test_a_saved_screen_path_can_be_copied(qtbot: QtBot, window: MainWindow) -> None:
+    saved = window.saved
+    saved.show_result(_result([PROPS], out=str(LONG_OUT)), label="Case number", identifier="X",
+                      signed=False, source=LONG_SRC)
+    for label, text in ((saved.path_label, str(LONG_OUT)), (saved.original_label, f"{LONG_SRC} – unchanged")):
+        (copy,) = label.actions()
+        assert copy.text() == "Copy" and label.contextMenuPolicy() == Qt.ContextMenuPolicy.ActionsContextMenu
+        copy.trigger()
+        assert QGuiApplication.clipboard().text() == text

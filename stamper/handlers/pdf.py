@@ -32,7 +32,7 @@ import unicodedata
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
-from datetime import date
+from datetime import date, datetime
 from functools import lru_cache
 from pathlib import Path
 
@@ -297,6 +297,22 @@ _REPLACED_NOTE_START = "Document property "
 COVERS_TEXT_NOTE_END = (" the white box covers text that was already on the page. "
                         "The covered text is still in the file: the box is not redaction. "
                         "Choose another position under Placement, or turn off the white box.")
+
+
+def pdf_now(now: datetime | None = None) -> str:
+    """The time of stamping as a PDF date, ``D:YYYYMMDDHHMMSS-05'00'``, for the copy's ModDate.
+
+    Local time with the UTC offset in force at that moment. PyMuPDF's own
+    ``get_pdf_now`` always writes the daylight-saving offset, so in standard
+    time its dates read an hour off; this asks the system for the offset.
+    """
+    when = now if now is not None and now.tzinfo is not None else (now or datetime.now()).astimezone()
+    offset = when.utcoffset()
+    minutes = round(offset.total_seconds() / 60) if offset is not None else 0
+    if minutes == 0:
+        return when.strftime("D:%Y%m%d%H%M%S") + "Z"
+    sign, minutes = ("-" if minutes < 0 else "+"), abs(minutes)
+    return when.strftime("D:%Y%m%d%H%M%S") + f"{sign}{minutes // 60:02d}'{minutes % 60:02d}'"
 
 
 def covers_text_note(pages: list[int]) -> str:
@@ -861,7 +877,7 @@ class PdfHandler(Handler):
         info = self._info_xref(doc)
         for key, value in written.items():
             doc.xref_set_key(info, key, pymupdf.get_pdf_str(value))
-        doc.xref_set_key(info, "ModDate", pymupdf.get_pdf_str(pymupdf.get_pdf_now()))
+        doc.xref_set_key(info, "ModDate", pymupdf.get_pdf_str(pdf_now()))
         return written, replaced
 
     @staticmethod
