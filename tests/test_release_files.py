@@ -78,3 +78,18 @@ def test_security_policy_says_how_and_warns_about_case_material() -> None:
     for needed in ("Report a vulnerability", "privately", "Never attach real case material", "newest released version",
                    "99-2026-999901"):
         assert needed in text, needed
+
+
+def test_security_policy_lists_what_is_stored_and_quotes_the_notes_as_worded() -> None:
+    """The section a reviewer reads: every place written, and the warnings exactly as the program words them."""
+    from stamper.handlers.pdf import KEEP_PROTECTION, OUTPUT_PASSWORD_RULE, UNPROTECTED_NOTE
+
+    text = (REPO / "SECURITY.md").read_text(encoding="utf-8")
+    section = text.split("## What is stored, and what the computer must provide", 1)[1]
+    for needed in ("~stamper-", r"DocumentStamper\pending", r"DocumentStamper\work", "~stamper-combine-", "state.json",
+                   "settings.remember_folders", "config.json.bak", r"Windows\SendTo", "stamper-sample-", "_MEI",
+                   "held in memory only", "AES-256", "never encrypted", "not a substitute for disk encryption",
+                   "must not be used to redact", r"Explorer\ComDlg32",
+                   UNPROTECTED_NOTE, KEEP_PROTECTION, OUTPUT_PASSWORD_RULE):
+        assert needed in section, needed
+    assert not re.search(r"\b[DOUF]-\d{2,3}\b|UX-\d{3}", section)  # plain language: no planning references
