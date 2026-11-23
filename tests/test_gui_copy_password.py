@@ -18,7 +18,7 @@ from stamper.gui.main_window import MainWindow
 from stamper.gui.multi import BatchDialog
 from stamper.gui.stamp_dialog import StampDialog
 from stamper.handlers.batch import Status
-from stamper.handlers.pdf import PASSWORD_SET_NOTE, UNPROTECTED_NOTE
+from stamper.handlers.pdf import OUTPUT_PASSWORD_RULE, PASSWORD_SET_NOTE, UNPROTECTED_NOTE
 from tests.gui_support import (  # noqa: F401 - fixtures
     WAIT_MS,
     FakeServices,
@@ -224,3 +224,48 @@ def test_batch_no_password_removes_every_copys_protection(qtbot: QtBot, default_
     for path in out.values():
         with pymupdf.open(path) as doc:
             assert not doc.needs_pass and not doc.metadata["encryption"]
+
+
+# ------------------------------------------------------------ the 10-character minimum (F-01)
+
+
+def test_nine_characters_are_refused_and_ten_save_a_copy_that_opens_with_them(
+        qtbot: QtBot, default_window: MainWindow, fake: FakeServices, corpus_dir: Path, tmp_path: Path) -> None:
+    w = default_window
+    d = _open_locked(qtbot, w, fake, corpus_dir, tmp_path)
+    box = d.password_box
+    assert box is not None
+    box.set_radio.setChecked(True)
+    assert box.rule_hint.isVisible() and box.rule_hint.text() == OUTPUT_PASSWORD_RULE  # before typing
+    _fill(qtbot, d)
+    box.password_edit.setText("Aa1! nine")
+    box.repeat_edit.setText("Aa1! nine")
+    assert OUTPUT_PASSWORD_RULE in d.blockers() and not d.save_button.isEnabled()
+    assert box.strength_label.text() == "Strength: doesn't meet the rule"
+    box.password_edit.setText("Aa1! tenpw")
+    box.repeat_edit.setText("Aa1! tenpw")
+    assert box.strength_label.text() == "Strength: fair"
+    out = tmp_path / "copy.pdf"
+    _save(qtbot, w, fake, d, out)
+    with pymupdf.open(out) as doc:
+        assert doc.needs_pass and not doc.authenticate("Aa1! nine") and not doc.authenticate(PW)
+    assert all(CASE in t for t in _page_texts(out, "Aa1! tenpw"))
+
+
+def test_an_original_with_a_short_password_opens_and_keep_still_saves(
+        qtbot: QtBot, default_window: MainWindow, fake: FakeServices, tmp_path: Path) -> None:
+    w = default_window
+    src = tmp_path / "short_pw_original.pdf"
+    with pymupdf.open() as doc:
+        doc.new_page().insert_text((72, 72), "Synthetic page")
+        doc.save(src, encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="abc", owner_pw="abc")
+    fake.passwords.append("abc")
+    d = open_dialog(qtbot, w, src)
+    box = d.password_box
+    assert box is not None and box.keep_radio is not None
+    box.keep_radio.setChecked(True)
+    _fill(qtbot, d)
+    out = tmp_path / "copy.pdf"
+    _save(qtbot, w, fake, d, out)
+    with pymupdf.open(out) as doc:
+        assert doc.needs_pass and doc.authenticate("abc") and CASE in doc[0].get_text()

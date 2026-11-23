@@ -130,6 +130,8 @@ def test_no_password_saves_an_open_file_with_the_counted_warning(qtbot: QtBot, d
     (OUT_PW, OUT_PW + "x", "The two passwords for the combined file don't match."),
     ("pässwort", "pässwort", OUTPUT_PASSWORD_RULE),
     ("x" * 41, "x" * 41, OUTPUT_PASSWORD_RULE),
+    ("Aa1! ninep", "Aa1! ninep"[:9], "The two passwords for the combined file don't match."),
+    ("Aa1! nine", "Aa1! nine", OUTPUT_PASSWORD_RULE),
 ])
 def test_unusable_passwords_are_refused_before_continuing(qtbot: QtBot, default_window: MainWindow,
                                                           corpus_dir: Path, tmp_path: Path,
@@ -306,3 +308,24 @@ def test_switching_profile_keeps_the_password_and_says_so(qtbot: QtBot, fake: Fa
         assert d.chosen_password is None  # the old screen forgot it
     finally:
         close_window(w)
+
+
+# ------------------------------------------------------------ the 10-character minimum (F-01)
+
+
+def test_the_rule_shows_before_anything_is_typed_and_ten_characters_continue(
+        qtbot: QtBot, default_window: MainWindow, corpus_dir: Path, tmp_path: Path) -> None:
+    screen = _to_prepare(qtbot, default_window, _locked_and_open(corpus_dir, tmp_path))
+    box = screen.password_box
+    assert box is not None
+    assert not box.rule_hint.isVisible()  # only with "Set a password"
+    box.set_radio.setChecked(True)
+    assert box.rule_hint.isVisible() and box.rule_hint.text() == OUTPUT_PASSWORD_RULE
+    assert box.strength_label.isVisible() and box.strength_label.text() == "Strength: nothing typed"
+    for typed, word in (("Aa1! nine", "doesn't meet the rule"), ("Aa1! tenpw", "fair")):
+        box.password_edit.setText(typed)
+        box.repeat_edit.setText(typed)
+        assert box.strength_label.text() == f"Strength: {word}"
+        assert screen.continue_button.isEnabled() == (len(typed) == 10)
+    assert screen.output_password() == "Aa1! tenpw"
+    assert OUTPUT_PASSWORD_RULE not in screen.status.text()

@@ -59,7 +59,13 @@ from ..handlers.base import (
     StampDoesNotFit,
     StampJob,
 )
-from ..handlers.pdf import PROPERTIES_NOTE_PREFIX, needs_check, output_password_problem
+from ..handlers.pdf import (
+    OUTPUT_PASSWORD_RULE,
+    PROPERTIES_NOTE_PREFIX,
+    needs_check,
+    output_password_problem,
+    output_password_strength,
+)
 from .engine import ApplyRequest, EngineClient, EngineFailure
 from .help import help_button
 from .page_numbers import (
@@ -212,10 +218,35 @@ class OutputPasswordBox(QWidget):
             label.setBuddy(edit)
             grid.addWidget(label, row, 0)
             grid.addWidget(edit, row, 1)
+        self.password_edit.setAccessibleDescription(OUTPUT_PASSWORD_RULE)
+        # The rule shows as soon as the boxes do, before anything is typed, like a field's format hint.
+        self.rule_hint = _plain_label(OUTPUT_PASSWORD_RULE, "msgNeutral")
+        grid.addWidget(self.rule_hint, 2, 1)
+        meter_row = QHBoxLayout()
+        meter_row.setSpacing(10)
+        self.strength_bar = QProgressBar()
+        self.strength_bar.setRange(0, 4)
+        self.strength_bar.setTextVisible(False)
+        self.strength_bar.setFixedWidth(120)
+        self.strength_bar.setAccessibleName("Password strength")
+        self.strength_label = QLabel()
+        self.strength_label.setObjectName("msgNeutral")
+        meter_row.addWidget(self.strength_bar)
+        meter_row.addWidget(self.strength_label)
+        meter_row.addStretch(1)
+        grid.addLayout(meter_row, 3, 1)
+        self.password_edit.textChanged.connect(self._show_strength)
+        self._show_strength("")
         grid.setColumnStretch(1, 1)
         self.boxes.setVisible(False)
         lay.addWidget(self.boxes)
         self.set_radio.toggled.connect(self._toggled)
+
+    def _show_strength(self, typed: str) -> None:
+        level, word = output_password_strength(typed)
+        self.strength_bar.setValue(level)
+        self.strength_label.setText(f"Strength: {word}")
+        self.strength_bar.setAccessibleDescription(word)
 
     def _toggled(self, on: bool) -> None:
         self.boxes.setVisible(on)
