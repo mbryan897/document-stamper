@@ -335,7 +335,8 @@ def diff_summary(old: Config | Mapping[str, Any], new: Config | Mapping[str, Any
     """What changes between two configs, as short lines.
 
     Profiles, fields and lists added or removed; fields renamed; and, for the
-    ones in both, a profile's stamp text, a field's rules and the date format.
+    ones in both, a profile's stamp text, a field's rules, the date format and
+    whether folders are remembered.
     """
 
     def data(cfg: Config | Mapping[str, Any]) -> Mapping[str, Any]:
@@ -388,6 +389,10 @@ def diff_summary(old: Config | Mapping[str, Any], new: Config | Mapping[str, Any
     ndf = nd.get("settings", {}).get("date_format")
     if odf and ndf and odf != ndf:
         lines.append(f"Date format changed: {odf} → {ndf}")
+    orf = od.get("settings", {}).get("remember_folders", True) is not False
+    nrf = nd.get("settings", {}).get("remember_folders", True) is not False
+    if orf != nrf:
+        lines.append(f"Remember folders turned {'on' if nrf else 'off'}")
     if not lines:
         lines.append("Same profiles, fields and lists; settings inside them may differ.")
     return lines

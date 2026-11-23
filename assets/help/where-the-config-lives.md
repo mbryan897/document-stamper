@@ -24,7 +24,7 @@ A settings file made by a newer version of Document Stamper isn't read. The app 
 
 **Save changes** in Profile settings writes back to the file that was loaded:
 
-- First it lists what you changed (profiles, fields and lists added or removed, fields renamed, stamp text, rules and the date format) and asks you to confirm. Cancel is the default, and Ctrl+S asks the same way. When the file is the copy next to the app, it also says that everyone who starts Document Stamper from that folder gets these settings.
+- First it lists what you changed (profiles, fields and lists added or removed, fields renamed, stamp text, rules, the date format and whether folders are remembered) and asks you to confirm. Cancel is the default, and Ctrl+S asks the same way. When the file is the copy next to the app, it also says that everyone who starts Document Stamper from that folder gets these settings.
 - The previous version is kept next to it as `config.json.bak`, and the last five versions are also kept as `config.json.YYYYMMDD-HHMMSS.bak` (date and time of the save). Older dated backups are deleted; no other file in the folder is touched.
 - The new file is written completely before it replaces the old one, and only if it would load. A half-written or broken config is never left behind.
 - The file is written in the app's own layout. Spacing or key order you used when editing it by hand isn't kept.
@@ -52,6 +52,12 @@ A file with problems can't be imported or restored; the problems are listed.
 
 **Date format** sets how dates are written in stamps (`{date}`), in file names (**Today's date**) and in date fields. Write it with `YYYY`, `YY`, `MM` and `DD` and any separators, for example `MM-DD-YYYY`, `YYYY-MM-DD` or `DD.MM.YYYY`. The line under it shows today's date in that format.
 
+## Folders
+
+**Remember the folders files are opened from and saved to** is ticked to start with. Choosing files then starts in the folder you opened from last, Save As in the folder you saved to last, and a batch in the folder its copies went to last. These folders are kept on this computer in `state.json`.
+
+Untick it when folder names may contain case details. Then no folder is kept: choosing files starts where Windows starts it, Save As starts in the original's folder, and a batch starts with **Next to each original**. Folders already in `state.json` are removed from it the next time the app starts or the setting is saved. Like the other settings it's part of **Save changes**, so an organization sets it once in the shared config. The last profile is still remembered.
+
 ## Trying another config
 
 **Organization setup…** › **Use a different settings file…** on the drop screen uses a different config file for this session only, without moving or copying anything, and isn't remembered. Use it to check a config before putting it in place. Profile settings then edits that file.
@@ -60,7 +66,7 @@ A file with problems can't be imported or restored; the problems are listed.
 
 | What | Where | Why |
 | --- | --- | --- |
-| The last profile, the last folders used (opening, saving and batches), and which config was found | `%APPDATA%\DocumentStamper\state.json` | So the app opens where you left off. Never field values. |
+| The last profile, the last folders used (opening, saving and batches, unless **Folders** is unticked), and which config was found | `%APPDATA%\DocumentStamper\state.json` | So the app opens where you left off. Never field values. |
 | Combined files while you stamp them | `%LOCALAPPDATA%\DocumentStamper\work\` | Deleted when you save, cancel or close. |
 | A list of copies being written | `%LOCALAPPDATA%\DocumentStamper\pending\` | So partial copies can be found after a crash. Each entry is removed once its copy is saved. |
 | A blank sample page for the Profile settings preview | Windows' temporary folder | Removed when you close Profile settings. |

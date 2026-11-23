@@ -1523,7 +1523,7 @@ class ListsPage(_Page):
 
 
 class GeneralPage(_Page):
-    """General: date format, this config file, Send to."""
+    """General: date format, folder memory, this config file, Send to."""
 
     def __init__(self, owner: ProfileSettings) -> None:
         super().__init__(owner)
@@ -1550,6 +1550,15 @@ class GeneralPage(_Page):
         self.form.addWidget(self.date_format)
         self.date_example = _label("", "msgNeutral")
         self.form.addWidget(self.date_example)
+
+        self.form.addWidget(_section("Folders"))
+        self.remember_folders = QCheckBox("Remember the folders files are opened from and saved to")
+        self.remember_folders.setChecked(self.draft.data["settings"].get("remember_folders", True) is not False)
+        self.remember_folders.toggled.connect(self._remember_folders)
+        self.form.addWidget(self.remember_folders)
+        self.form.addWidget(_label(
+            "Stored on this computer in state.json. Turn this off if folder names may contain case details.",
+            "muted"))
 
         self.form.addWidget(_section("This config"))
         src = self.owner.source
@@ -1610,6 +1619,10 @@ class GeneralPage(_Page):
     def _date_format(self, text: str) -> None:
         self.draft.data.setdefault("settings", {})["date_format"] = text
         self.owner.changed(debounce=True)
+
+    def _remember_folders(self, on: bool) -> None:
+        self.draft.data.setdefault("settings", {})["remember_folders"] = on
+        self.owner.changed()
 
     def refresh_live(self) -> None:
         if not hasattr(self, "date_example"):
