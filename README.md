@@ -4,7 +4,6 @@ A portable Windows desktop app that adds a configurable text stamp (case number,
 
 Version 1 handles PDF only. Images, Word and text files are planned through the same handler interface. All agency-specific rules (fields, case number formats, document types, stamp layout) live in `config.json`, so any agency or organization can adapt it without code changes.
 
-**Status:** pre-alpha. Not ready for use on real documents.
 
 ## Development setup (PowerShell)
 
